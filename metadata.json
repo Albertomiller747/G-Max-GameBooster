@@ -1,0 +1,6 @@
+{
+  "name": "G Max Gaming Hub",
+  "description": "Smart game booster with 120Hz display locking, DND focus shield, honest RAM cleaning, server latency testing, and real-time hardware telemetry.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

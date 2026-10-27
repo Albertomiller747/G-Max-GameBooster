@@ -1,0 +1,114 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:gravity="center_vertical"
+    android:orientation="horizontal"
+    android:paddingStart="8dp"
+    android:paddingEnd="8dp"
+    android:paddingTop="6dp"
+    android:paddingBottom="6dp">
+
+    <!-- Record / Stop Button -->
+    <LinearLayout
+        android:id="@+id/notif_btn_record"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:gravity="center"
+        android:orientation="vertical"
+        android:padding="4dp">
+
+        <ImageView
+            android:id="@+id/notif_icon_record"
+            android:layout_width="24dp"
+            android:layout_height="24dp"
+            android:src="@drawable/ic_notif_record"
+            android:contentDescription="Record" />
+
+        <TextView
+            android:id="@+id/notif_txt_record"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
+            android:text="Record"
+            android:textColor="#212121"
+            android:textSize="11sp" />
+    </LinearLayout>
+
+    <!-- Videos Hub Button -->
+    <LinearLayout
+        android:id="@+id/notif_btn_videos"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:gravity="center"
+        android:orientation="vertical"
+        android:padding="4dp">
+
+        <ImageView
+            android:layout_width="24dp"
+            android:layout_height="24dp"
+            android:src="@drawable/ic_notif_videos"
+            android:contentDescription="Videos" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
+            android:text="Videos"
+            android:textColor="#212121"
+            android:textSize="11sp" />
+    </LinearLayout>
+
+    <!-- Screenshots Button -->
+    <LinearLayout
+        android:id="@+id/notif_btn_screenshots"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:gravity="center"
+        android:orientation="vertical"
+        android:padding="4dp">
+
+        <ImageView
+            android:layout_width="24dp"
+            android:layout_height="24dp"
+            android:src="@drawable/ic_notif_screenshots"
+            android:contentDescription="Screenshots" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
+            android:text="Shots"
+            android:textColor="#212121"
+            android:textSize="11sp" />
+    </LinearLayout>
+
+    <!-- Exit Button -->
+    <LinearLayout
+        android:id="@+id/notif_btn_exit"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:gravity="center"
+        android:orientation="vertical"
+        android:padding="4dp">
+
+        <ImageView
+            android:layout_width="24dp"
+            android:layout_height="24dp"
+            android:src="@drawable/ic_notif_exit"
+            android:contentDescription="Exit" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
+            android:text="Exit"
+            android:textColor="#212121"
+            android:textSize="11sp" />
+    </LinearLayout>
+
+</LinearLayout>

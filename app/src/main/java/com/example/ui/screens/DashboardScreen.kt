@@ -115,7 +115,7 @@ fun DashboardScreen(
     val isBatteryOptimizationIgnored by viewModel.isBatteryOptimizationIgnored.collectAsState()
     val isPowerSaveModeActive by viewModel.isPowerSaveModeActive.collectAsState()
     val isDndAccessGranted by viewModel.isDndAccessGranted.collectAsState()
-    val shizukuInfo by viewModel.shizukuInfo.collectAsState()
+    val efpsTelemetry by viewModel.efpsTelemetry.collectAsState()
 
     val infiniteTransition = rememberInfiniteTransition(label = "pulse")
     val pulseScale by infiniteTransition.animateFloat(
@@ -476,25 +476,15 @@ fun DashboardScreen(
             }
         }
 
-        // 2.8 Shizuku Real FPS Integration Card
+        // 2.8 Multi-Sensor EFPS Pipeline Status Card
         item {
-            val isShizukuActive = shizukuInfo.state == com.example.util.ShizukuState.ACTIVE
-            val isPermNeeded = shizukuInfo.state == com.example.util.ShizukuState.PERMISSION_NEEDED
-            val isUnsupported = shizukuInfo.state == com.example.util.ShizukuState.UNSUPPORTED
-
-            val cardBorder = when {
-                isShizukuActive -> NeonGreen.copy(alpha = 0.5f)
-                isPermNeeded -> SolarGold.copy(alpha = 0.6f)
-                else -> Color(0xFF222B3D)
-            }
-
             Surface(
                 shape = RoundedCornerShape(12.dp),
-                color = Color(0xFF101726),
-                border = BorderStroke(1.dp, cardBorder),
+                color = MaterialTheme.colorScheme.surface,
+                border = BorderStroke(1.dp, NeonGreen.copy(alpha = 0.5f)),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .testTag("shizuku_real_fps_card")
+                    .testTag("efps_pipeline_card")
             ) {
                 Column(modifier = Modifier.padding(12.dp)) {
                     Row(
@@ -504,47 +494,31 @@ fun DashboardScreen(
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(
-                                text = if (isShizukuActive) "⚡" else "📊",
+                                text = "⚡",
                                 fontSize = 16.sp
                             )
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
-                                text = if (isShizukuActive) "REAL FPS ENGINE (SHIZUKU)" else "FRAME TIMING PIPELINE",
+                                text = "MULTI-SENSOR EFPS ENGINE (${efpsTelemetry.currentEfps} EFPS @ ${efpsTelemetry.displayHz}Hz)",
                                 style = MaterialTheme.typography.titleSmall.copy(
                                     fontWeight = FontWeight.Bold,
-                                    color = if (isShizukuActive) NeonGreen else Color.White,
+                                    color = MaterialTheme.colorScheme.onSurface,
                                     fontSize = 12.sp,
                                     letterSpacing = 0.5.sp
                                 )
                             )
                         }
 
-                        // Status Badge
                         Box(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(6.dp))
-                                .background(
-                                    when {
-                                        isShizukuActive -> NeonGreen.copy(alpha = 0.15f)
-                                        isPermNeeded -> SolarGold.copy(alpha = 0.15f)
-                                        else -> Color(0xFF1E283D)
-                                    }
-                                )
+                                .background(NeonGreen.copy(alpha = 0.15f))
                                 .padding(horizontal = 6.dp, vertical = 2.dp)
                         ) {
                             Text(
-                                text = when {
-                                    isShizukuActive -> "REAL FPS ACTIVE"
-                                    isPermNeeded -> "PERMISSION NEEDED"
-                                    isUnsupported -> "ANDROID < 11 (EFPS)"
-                                    else -> "EFPS FALLBACK"
-                                },
+                                text = "${efpsTelemetry.confidencePercent}% ACCURACY",
                                 style = MaterialTheme.typography.labelSmall.copy(
-                                    color = when {
-                                        isShizukuActive -> NeonGreen
-                                        isPermNeeded -> SolarGold
-                                        else -> Color(0xFF9CA3AF)
-                                    },
+                                    color = NeonGreen,
                                     fontWeight = FontWeight.Bold,
                                     fontSize = 9.sp
                                 )
@@ -555,55 +529,12 @@ fun DashboardScreen(
                     Spacer(modifier = Modifier.height(4.dp))
 
                     Text(
-                        text = shizukuInfo.explanation,
+                        text = com.example.util.EfpsEngine.NON_ROOT_EXPLANATION_BODY,
                         style = MaterialTheme.typography.bodySmall.copy(
-                            color = Color(0xFF9CA3AF),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                             fontSize = 11.sp
                         )
                     )
-
-                    if (!isShizukuActive && !isUnsupported) {
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            if (isPermNeeded) {
-                                Button(
-                                    onClick = { viewModel.requestShizukuPermission() },
-                                    colors = ButtonDefaults.buttonColors(containerColor = SolarGold),
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .height(34.dp),
-                                    shape = RoundedCornerShape(8.dp),
-                                    contentPadding = PaddingValues(0.dp)
-                                ) {
-                                    Text("GRANT SHIZUKU PERMISSION", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.Black)
-                                }
-                            } else {
-                                Button(
-                                    onClick = { viewModel.openShizukuApp() },
-                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2563EB)),
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .height(34.dp),
-                                    shape = RoundedCornerShape(8.dp),
-                                    contentPadding = PaddingValues(0.dp)
-                                ) {
-                                    Text("LAUNCH / SETUP SHIZUKU", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                                }
-                            }
-
-                            OutlinedButton(
-                                onClick = { viewModel.refreshShizukuStatus() },
-                                modifier = Modifier.height(34.dp),
-                                shape = RoundedCornerShape(8.dp),
-                                contentPadding = PaddingValues(horizontal = 10.dp)
-                            ) {
-                                Icon(imageVector = Icons.Default.Refresh, contentDescription = "Refresh Shizuku", tint = CyberCyan, modifier = Modifier.size(16.dp))
-                            }
-                        }
-                    }
                 }
             }
         }

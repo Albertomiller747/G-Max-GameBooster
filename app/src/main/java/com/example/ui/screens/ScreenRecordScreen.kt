@@ -1,10 +1,12 @@
 package com.example.ui.screens
 
 import android.Manifest
-import android.content.Context
+import android.app.Activity
 import android.content.Intent
+import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.media.ThumbnailUtils
 import android.net.Uri
 import android.os.Build
@@ -15,11 +17,12 @@ import android.widget.MediaController
 import android.widget.VideoView
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -27,6 +30,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -40,28 +44,34 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
-import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.FiberManualRecord
+import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.Fullscreen
+import androidx.compose.material.icons.filled.FullscreenExit
+import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.Mic
-import androidx.compose.material.icons.filled.MicOff
+import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.Security
+import androidx.compose.material.icons.filled.ScreenRotation
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Share
-import androidx.compose.material.icons.filled.Speed
+import androidx.compose.material.icons.filled.Slideshow
+import androidx.compose.material.icons.filled.SportsEsports
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Timer
-import androidx.compose.material.icons.filled.Tv
 import androidx.compose.material.icons.filled.Videocam
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -84,11 +94,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -96,884 +108,1725 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.core.content.ContextCompat
+import com.example.model.CapturedScreenshot
+import com.example.model.GameMediaGroup
 import com.example.model.RecordedVideo
+import com.example.model.ResolutionPreset
 import com.example.model.VideoQualitySettings
 import com.example.service.ScreenRecordOverlayService
 import com.example.service.ScreenRecordingService
-import com.example.ui.components.CyberCard
-import com.example.ui.components.SectionTitle
-import com.example.ui.theme.CyberCyan
-import com.example.ui.theme.DarkSurfaceBorder
-import com.example.ui.theme.NeonGreen
-import com.example.ui.theme.SolarGold
+import com.example.ui.theme.HubBlue
+import com.example.ui.theme.LaunchGreen
+import com.example.ui.theme.RecorderCoral
+import com.example.util.ConsoleHapticManager
 import com.example.util.ScreenRecordingManager
 import com.example.viewmodel.GameBoosterViewModel
 import java.io.File
+import java.util.Locale
 
 @Composable
 fun ScreenRecordScreen(
     viewModel: GameBoosterViewModel,
     onRequestMediaProjection: () -> Unit,
+    onRequestScreenshotProjection: (() -> Unit)? = null,
+    initialSubTab: Int = 0,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
-    val currentTheme by viewModel.appTheme.collectAsState()
+    val gamepads by viewModel.gamepads.collectAsState()
+    val isControllerConnected = gamepads.isNotEmpty()
 
+    var selectedTab by remember(initialSubTab) { mutableIntStateOf(initialSubTab.coerceIn(0, 2)) }
     var settings by remember { mutableStateOf(ScreenRecordingManager.loadSettings(context)) }
     var recordings by remember { mutableStateOf(emptyList<RecordedVideo>()) }
+    var screenshots by remember { mutableStateOf(emptyList<CapturedScreenshot>()) }
+
     var selectedVideoForPlayback by remember { mutableStateOf<RecordedVideo?>(null) }
+    var videoToDelete by remember { mutableStateOf<RecordedVideo?>(null) }
+    var selectedScreenshotForPreview by remember { mutableStateOf<CapturedScreenshot?>(null) }
+    var screenshotToDelete by remember { mutableStateOf<CapturedScreenshot?>(null) }
     var userMessage by remember { mutableStateOf<String?>(null) }
 
     // State from ScreenRecordingService
     val isRecording by ScreenRecordingService.isRecording.collectAsState()
     val recordingSeconds by ScreenRecordingService.recordingSeconds.collectAsState()
     val lastSavedUri by ScreenRecordingService.lastSavedVideoUri.collectAsState()
+    val lastScreenshotUri by ScreenRecordingService.lastSavedScreenshotUri.collectAsState()
 
     // Query device supported options
     val supportedResolutions = remember(context) { ScreenRecordingManager.getSupportedResolutions(context) }
     val supportedFps = remember(context) { ScreenRecordingManager.getSupportedFps(context) }
 
-    // Permissions check
-    var hasAudioPermission by remember {
-        mutableStateOf(ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED)
-    }
-    var hasOverlayPermission by remember {
-        mutableStateOf(Settings.canDrawOverlays(context))
-    }
-    var hasNotificationPermission by remember {
-        mutableStateOf(
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
-            } else true
-        )
+    // Storage capacity info for bottom bar
+    val storageInfo = remember(recordings.size, screenshots.size, settings.bitrateMbps) {
+        ScreenRecordingManager.getStorageCapacityInfo(context)
     }
 
-    val permissionsLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.RequestMultiplePermissions()
-    ) { result ->
-        hasAudioPermission = result[Manifest.permission.RECORD_AUDIO] ?: hasAudioPermission
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            hasNotificationPermission = result[Manifest.permission.POST_NOTIFICATIONS] ?: hasNotificationPermission
+    var isOverlayBubbleEnabled by remember {
+        mutableStateOf(settings.isOverlayEnabled)
+    }
+
+    val audioPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) {
+            settings = settings.copy(recordMic = true)
+            ScreenRecordingManager.saveSettings(context, settings)
         }
-        ScreenRecordingManager.setRequestedPermissionsOnce(context, true)
     }
 
-    // Refresh recordings list
-    val refreshRecordings: () -> Unit = {
+    fun refreshMediaLists() {
         recordings = ScreenRecordingManager.queryRecordedVideos(context)
+        screenshots = ScreenRecordingManager.queryCapturedScreenshots(context)
     }
 
-    LaunchedEffect(Unit) {
-        refreshRecordings()
-        // If not asked yet, automatically request permissions on first entry
-        if (!ScreenRecordingManager.hasRequestedPermissionsOnce(context)) {
-            val list = mutableListOf(Manifest.permission.RECORD_AUDIO)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                list.add(Manifest.permission.POST_NOTIFICATIONS)
-            }
-            permissionsLauncher.launch(list.toTypedArray())
-        }
+    LaunchedEffect(Unit, isRecording, lastSavedUri, lastScreenshotUri) {
+        refreshMediaLists()
     }
 
-    // Re-query recordings when a new video finishes saving
-    LaunchedEffect(lastSavedUri) {
-        if (lastSavedUri != null) {
-            refreshRecordings()
-        }
-    }
+    val tabTitles = listOf("Videos", "Screenshots", "Settings")
 
-    val areRequiredPermissionsGranted = hasAudioPermission && hasOverlayPermission
-
-    LazyColumn(
+    Box(
         modifier = modifier
             .fillMaxSize()
-            .background(currentTheme.backgroundColor)
-            .padding(horizontal = 16.dp),
-        contentPadding = PaddingValues(top = 16.dp, bottom = 100.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
+            .background(MaterialTheme.colorScheme.background)
     ) {
-        // 1. Screen Title
-        item {
-            Column(modifier = Modifier.fillMaxWidth().padding(top = 4.dp)) {
-                Text(
-                    text = "Screen Recording",
-                    style = MaterialTheme.typography.headlineMedium.copy(
-                        fontWeight = FontWeight.Bold,
-                        color = Color.White,
-                        fontSize = 24.sp
+        Column(
+            modifier = Modifier.fillMaxSize()
+        ) {
+            // 1. Clean Top Header Bar (Matches screenshot #2: "Videos" / "Screenshots" / "Settings" + Floating Cam Bubble Toggle)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp, vertical = 14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = tabTitles[selectedTab],
+                        style = MaterialTheme.typography.headlineSmall.copy(
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onBackground,
+                            fontSize = 22.sp
+                        )
                     )
-                )
-                Text(
-                    text = "High-definition lag-free game capture & quick overlay controls",
-                    style = MaterialTheme.typography.bodySmall.copy(color = Color(0xFF8893A7), fontSize = 13.sp)
-                )
-            }
-        }
-
-        // Permission Onboarding Banner (if permissions not yet granted)
-        if (!areRequiredPermissionsGranted) {
-            item {
-                Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .border(1.dp, SolarGold.copy(alpha = 0.5f), RoundedCornerShape(16.dp)),
-                    colors = CardDefaults.cardColors(containerColor = Color(0xFF1E1711)),
-                    shape = RoundedCornerShape(16.dp)
-                ) {
-                    Column(modifier = Modifier.padding(16.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.Security, contentDescription = null, tint = SolarGold, modifier = Modifier.size(24.dp))
-                            Spacer(modifier = Modifier.width(10.dp))
+                    if (isRecording) {
+                        Spacer(modifier = Modifier.width(12.dp))
+                        val mins = recordingSeconds / 60
+                        val secs = recordingSeconds % 60
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(50))
+                                .background(RecorderCoral.copy(alpha = 0.16f))
+                                .border(1.dp, RecorderCoral, RoundedCornerShape(50))
+                                .padding(horizontal = 10.dp, vertical = 4.dp)
+                        ) {
                             Text(
-                                text = "Recording Permissions Needed",
-                                style = MaterialTheme.typography.titleMedium.copy(color = Color.White, fontWeight = FontWeight.Bold)
+                                text = String.format(Locale.US, "REC %02d:%02d", mins, secs),
+                                color = RecorderCoral,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.ExtraBold
                             )
                         }
+                    }
+                }
 
-                        Spacer(modifier = Modifier.height(8.dp))
-
-                        Text(
-                            text = "To record game audio and show the floating 5-in-1 widget over your games, please grant Microphone and Display Over Apps permissions.",
-                            style = MaterialTheme.typography.bodySmall.copy(color = Color(0xFFD1D5DB), fontSize = 12.sp)
+                // Right side quick actions: Refresh & Floating Coral Bubble toggle
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    IconButton(
+                        onClick = { refreshMediaLists() },
+                        modifier = Modifier.size(36.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Refresh,
+                            contentDescription = "Refresh media",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
                         )
+                    }
 
-                        Spacer(modifier = Modifier.height(14.dp))
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            if (!hasAudioPermission) {
-                                Button(
-                                    onClick = {
-                                        val list = mutableListOf(Manifest.permission.RECORD_AUDIO)
-                                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                                            list.add(Manifest.permission.POST_NOTIFICATIONS)
-                                        }
-                                        permissionsLauncher.launch(list.toTypedArray())
-                                    },
-                                    colors = ButtonDefaults.buttonColors(containerColor = SolarGold, contentColor = Color.Black),
-                                    shape = RoundedCornerShape(10.dp),
-                                    modifier = Modifier.weight(1f)
-                                ) {
-                                    Text("Grant Mic", fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                                }
-                            }
-
-                            if (!hasOverlayPermission) {
-                                OutlinedButton(
-                                    onClick = {
-                                        val intent = Intent(
+                    // Docked Recorder Bubble quick toggle without gray box overlay
+                    IconButton(
+                        onClick = {
+                            if (!Settings.canDrawOverlays(context)) {
+                                try {
+                                    context.startActivity(
+                                        Intent(
                                             Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
                                             Uri.parse("package:${context.packageName}")
                                         )
-                                        context.startActivity(intent)
-                                    },
-                                    shape = RoundedCornerShape(10.dp),
-                                    modifier = Modifier.weight(1f)
-                                ) {
-                                    Text("Grant Overlay", color = Color.White, fontSize = 12.sp)
+                                    )
+                                } catch (_: Exception) {}
+                            } else {
+                                val newState = !isOverlayBubbleEnabled
+                                isOverlayBubbleEnabled = newState
+                                settings = settings.copy(isOverlayEnabled = newState)
+                                ScreenRecordingManager.setOverlayEnabled(context, newState)
+                                val svcIntent = Intent(context, ScreenRecordOverlayService::class.java).apply {
+                                    action = if (newState) {
+                                        ScreenRecordOverlayService.ACTION_START
+                                    } else {
+                                        ScreenRecordOverlayService.ACTION_STOP
+                                    }
+                                }
+                                context.startService(svcIntent)
+                                userMessage = if (newState) {
+                                    "Floating recorder bubble & notification bar enabled"
+                                } else {
+                                    "Floating recorder bubble disabled"
                                 }
                             }
+                        },
+                        modifier = Modifier
+                            .size(36.dp)
+                            .testTag("recorder_bubble_quick_toggle")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Videocam,
+                            contentDescription = "Toggle Floating Recorder Bubble",
+                            tint = if (isOverlayBubbleEnabled) RecorderCoral else MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(22.dp)
+                        )
+                    }
+                }
+            }
+
+            // 2. 3-Icon Tab Strip with Coral-Red Underline (Videos, Screenshots, Settings - NO wrench/tools icon)
+            RecorderThreeTabStrip(
+                selectedTab = selectedTab,
+                onSelectTab = { selectedTab = it }
+            )
+
+            HorizontalDivider(
+                color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f),
+                thickness = 1.dp
+            )
+
+            // Optional Toast / Status Banner
+            userMessage?.let { msg ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(RecorderCoral.copy(alpha = 0.12f))
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        text = msg,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Medium,
+                        modifier = Modifier.weight(1f)
+                    )
+                    IconButton(
+                        onClick = { userMessage = null },
+                        modifier = Modifier.size(24.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = "Dismiss",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+                }
+            }
+
+            // 3. Main Tab Content Area
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+            ) {
+                when (selectedTab) {
+                    0 -> VideosTabContent(
+                        recordings = recordings,
+                        onPlayVideo = { selectedVideoForPlayback = it },
+                        onSaveToGallery = { video ->
+                            val saved = ScreenRecordingManager.saveVideoToGallery(context, video)
+                            userMessage = if (saved) {
+                                "Saved '${video.title}' to Movies/GMaxRecordings"
+                            } else {
+                                "Could not export video"
+                            }
+                        },
+                        onShareVideo = { video ->
+                            val shareUri = ScreenRecordingManager.getShareUri(context, video)
+                            if (shareUri != null) {
+                                val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                                    type = "video/mp4"
+                                    putExtra(Intent.EXTRA_STREAM, shareUri)
+                                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                }
+                                context.startActivity(Intent.createChooser(shareIntent, "Share Gameplay Clip"))
+                            }
+                        },
+                        onDeleteVideo = { videoToDelete = it }
+                    )
+
+                    1 -> ScreenshotsTabContent(
+                        screenshots = screenshots,
+                        onCaptureScreenshot = {
+                            if (onRequestScreenshotProjection != null) {
+                                onRequestScreenshotProjection()
+                            } else {
+                                val intent = Intent(context, com.example.MainActivity::class.java).apply {
+                                    flags = Intent.FLAG_ACTIVITY_SINGLE_TOP
+                                    putExtra("extra_trigger_screenshot", true)
+                                }
+                                context.startActivity(intent)
+                            }
+                        },
+                        onPreviewScreenshot = { selectedScreenshotForPreview = it },
+                        onShareScreenshot = { shot ->
+                            val shareUri = ScreenRecordingManager.getScreenshotShareUri(context, shot)
+                            if (shareUri != null) {
+                                val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                                    type = "image/png"
+                                    putExtra(Intent.EXTRA_STREAM, shareUri)
+                                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                }
+                                context.startActivity(Intent.createChooser(shareIntent, "Share Screenshot"))
+                            }
+                        },
+                        onDeleteScreenshot = { screenshotToDelete = it }
+                    )
+
+                    2 -> RecorderSettingsTabContent(
+                        settings = settings,
+                        supportedResolutions = supportedResolutions,
+                        supportedFps = supportedFps,
+                        isOverlayBubbleEnabled = isOverlayBubbleEnabled,
+                        onUpdateSettings = { updated ->
+                            settings = updated
+                            ScreenRecordingManager.saveSettings(context, updated)
+                            viewModel.scheduleCloudSettingsSync()
+                        },
+                        onRequestMicPermission = {
+                            audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                        },
+                        onToggleOverlayBubble = { enable ->
+                            if (!Settings.canDrawOverlays(context)) {
+                                try {
+                                    context.startActivity(
+                                        Intent(
+                                            Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                                            Uri.parse("package:${context.packageName}")
+                                        )
+                                    )
+                                } catch (_: Exception) {}
+                            } else {
+                                isOverlayBubbleEnabled = enable
+                                ScreenRecordingManager.setOverlayEnabled(context, enable)
+                                viewModel.scheduleCloudSettingsSync()
+                                val svcIntent = Intent(context, ScreenRecordOverlayService::class.java).apply {
+                                    action = if (enable) {
+                                        ScreenRecordOverlayService.ACTION_START
+                                    } else {
+                                        ScreenRecordOverlayService.ACTION_STOP
+                                    }
+                                }
+                                context.startService(svcIntent)
+                            }
+                        },
+                        onAutoConfigure = {
+                            val optimal = ScreenRecordingManager.getAutoConfiguredIdealSettings(context)
+                            settings = optimal
+                            ScreenRecordingManager.saveSettings(context, optimal)
+                            viewModel.scheduleCloudSettingsSync()
+                            userMessage = "Auto-tuned to ${optimal.resolutionLabel} @ ${optimal.fps} FPS (${optimal.bitrateMbps} Mbps)"
+                        }
+                    )
+                }
+
+                // Floating Coral-Red "[ 🎥 Record ]" Pill Button in bottom-right (matching screenshot #2)
+                var recordFabFocused by remember { mutableStateOf(false) }
+                Button(
+                    onClick = {
+                        if (isRecording) {
+                            val stopIntent = Intent(context, ScreenRecordingService::class.java).apply {
+                                action = ScreenRecordingService.ACTION_STOP
+                            }
+                            context.startService(stopIntent)
+                            userMessage = "Gameplay recording saved to Videos!"
+                        } else {
+                            onRequestMediaProjection()
+                        }
+                    },
+                    shape = RoundedCornerShape(50),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = RecorderCoral,
+                        contentColor = Color.White
+                    ),
+                    elevation = ButtonDefaults.buttonElevation(
+                        defaultElevation = 8.dp,
+                        pressedElevation = 12.dp
+                    ),
+                    contentPadding = PaddingValues(horizontal = 24.dp, vertical = 14.dp),
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(end = 20.dp, bottom = 16.dp)
+                        .onFocusChanged { recordFabFocused = it.isFocused }
+                        .border(
+                            width = if (recordFabFocused) 3.dp else 0.dp,
+                            color = if (recordFabFocused) Color.White else Color.Transparent,
+                            shape = RoundedCornerShape(50)
+                        )
+                        .testTag("recorder_floating_record_button")
+                ) {
+                    Icon(
+                        imageVector = if (isRecording) Icons.Default.Stop else Icons.Default.Videocam,
+                        contentDescription = if (isRecording) "Stop Recording" else "Start Recording",
+                        modifier = Modifier.size(22.dp)
+                    )
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Text(
+                        text = if (isRecording) "Stop" else "Record",
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    if (isControllerConnected) {
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Box(
+                            modifier = Modifier
+                                .size(21.dp)
+                                .clip(CircleShape)
+                                .background(Color.White),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = "Y",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Black,
+                                color = RecorderCoral
+                            )
                         }
                     }
                 }
             }
-        }
 
-        // User Feedback Alert
-        if (userMessage != null) {
-            item {
+            // 4. Bottom Storage Capacity Progress Bar & Labels (Matches screenshot #2: "12.72 GB available" | "(03:47:23 can be recorded)")
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(MaterialTheme.colorScheme.surface)
+            ) {
+                // Coral-red thin progress bar
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(Color(0xFF0D293E))
-                        .border(1.dp, CyberCyan.copy(alpha = 0.6f), RoundedCornerShape(12.dp))
-                        .padding(12.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Text(text = userMessage ?: "", color = CyberCyan, fontSize = 12.sp, modifier = Modifier.weight(1f))
-                        IconButton(onClick = { userMessage = null }, modifier = Modifier.size(24.dp)) {
-                            Icon(Icons.Default.Close, contentDescription = "Close", tint = CyberCyan, modifier = Modifier.size(16.dp))
-                        }
-                    }
-                }
-            }
-        }
-
-        // 2. Active Status & Master Actions Card
-        item {
-            Card(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .border(
-                        1.dp,
-                        if (isRecording) Color(0xFFEF4444) else DarkSurfaceBorder,
-                        RoundedCornerShape(18.dp)
-                    ),
-                colors = CardDefaults.cardColors(
-                    containerColor = if (isRecording) Color(0xFF2E0E14) else Color(0xFF13192B)
-                ),
-                shape = RoundedCornerShape(18.dp)
-            ) {
-                Column(modifier = Modifier.padding(18.dp)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Box(
-                                modifier = Modifier
-                                    .size(14.dp)
-                                    .clip(CircleShape)
-                                    .background(if (isRecording) Color(0xFFEF4444) else NeonGreen)
-                            )
-                            Spacer(modifier = Modifier.width(10.dp))
-                            Column {
-                                Text(
-                                    text = if (isRecording) "RECORDING IN PROGRESS" else "RECORDER READY",
-                                    style = MaterialTheme.typography.titleMedium.copy(
-                                        fontWeight = FontWeight.Black,
-                                        color = if (isRecording) Color(0xFFEF4444) else Color.White,
-                                        letterSpacing = 1.sp
-                                    )
-                                )
-                                Text(
-                                    text = if (isRecording) {
-                                        val mins = recordingSeconds / 60
-                                        val secs = recordingSeconds % 60
-                                        String.format(java.util.Locale.US, "Elapsed Time: %02d:%02d", mins, secs)
-                                    } else {
-                                        "${settings.resolutionLabel} • ${settings.fps} FPS • ${settings.bitrateMbps} Mbps"
-                                    },
-                                    style = MaterialTheme.typography.bodySmall.copy(
-                                        color = Color(0xFF8893A7),
-                                        fontSize = 12.sp
-                                    )
-                                )
-                            }
-                        }
-
-                        // Big Action Button
-                        Button(
-                            onClick = {
-                                if (isRecording) {
-                                    val intent = Intent(context, ScreenRecordingService::class.java).apply {
-                                        action = ScreenRecordingService.ACTION_STOP
-                                    }
-                                    context.startService(intent)
-                                    userMessage = "Screen recording saved to Gallery!"
-                                } else {
-                                    onRequestMediaProjection()
-                                }
-                            },
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = if (isRecording) Color(0xFFDC2626) else Color(0xFFE11D48),
-                                contentColor = Color.White
-                            ),
-                            shape = RoundedCornerShape(12.dp),
-                            modifier = Modifier.testTag("main_record_action_button")
-                        ) {
-                            Icon(
-                                imageVector = if (isRecording) Icons.Default.Stop else Icons.Default.FiberManualRecord,
-                                contentDescription = null,
-                                modifier = Modifier.size(18.dp)
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(
-                                text = if (isRecording) "Stop" else "Record",
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 13.sp
-                            )
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(14.dp))
-
-                    // Master Toggle for Floating Recording Overlay
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(Color(0xFF0F1524))
-                            .padding(horizontal = 12.dp, vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
-                            Icon(
-                                imageVector = Icons.Default.Layers,
-                                contentDescription = null,
-                                tint = if (settings.isOverlayEnabled) Color(0xFFE11D48) else Color(0xFF8893A7),
-                                modifier = Modifier.size(20.dp)
-                            )
-                            Spacer(modifier = Modifier.width(10.dp))
-                            Column {
-                                Text(
-                                    text = "Floating Recording Overlay",
-                                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold, color = Color.White)
-                                )
-                                Text(
-                                    text = "Draggable 5-in-1 quick widget over games",
-                                    style = MaterialTheme.typography.labelSmall.copy(color = Color(0xFF8893A7), fontSize = 10.sp)
-                                )
-                            }
-                        }
-
-                        Switch(
-                            checked = settings.isOverlayEnabled,
-                            onCheckedChange = { enable ->
-                                if (enable && !Settings.canDrawOverlays(context)) {
-                                    val intent = Intent(
-                                        Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                                        Uri.parse("package:${context.packageName}")
-                                    )
-                                    context.startActivity(intent)
-                                    return@Switch
-                                }
-                                val updated = settings.copy(isOverlayEnabled = enable)
-                                settings = updated
-                                ScreenRecordingManager.saveSettings(context, updated)
-
-                                val intent = Intent(context, ScreenRecordOverlayService::class.java).apply {
-                                    action = if (enable) ScreenRecordOverlayService.ACTION_START else ScreenRecordOverlayService.ACTION_STOP
-                                }
-                                if (enable) {
-                                    context.startService(intent)
-                                    userMessage = "Floating recording overlay activated on screen."
-                                } else {
-                                    context.stopService(intent)
-                                    userMessage = "Floating recording overlay hidden."
-                                }
-                            },
-                            colors = SwitchDefaults.colors(
-                                checkedThumbColor = Color.White,
-                                checkedTrackColor = Color(0xFFE11D48)
-                            ),
-                            modifier = Modifier.testTag("recording_overlay_toggle")
-                        )
-                    }
-                }
-            }
-        }
-
-        // 3. Auto-Configure Ideal Settings Button
-        item {
-            Card(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .border(1.dp, CyberCyan.copy(alpha = 0.4f), RoundedCornerShape(16.dp))
-                    .clickable {
-                        val auto = ScreenRecordingManager.getAutoConfiguredIdealSettings(context)
-                        settings = auto
-                        ScreenRecordingManager.saveSettings(context, auto)
-                        userMessage = "Auto-configured ideal settings for your device: ${auto.resolutionLabel} @ ${auto.fps}fps (${auto.bitrateMbps} Mbps) for zero lag."
-                    }
-                    .testTag("auto_configure_settings_card"),
-                colors = CardDefaults.cardColors(containerColor = Color(0xFF0F1A2C)),
-                shape = RoundedCornerShape(16.dp)
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(16.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                        .height(4.dp)
+                        .background(MaterialTheme.colorScheme.surfaceVariant)
                 ) {
                     Box(
                         modifier = Modifier
-                            .size(44.dp)
-                            .clip(CircleShape)
-                            .background(CyberCyan.copy(alpha = 0.2f)),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = CyberCyan, modifier = Modifier.size(24.dp))
-                    }
-
-                    Spacer(modifier = Modifier.width(12.dp))
-
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = "Auto-Configure Ideal Settings",
-                            style = MaterialTheme.typography.titleMedium.copy(
-                                fontWeight = FontWeight.Bold,
-                                color = Color.White,
-                                fontSize = 15.sp
-                            )
-                        )
-                        Spacer(modifier = Modifier.height(2.dp))
-                        Text(
-                            text = "Auto-tunes resolution, FPS, and bitrate for your specific processor and screen to eliminate lag.",
-                            style = MaterialTheme.typography.bodySmall.copy(color = Color(0xFF9CA3AF), fontSize = 11.sp)
-                        )
-                    }
-                }
-            }
-        }
-
-        // 4. Video Quality Settings Card
-        item {
-            CyberCard {
-                SectionTitle(
-                    title = "Video Quality Settings",
-                    subtitle = "Customize screen resolution, frame rate, and compression bitrate"
-                )
-
-                Spacer(modifier = Modifier.height(14.dp))
-
-                // A. Resolution Choice
-                Text(
-                    text = "RESOLUTION (DEVICE SUPPORTED):",
-                    style = MaterialTheme.typography.labelSmall.copy(
-                        fontWeight = FontWeight.Bold,
-                        color = Color(0xFF8893A7),
-                        letterSpacing = 1.sp
+                            .fillMaxWidth(storageInfo.usedRatio.coerceIn(0.08f, 0.95f))
+                            .fillMaxHeight()
+                            .background(RecorderCoral)
                     )
-                )
-                Spacer(modifier = Modifier.height(6.dp))
-
-                LazyRow(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    items(supportedResolutions, key = { it.label }) { preset ->
-                        val isSelected = settings.resolutionLabel == preset.label
-                        FilterChip(
-                            selected = isSelected,
-                            onClick = {
-                                val updated = settings.copy(
-                                    resolutionLabel = preset.label,
-                                    width = preset.width,
-                                    height = preset.height
-                                )
-                                settings = updated
-                                ScreenRecordingManager.saveSettings(context, updated)
-                            },
-                            label = {
-                                Text(
-                                    text = preset.label,
-                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                                    fontSize = 12.sp
-                                )
-                            },
-                            colors = FilterChipDefaults.filterChipColors(
-                                selectedContainerColor = Color(0xFF2563EB),
-                                selectedLabelColor = Color.White,
-                                containerColor = Color(0xFF13192B),
-                                labelColor = Color(0xFF8893A7)
-                            ),
-                            border = FilterChipDefaults.filterChipBorder(
-                                enabled = true,
-                                selected = isSelected,
-                                borderColor = if (isSelected) Color(0xFF38BDF8) else DarkSurfaceBorder
-                            )
-                        )
-                    }
                 }
-
-                Spacer(modifier = Modifier.height(14.dp))
-
-                // B. Frame Rate Choice
-                Text(
-                    text = "FRAME RATE (CAPPED AT HARDWARE REFRESH RATE):",
-                    style = MaterialTheme.typography.labelSmall.copy(
-                        fontWeight = FontWeight.Bold,
-                        color = Color(0xFF8893A7),
-                        letterSpacing = 1.sp
-                    )
-                )
-                Spacer(modifier = Modifier.height(6.dp))
 
                 Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    for (fps in supportedFps) {
-                        val isSelected = settings.fps == fps
-                        FilterChip(
-                            selected = isSelected,
-                            onClick = {
-                                val updated = settings.copy(fps = fps)
-                                settings = updated
-                                ScreenRecordingManager.saveSettings(context, updated)
-                            },
-                            label = {
-                                Text(
-                                    text = "${fps} FPS",
-                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                                    fontSize = 12.sp
-                                )
-                            },
-                            colors = FilterChipDefaults.filterChipColors(
-                                selectedContainerColor = Color(0xFF2563EB),
-                                selectedLabelColor = Color.White,
-                                containerColor = Color(0xFF13192B),
-                                labelColor = Color(0xFF8893A7)
-                            ),
-                            border = FilterChipDefaults.filterChipBorder(
-                                enabled = true,
-                                selected = isSelected,
-                                borderColor = if (isSelected) Color(0xFF38BDF8) else DarkSurfaceBorder
-                            )
-                        )
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(14.dp))
-
-                // C. Bitrate Slider (1 to 16 Mbps)
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = "VIDEO BITRATE:",
-                        style = MaterialTheme.typography.labelSmall.copy(
-                            fontWeight = FontWeight.Bold,
-                            color = Color(0xFF8893A7),
-                            letterSpacing = 1.sp
+                        text = storageInfo.availableGbText,
+                        style = MaterialTheme.typography.bodySmall.copy(
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            fontWeight = FontWeight.Medium,
+                            fontSize = 12.sp
                         )
                     )
                     Text(
-                        text = "${settings.bitrateMbps} Mbps",
-                        style = MaterialTheme.typography.titleSmall.copy(
-                            fontWeight = FontWeight.Bold,
-                            color = CyberCyan,
-                            fontFamily = FontFamily.Monospace
+                        text = storageInfo.recordableTimeText,
+                        style = MaterialTheme.typography.bodySmall.copy(
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            fontWeight = FontWeight.Medium,
+                            fontSize = 12.sp
                         )
                     )
                 }
-
-                Slider(
-                    value = settings.bitrateMbps.toFloat(),
-                    onValueChange = {
-                        val mbps = it.toInt().coerceIn(1, 16)
-                        val updated = settings.copy(bitrateMbps = mbps)
-                        settings = updated
-                        ScreenRecordingManager.saveSettings(context, updated)
-                    },
-                    valueRange = 1f..16f,
-                    steps = 14,
-                    colors = SliderDefaults.colors(
-                        thumbColor = Color(0xFF38BDF8),
-                        activeTrackColor = Color(0xFF2563EB),
-                        inactiveTrackColor = Color(0xFF1E283D)
-                    )
-                )
-
-                Spacer(modifier = Modifier.height(10.dp))
-
-                // D. Microphone & Overlay Timer Toggles
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(Color(0xFF101524))
-                        .padding(horizontal = 12.dp, vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            imageVector = if (settings.recordMic) Icons.Default.Mic else Icons.Default.MicOff,
-                            contentDescription = null,
-                            tint = if (settings.recordMic) NeonGreen else Color(0xFF8893A7),
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = "Record Microphone Audio",
-                            style = MaterialTheme.typography.bodyMedium.copy(color = Color.White, fontSize = 13.sp)
-                        )
-                    }
-
-                    Switch(
-                        checked = settings.recordMic,
-                        onCheckedChange = { mic ->
-                            val updated = settings.copy(recordMic = mic)
-                            settings = updated
-                            ScreenRecordingManager.saveSettings(context, updated)
-                        },
-                        colors = SwitchDefaults.colors(
-                            checkedThumbColor = Color.White,
-                            checkedTrackColor = NeonGreen
-                        )
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(8.dp))
-
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(Color(0xFF101524))
-                        .padding(horizontal = 12.dp, vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            imageVector = Icons.Default.Timer,
-                            contentDescription = null,
-                            tint = if (settings.showTimerHud) Color(0xFF38BDF8) else Color(0xFF8893A7),
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = "Display Elapsed Time in Overlay",
-                            style = MaterialTheme.typography.bodyMedium.copy(color = Color.White, fontSize = 13.sp)
-                        )
-                    }
-
-                    Switch(
-                        checked = settings.showTimerHud,
-                        onCheckedChange = { show ->
-                            val updated = settings.copy(showTimerHud = show)
-                            settings = updated
-                            ScreenRecordingManager.saveSettings(context, updated)
-                        },
-                        colors = SwitchDefaults.colors(
-                            checkedThumbColor = Color.White,
-                            checkedTrackColor = Color(0xFF38BDF8)
-                        )
-                    )
-                }
-            }
-        }
-
-        // 5. Past Recordings Gallery Header
-        item {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 8.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = "PAST RECORDINGS (${recordings.size})",
-                    style = MaterialTheme.typography.labelLarge.copy(
-                        fontWeight = FontWeight.Black,
-                        color = Color(0xFF8893A7),
-                        letterSpacing = 1.sp,
-                        fontSize = 14.sp
-                    )
-                )
-
-                IconButton(onClick = refreshRecordings) {
-                    Icon(Icons.Default.Refresh, contentDescription = "Refresh Recordings", tint = CyberCyan)
-                }
-            }
-        }
-
-        // 6. Recordings Items or Empty State
-        if (recordings.isEmpty()) {
-            item {
-                Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .border(1.dp, DarkSurfaceBorder, RoundedCornerShape(16.dp)),
-                    colors = CardDefaults.cardColors(containerColor = Color(0xFF13192B)),
-                    shape = RoundedCornerShape(16.dp)
-                ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(24.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Videocam,
-                            contentDescription = null,
-                            tint = Color(0xFF3B4863),
-                            modifier = Modifier.size(48.dp)
-                        )
-                        Spacer(modifier = Modifier.height(10.dp))
-                        Text(
-                            text = "No gameplay recordings yet",
-                            style = MaterialTheme.typography.titleMedium.copy(
-                                fontWeight = FontWeight.Bold,
-                                color = Color.White
-                            )
-                        )
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(
-                            text = "Videos saved via the floating recording circle will appear in your phone's Gallery and in this tab.",
-                            style = MaterialTheme.typography.bodySmall.copy(
-                                color = Color(0xFF8893A7),
-                                textAlign = TextAlign.Center,
-                                fontSize = 12.sp
-                            )
-                        )
-                    }
-                }
-            }
-        } else {
-            items(recordings, key = { it.id }) { video ->
-                RecordedVideoCard(
-                    video = video,
-                    onPlay = { selectedVideoForPlayback = video },
-                    onShare = {
-                        val shareIntent = Intent(Intent.ACTION_SEND).apply {
-                            type = "video/mp4"
-                            putExtra(Intent.EXTRA_STREAM, Uri.parse(video.uriString))
-                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                        }
-                        context.startActivity(Intent.createChooser(shareIntent, "Share Video"))
-                    },
-                    onDelete = {
-                        ScreenRecordingManager.deleteRecording(context, video)
-                        refreshRecordings()
-                        userMessage = "Recording deleted."
-                    }
-                )
             }
         }
     }
 
-    // In-app Video Player Dialog
+    // Video Player Modal
     selectedVideoForPlayback?.let { video ->
         VideoPlayerModalDialog(
             video = video,
             onDismiss = { selectedVideoForPlayback = null }
         )
     }
+
+    // Confirm Delete Video Dialog
+    videoToDelete?.let { video ->
+        AlertDialog(
+            onDismissRequest = { videoToDelete = null },
+            title = { Text("Delete Recording?") },
+            text = { Text("Delete '${video.title}' permanently from your device?") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        ScreenRecordingManager.deleteRecording(context, video)
+                        videoToDelete = null
+                        refreshMediaLists()
+                    }
+                ) {
+                    Text("Delete", color = RecorderCoral, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { videoToDelete = null }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    // Screenshot Preview Modal
+    selectedScreenshotForPreview?.let { shot ->
+        ScreenshotPreviewDialog(
+            screenshot = shot,
+            onDismiss = { selectedScreenshotForPreview = null }
+        )
+    }
+
+    // Confirm Delete Screenshot Dialog
+    screenshotToDelete?.let { shot ->
+        AlertDialog(
+            onDismissRequest = { screenshotToDelete = null },
+            title = { Text("Delete Screenshot?") },
+            text = { Text("Remove '${shot.title}' from your Screenshots library?") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        ScreenRecordingManager.deleteScreenshot(context, shot)
+                        screenshotToDelete = null
+                        refreshMediaLists()
+                    }
+                ) {
+                    Text("Delete", color = RecorderCoral, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { screenshotToDelete = null }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
 }
 
 /**
- * Individual Recorded Video Item Card
+ * 3-Icon Tab Strip matching screenshot #2 (Videos, Screenshots, Settings) with Coral-Red active icon and underline
  */
 @Composable
-fun RecordedVideoCard(
-    video: RecordedVideo,
-    onPlay: () -> Unit,
-    onShare: () -> Unit,
-    onDelete: () -> Unit
+private fun RecorderThreeTabStrip(
+    selectedTab: Int,
+    onSelectTab: (Int) -> Unit
 ) {
-    val context = LocalContext.current
-    var thumbnailBitmap by remember { mutableStateOf<Bitmap?>(null) }
+    val tabs = listOf(
+        Triple(0, "Videos", Icons.Default.Slideshow),
+        Triple(1, "Screenshots", Icons.Default.Image),
+        Triple(2, "Settings", Icons.Default.Settings)
+    )
 
-    LaunchedEffect(video.id) {
-        try {
-            thumbnailBitmap = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && video.uriString.startsWith("content://")) {
-                context.contentResolver.loadThumbnail(Uri.parse(video.uriString), Size(320, 180), null)
-            } else {
-                @Suppress("DEPRECATION")
-                ThumbnailUtils.createVideoThumbnail(video.filePath, MediaStore.Images.Thumbnails.MINI_KIND)
-            }
-        } catch (_: Exception) {}
-    }
-
-    Card(
+    Row(
         modifier = Modifier
             .fillMaxWidth()
-            .border(1.dp, Color(0xFF1E283E), RoundedCornerShape(16.dp)),
-        colors = CardDefaults.cardColors(containerColor = Color(0xFF13192B)),
-        shape = RoundedCornerShape(16.dp)
+            .background(MaterialTheme.colorScheme.surface)
+            .padding(top = 4.dp),
+        horizontalArrangement = Arrangement.SpaceEvenly,
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        Column(modifier = Modifier.padding(12.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically
+        tabs.forEach { (index, label, icon) ->
+            val isSelected = selectedTab == index
+            var isFocused by remember { mutableStateOf(false) }
+
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .onFocusChanged { isFocused = it.isFocused }
+                    .clickable { onSelectTab(index) }
+                    .focusable()
+                    .padding(top = 8.dp)
+                    .testTag("recorder_tab_${label.lowercase()}"),
+                horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                // Thumbnail preview box
+                Icon(
+                    imageVector = icon,
+                    contentDescription = label,
+                    tint = if (isSelected || isFocused) {
+                        RecorderCoral
+                    } else {
+                        RecorderCoral.copy(alpha = 0.35f)
+                    },
+                    modifier = Modifier.size(26.dp)
+                )
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                // Active Coral Underline Indicator
                 Box(
                     modifier = Modifier
-                        .size(width = 90.dp, height = 64.dp)
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(Color(0xFF0A0F1D))
-                        .clickable { onPlay() },
-                    contentAlignment = Alignment.Center
-                ) {
-                    if (thumbnailBitmap != null) {
-                        Image(
-                            bitmap = thumbnailBitmap!!.asImageBitmap(),
-                            contentDescription = "Thumbnail",
-                            modifier = Modifier.fillMaxSize()
+                        .width(36.dp)
+                        .height(3.dp)
+                        .clip(RoundedCornerShape(2.dp))
+                        .background(
+                            if (isSelected) RecorderCoral else Color.Transparent
                         )
-                    } else {
-                        Icon(Icons.Default.Videocam, contentDescription = null, tint = Color(0xFF4B5563))
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun VideosTabContent(
+    recordings: List<RecordedVideo>,
+    onPlayVideo: (RecordedVideo) -> Unit,
+    onSaveToGallery: (RecordedVideo) -> Unit,
+    onShareVideo: (RecordedVideo) -> Unit,
+    onDeleteVideo: (RecordedVideo) -> Unit
+) {
+    val context = LocalContext.current
+    val groupedVideos = remember(recordings) {
+        ScreenRecordingManager.groupVideosByGame(recordings)
+    }
+    var selectedGameFilter by remember { mutableStateOf<String?>(null) }
+
+    // Reset filter if that game's last video was deleted
+    LaunchedEffect(groupedVideos) {
+        if (selectedGameFilter != null && groupedVideos.none { it.gameName == selectedGameFilter }) {
+            selectedGameFilter = null
+        }
+    }
+
+    val visibleGroups = remember(groupedVideos, selectedGameFilter) {
+        if (selectedGameFilter == null) groupedVideos
+        else groupedVideos.filter { it.gameName == selectedGameFilter }
+    }
+
+    if (recordings.isEmpty()) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(32.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Icon(
+                    imageVector = Icons.Default.Slideshow,
+                    contentDescription = null,
+                    tint = RecorderCoral.copy(alpha = 0.35f),
+                    modifier = Modifier.size(64.dp)
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+                Text(
+                    text = "No videos have been recorded",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "Tap the coral Record button below or use the floating bubble during gameplay. Videos are automatically grouped by game.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center
+                )
+            }
+        }
+    } else {
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxSize()
+                .testTag("videos_grouped_gallery"),
+            contentPadding = PaddingValues(top = 12.dp, bottom = 96.dp, start = 16.dp, end = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            // Game Filter Chip Bar
+            item {
+                GameMediaFilterBar(
+                    groups = groupedVideos.map { Triple(it.gameName, it.gamePackage, it.items.size) },
+                    totalCount = recordings.size,
+                    selectedGameName = selectedGameFilter,
+                    onSelectGame = { gameName ->
+                        ConsoleHapticManager.playSelectClick(context)
+                        selectedGameFilter = gameName
                     }
+                )
+            }
 
-                    // Play Overlay Icon
-                    Box(
-                        modifier = Modifier
-                            .size(28.dp)
-                            .clip(CircleShape)
-                            .background(Color(0x80000000)),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(Icons.Default.PlayArrow, contentDescription = "Play", tint = Color.White, modifier = Modifier.size(18.dp))
-                    }
-                }
-
-                Spacer(modifier = Modifier.width(12.dp))
-
-                // Metadata
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = video.title,
-                        style = MaterialTheme.typography.titleSmall.copy(
-                            fontWeight = FontWeight.Bold,
-                            color = Color.White
-                        ),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    Spacer(modifier = Modifier.height(2.dp))
-                    Text(
-                        text = "${video.formattedDuration} • ${video.formattedSize} • ${video.resolution}",
-                        style = MaterialTheme.typography.bodySmall.copy(
-                            color = Color(0xFF8893A7),
-                            fontSize = 11.sp
-                        )
+            visibleGroups.forEach { group ->
+                item(key = "video_group_header_${group.gameName}") {
+                    GameMediaGroupHeader(
+                        gameName = group.gameName,
+                        gamePackage = group.gamePackage,
+                        itemCount = group.items.size,
+                        unitLabel = if (group.items.size == 1) "clip" else "clips"
                     )
                 }
 
-                // Quick Play, Share, Delete Buttons
-                IconButton(onClick = onShare, modifier = Modifier.size(34.dp)) {
-                    Icon(Icons.Default.Share, contentDescription = "Share", tint = CyberCyan, modifier = Modifier.size(18.dp))
-                }
-
-                IconButton(onClick = onDelete, modifier = Modifier.size(34.dp)) {
-                    Icon(Icons.Default.Delete, contentDescription = "Delete", tint = Color(0xFFF87171), modifier = Modifier.size(18.dp))
+                items(group.items, key = { it.id }) { video ->
+                    RecordedVideoItemCard(
+                        video = video,
+                        onPlay = {
+                            ConsoleHapticManager.playSelectClick(context)
+                            onPlayVideo(video)
+                        },
+                        onSaveToGallery = {
+                            ConsoleHapticManager.playSelectClick(context)
+                            onSaveToGallery(video)
+                        },
+                        onShare = {
+                            ConsoleHapticManager.playSelectClick(context)
+                            onShareVideo(video)
+                        },
+                        onDelete = {
+                            ConsoleHapticManager.playSelectClick(context)
+                            onDeleteVideo(video)
+                        }
+                    )
                 }
             }
         }
     }
 }
 
+@Composable
+private fun GameMediaFilterBar(
+    groups: List<Triple<String, String?, Int>>,
+    totalCount: Int,
+    selectedGameName: String?,
+    onSelectGame: (String?) -> Unit
+) {
+    val context = LocalContext.current
+    LazyRow(
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("media_game_filter_bar"),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        contentPadding = PaddingValues(vertical = 2.dp)
+    ) {
+        item {
+            var allFocused by remember { mutableStateOf(false) }
+            FilterChip(
+                selected = selectedGameName == null,
+                onClick = { onSelectGame(null) },
+                label = {
+                    Text(
+                        text = "All Games ($totalCount)",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 12.sp
+                    )
+                },
+                colors = FilterChipDefaults.filterChipColors(
+                    selectedContainerColor = RecorderCoral.copy(alpha = 0.18f),
+                    selectedLabelColor = RecorderCoral
+                ),
+                border = FilterChipDefaults.filterChipBorder(
+                    enabled = true,
+                    selected = selectedGameName == null,
+                    borderColor = if (allFocused) Color.White else MaterialTheme.colorScheme.outline.copy(alpha = 0.35f),
+                    selectedBorderColor = if (allFocused) Color.White else RecorderCoral,
+                    borderWidth = if (allFocused) 2.dp else 1.dp,
+                    selectedBorderWidth = if (allFocused) 2.dp else 1.5.dp
+                ),
+                modifier = Modifier.onFocusChanged {
+                    if (it.isFocused && !allFocused) {
+                        ConsoleHapticManager.playFocusTick(context)
+                    }
+                    allFocused = it.isFocused
+                }
+            )
+        }
+
+        items(groups, key = { it.first }) { (gameName, _, count) ->
+            val isSelected = selectedGameName == gameName
+            var chipFocused by remember { mutableStateOf(false) }
+            FilterChip(
+                selected = isSelected,
+                onClick = { onSelectGame(if (isSelected) null else gameName) },
+                label = {
+                    Text(
+                        text = "$gameName ($count)",
+                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                        fontSize = 12.sp
+                    )
+                },
+                colors = FilterChipDefaults.filterChipColors(
+                    selectedContainerColor = HubBlue.copy(alpha = 0.2f),
+                    selectedLabelColor = HubBlue
+                ),
+                border = FilterChipDefaults.filterChipBorder(
+                    enabled = true,
+                    selected = isSelected,
+                    borderColor = if (chipFocused) Color.White else MaterialTheme.colorScheme.outline.copy(alpha = 0.35f),
+                    selectedBorderColor = if (chipFocused) Color.White else HubBlue,
+                    borderWidth = if (chipFocused) 2.dp else 1.dp,
+                    selectedBorderWidth = if (chipFocused) 2.dp else 1.5.dp
+                ),
+                modifier = Modifier.onFocusChanged {
+                    if (it.isFocused && !chipFocused) {
+                        ConsoleHapticManager.playFocusTick(context)
+                    }
+                    chipFocused = it.isFocused
+                }
+            )
+        }
+    }
+}
+
+@Composable
+private fun GameMediaGroupHeader(
+    gameName: String,
+    gamePackage: String?,
+    itemCount: Int,
+    unitLabel: String
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 6.dp, bottom = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            if (!gamePackage.isNullOrBlank()) {
+                Box(
+                    modifier = Modifier
+                        .size(28.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.35f), RoundedCornerShape(8.dp))
+                ) {
+                    AppIconImage(
+                        packageName = gamePackage,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                }
+            } else {
+                Box(
+                    modifier = Modifier
+                        .size(28.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(HubBlue.copy(alpha = 0.16f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.SportsEsports,
+                        contentDescription = null,
+                        tint = HubBlue,
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.width(10.dp))
+
+            Text(
+                text = gameName.uppercase(Locale.US),
+                style = MaterialTheme.typography.titleSmall.copy(
+                    fontWeight = FontWeight.ExtraBold,
+                    letterSpacing = 0.7.sp,
+                    color = MaterialTheme.colorScheme.onBackground
+                )
+            )
+        }
+
+        Box(
+            modifier = Modifier
+                .clip(RoundedCornerShape(50))
+                .background(MaterialTheme.colorScheme.surfaceVariant)
+                .padding(horizontal = 10.dp, vertical = 3.dp)
+        ) {
+            Text(
+                text = "$itemCount $unitLabel",
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
+
+@Composable
+private fun RecordedVideoItemCard(
+    video: RecordedVideo,
+    onPlay: () -> Unit,
+    onSaveToGallery: () -> Unit,
+    onShare: () -> Unit,
+    onDelete: () -> Unit
+) {
+    val context = LocalContext.current
+    val thumbnail = remember(video.filePath) {
+        try {
+            val f = File(video.filePath)
+            if (f.exists()) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    ThumbnailUtils.createVideoThumbnail(f, Size(320, 180), null)
+                } else {
+                    @Suppress("DEPRECATION")
+                    ThumbnailUtils.createVideoThumbnail(
+                        video.filePath,
+                        MediaStore.Images.Thumbnails.MINI_KIND
+                    )
+                }
+            } else null
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    var isFocused by remember { mutableStateOf(false) }
+
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .onFocusChanged {
+                if (it.isFocused && !isFocused) {
+                    ConsoleHapticManager.playFocusTick(context)
+                }
+                isFocused = it.isFocused
+            }
+            .border(
+                width = if (isFocused) 2.5.dp else 1.dp,
+                color = if (isFocused) Color.White else MaterialTheme.colorScheme.outline.copy(alpha = 0.25f),
+                shape = RoundedCornerShape(16.dp)
+            )
+            .clickable { onPlay() }
+            .focusable(),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // Thumbnail Preview with Play badge
+            Box(
+                modifier = Modifier
+                    .width(110.dp)
+                    .height(66.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(Color.Black),
+                contentAlignment = Alignment.Center
+            ) {
+                if (thumbnail != null) {
+                    Image(
+                        bitmap = thumbnail.asImageBitmap(),
+                        contentDescription = video.title,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                }
+                Box(
+                    modifier = Modifier
+                        .size(30.dp)
+                        .clip(CircleShape)
+                        .background(RecorderCoral.copy(alpha = 0.88f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.PlayArrow,
+                        contentDescription = "Play",
+                        tint = Color.White,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.width(12.dp))
+
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = video.title,
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    text = video.gameName,
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = HubBlue,
+                    maxLines = 1
+                )
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    text = "${video.formattedDuration} • ${video.formattedSize} • ${video.resolution}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+
+            IconButton(onClick = onSaveToGallery, modifier = Modifier.size(34.dp)) {
+                Icon(
+                    imageVector = Icons.Default.Download,
+                    contentDescription = "Save to Gallery",
+                    tint = HubBlue,
+                    modifier = Modifier.size(18.dp)
+                )
+            }
+
+            IconButton(onClick = onShare, modifier = Modifier.size(34.dp)) {
+                Icon(
+                    imageVector = Icons.Default.Share,
+                    contentDescription = "Share",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(18.dp)
+                )
+            }
+
+            IconButton(onClick = onDelete, modifier = Modifier.size(34.dp)) {
+                Icon(
+                    imageVector = Icons.Default.Delete,
+                    contentDescription = "Delete",
+                    tint = RecorderCoral,
+                    modifier = Modifier.size(18.dp)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ScreenshotsTabContent(
+    screenshots: List<CapturedScreenshot>,
+    onCaptureScreenshot: () -> Unit,
+    onPreviewScreenshot: (CapturedScreenshot) -> Unit,
+    onShareScreenshot: (CapturedScreenshot) -> Unit,
+    onDeleteScreenshot: (CapturedScreenshot) -> Unit
+) {
+    val context = LocalContext.current
+    val groupedScreenshots = remember(screenshots) {
+        ScreenRecordingManager.groupScreenshotsByGame(screenshots)
+    }
+    var selectedGameFilter by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(groupedScreenshots) {
+        if (selectedGameFilter != null && groupedScreenshots.none { it.gameName == selectedGameFilter }) {
+            selectedGameFilter = null
+        }
+    }
+
+    val visibleGroups = remember(groupedScreenshots, selectedGameFilter) {
+        if (selectedGameFilter == null) groupedScreenshots
+        else groupedScreenshots.filter { it.gameName == selectedGameFilter }
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 16.dp, vertical = 12.dp)
+    ) {
+        // Top Quick Action Bar to capture a screenshot right now
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.25f))
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "Real Screen Capture",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Text(
+                        text = "Capture lossless PNG frames automatically grouped by active game",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+
+                Spacer(modifier = Modifier.width(12.dp))
+
+                Button(
+                    onClick = {
+                        ConsoleHapticManager.playSelectClick(context)
+                        onCaptureScreenshot()
+                    },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = RecorderCoral,
+                        contentColor = Color.White
+                    ),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.testTag("capture_screenshot_button")
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.CameraAlt,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Capture", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        if (screenshots.isEmpty()) {
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth(),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Icon(
+                        imageVector = Icons.Default.Image,
+                        contentDescription = null,
+                        tint = RecorderCoral.copy(alpha = 0.35f),
+                        modifier = Modifier.size(60.dp)
+                    )
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Text(
+                        text = "No screenshots captured yet",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = "Tap Capture above or use the Shots button in the notification bar.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.Center
+                    )
+                }
+            }
+        } else {
+            LazyColumn(
+                modifier = Modifier
+                    .weight(1f)
+                    .testTag("screenshots_grouped_gallery"),
+                contentPadding = PaddingValues(bottom = 88.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                // Game Filter Chip Bar
+                item {
+                    GameMediaFilterBar(
+                        groups = groupedScreenshots.map { Triple(it.gameName, it.gamePackage, it.items.size) },
+                        totalCount = screenshots.size,
+                        selectedGameName = selectedGameFilter,
+                        onSelectGame = { gameName ->
+                            ConsoleHapticManager.playSelectClick(context)
+                            selectedGameFilter = gameName
+                        }
+                    )
+                }
+
+                visibleGroups.forEach { group ->
+                    item(key = "shot_group_header_${group.gameName}") {
+                        GameMediaGroupHeader(
+                            gameName = group.gameName,
+                            gamePackage = group.gamePackage,
+                            itemCount = group.items.size,
+                            unitLabel = if (group.items.size == 1) "shot" else "shots"
+                        )
+                    }
+
+                    items(group.items, key = { it.id }) { shot ->
+                        val bmp = remember(shot.filePath) {
+                            try {
+                                BitmapFactory.decodeFile(shot.filePath)
+                            } catch (_: Exception) {
+                                null
+                            }
+                        }
+
+                        var shotFocused by remember { mutableStateOf(false) }
+
+                        Card(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .onFocusChanged {
+                                    if (it.isFocused && !shotFocused) {
+                                        ConsoleHapticManager.playFocusTick(context)
+                                    }
+                                    shotFocused = it.isFocused
+                                }
+                                .border(
+                                    width = if (shotFocused) 2.5.dp else 1.dp,
+                                    color = if (shotFocused) Color.White else MaterialTheme.colorScheme.outline.copy(alpha = 0.25f),
+                                    shape = RoundedCornerShape(14.dp)
+                                )
+                                .clickable {
+                                    ConsoleHapticManager.playSelectClick(context)
+                                    onPreviewScreenshot(shot)
+                                }
+                                .focusable(),
+                            shape = RoundedCornerShape(14.dp),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(10.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .width(96.dp)
+                                        .height(60.dp)
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(MaterialTheme.colorScheme.surfaceVariant),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    if (bmp != null) {
+                                        Image(
+                                            bitmap = bmp.asImageBitmap(),
+                                            contentDescription = shot.title,
+                                            contentScale = ContentScale.Crop,
+                                            modifier = Modifier.fillMaxSize()
+                                        )
+                                    } else {
+                                        Icon(
+                                            imageVector = Icons.Default.Image,
+                                            contentDescription = null,
+                                            tint = RecorderCoral
+                                        )
+                                    }
+                                }
+
+                                Spacer(modifier = Modifier.width(12.dp))
+
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = shot.title,
+                                        style = MaterialTheme.typography.titleSmall,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.onSurface,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Text(
+                                        text = shot.gameName,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontWeight = FontWeight.Bold,
+                                        color = HubBlue,
+                                        maxLines = 1
+                                    )
+                                    Text(
+                                        text = "${shot.resolution} • ${shot.formattedSize}",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+
+                                IconButton(
+                                    onClick = {
+                                        ConsoleHapticManager.playSelectClick(context)
+                                        onShareScreenshot(shot)
+                                    }
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Share,
+                                        contentDescription = "Share Screenshot",
+                                        tint = HubBlue
+                                    )
+                                }
+
+                                IconButton(
+                                    onClick = {
+                                        ConsoleHapticManager.playSelectClick(context)
+                                        onDeleteScreenshot(shot)
+                                    }
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Delete,
+                                        contentDescription = "Delete Screenshot",
+                                        tint = RecorderCoral
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun RecorderSettingsTabContent(
+    settings: VideoQualitySettings,
+    supportedResolutions: List<ResolutionPreset>,
+    supportedFps: List<Int>,
+    isOverlayBubbleEnabled: Boolean,
+    onUpdateSettings: (VideoQualitySettings) -> Unit,
+    onRequestMicPermission: () -> Unit,
+    onToggleOverlayBubble: (Boolean) -> Unit,
+    onAutoConfigure: () -> Unit
+) {
+    val context = LocalContext.current
+
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(top = 14.dp, bottom = 96.dp, start = 16.dp, end = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        // 1. Auto-Tune Hardware Button
+        item {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.25f))
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Smart Encoder Auto-Tune",
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            text = "Automatically match resolution, FPS, and bitrate to your hardware",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Button(
+                        onClick = onAutoConfigure,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = RecorderCoral,
+                            contentColor = Color.White
+                        ),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Auto-Tune", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                    }
+                }
+            }
+        }
+
+        // 2. Resolution Presets
+        item {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.25f))
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text(
+                        text = "Video Resolution",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        items(supportedResolutions) { preset ->
+                            val isSelected = settings.resolutionLabel == preset.label
+                            FilterChip(
+                                selected = isSelected,
+                                onClick = {
+                                    onUpdateSettings(
+                                        settings.copy(
+                                            resolutionLabel = preset.label,
+                                            width = preset.width,
+                                            height = preset.height
+                                        )
+                                    )
+                                },
+                                label = { Text("${preset.label} (${preset.width}x${preset.height})") },
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = RecorderCoral.copy(alpha = 0.18f),
+                                    selectedLabelColor = RecorderCoral
+                                )
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        // 3. Frame Rate (FPS) & Bitrate
+        item {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.25f))
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text(
+                        text = "Frame Rate (FPS)",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        supportedFps.forEach { fps ->
+                            val isSelected = settings.fps == fps
+                            FilterChip(
+                                selected = isSelected,
+                                onClick = { onUpdateSettings(settings.copy(fps = fps)) },
+                                label = { Text("$fps FPS") },
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = RecorderCoral.copy(alpha = 0.18f),
+                                    selectedLabelColor = RecorderCoral
+                                )
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            text = "Video Bitrate",
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            text = "${settings.bitrateMbps} Mbps",
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = RecorderCoral
+                        )
+                    }
+
+                    Slider(
+                        value = settings.bitrateMbps.toFloat(),
+                        onValueChange = { onUpdateSettings(settings.copy(bitrateMbps = it.toInt())) },
+                        valueRange = 4f..24f,
+                        steps = 9,
+                        colors = SliderDefaults.colors(
+                            thumbColor = RecorderCoral,
+                            activeTrackColor = RecorderCoral
+                        )
+                    )
+                }
+            }
+        }
+
+        // 4. Audio, Floating Radial Bubble, & Timer HUD Toggles
+        item {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.25f))
+            ) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(14.dp)
+                ) {
+                    // Microphone Audio
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                            Icon(Icons.Default.Mic, contentDescription = null, tint = RecorderCoral)
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column {
+                                Text(
+                                    text = "Record Microphone Audio",
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Text(
+                                    text = "Include voice commentary with gameplay audio",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                        Switch(
+                            checked = settings.recordMic,
+                            onCheckedChange = { wantMic ->
+                                if (wantMic && ContextCompat.checkSelfPermission(
+                                        context,
+                                        Manifest.permission.RECORD_AUDIO
+                                    ) != PackageManager.PERMISSION_GRANTED
+                                ) {
+                                    onRequestMicPermission()
+                                } else {
+                                    onUpdateSettings(settings.copy(recordMic = wantMic))
+                                }
+                            },
+                            colors = SwitchDefaults.colors(checkedTrackColor = RecorderCoral)
+                        )
+                    }
+
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.15f))
+
+                    // Floating Radial Bubble & Notification Bar
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                            Icon(Icons.Default.Layers, contentDescription = null, tint = RecorderCoral)
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column {
+                                Text(
+                                    text = "Floating Radial Bubble & Notification",
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Text(
+                                    text = "Show edge bubble & 'Recorder is ready' notification bar",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                        Switch(
+                            checked = isOverlayBubbleEnabled,
+                            onCheckedChange = onToggleOverlayBubble,
+                            colors = SwitchDefaults.colors(checkedTrackColor = RecorderCoral)
+                        )
+                    }
+
+                    // Floating Bubble Size Adjuster (28dp to 64dp with live preview)
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 4.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "Floating Bubble Size",
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Text(
+                                    text = "${settings.bubbleSizeDp} dp (Compact 28dp – Large 64dp)",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = RecorderCoral,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                            // Live 1:1 Scale Circular Bubble Preview (no gray box)
+                            Box(
+                                modifier = Modifier
+                                    .size(settings.bubbleSizeDp.coerceIn(28, 64).dp)
+                                    .clip(CircleShape)
+                                    .background(Color(0xFF1D4ED8))
+                                    .border(2.dp, Color(0xFF38BDF8), CircleShape),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Videocam,
+                                    contentDescription = "Live Bubble Preview",
+                                    tint = Color.White,
+                                    modifier = Modifier.size((settings.bubbleSizeDp * 0.5f).dp)
+                                )
+                            }
+                        }
+                        Slider(
+                            value = settings.bubbleSizeDp.toFloat(),
+                            onValueChange = { newValue ->
+                                val clamped = newValue.toInt().coerceIn(28, 64)
+                                val updated = settings.copy(bubbleSizeDp = clamped)
+                                onUpdateSettings(updated)
+                                if (isOverlayBubbleEnabled && Settings.canDrawOverlays(context)) {
+                                    try {
+                                        val updateIntent = Intent(context, ScreenRecordOverlayService::class.java).apply {
+                                            action = ScreenRecordOverlayService.ACTION_UPDATE_SIZE
+                                        }
+                                        context.startService(updateIntent)
+                                    } catch (_: Exception) {}
+                                }
+                            },
+                            valueRange = 28f..64f,
+                            colors = SliderDefaults.colors(
+                                thumbColor = RecorderCoral,
+                                activeTrackColor = RecorderCoral
+                            ),
+                            modifier = Modifier.testTag("floating_bubble_size_slider")
+                        )
+                    }
+
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.15f))
+
+                    // Timer HUD on Screen
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                            Icon(Icons.Default.Timer, contentDescription = null, tint = RecorderCoral)
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column {
+                                Text(
+                                    text = "On-Screen Timer Pill",
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Text(
+                                    text = "Show compact elapsed time pill during active recording",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                        Switch(
+                            checked = settings.showTimerHud,
+                            onCheckedChange = { onUpdateSettings(settings.copy(showTimerHud = it)) },
+                            colors = SwitchDefaults.colors(checkedTrackColor = RecorderCoral)
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ScreenshotPreviewDialog(
+    screenshot: CapturedScreenshot,
+    onDismiss: () -> Unit
+) {
+    val bmp = remember(screenshot.filePath) {
+        try {
+            BitmapFactory.decodeFile(screenshot.filePath)
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    Dialog(onDismissRequest = onDismiss) {
+        Surface(
+            shape = RoundedCornerShape(18.dp),
+            color = MaterialTheme.colorScheme.surface,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = screenshot.title,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f)
+                    )
+                    IconButton(onClick = onDismiss) {
+                        Icon(Icons.Default.Close, contentDescription = "Close")
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                if (bmp != null) {
+                    Image(
+                        bitmap = bmp.asImageBitmap(),
+                        contentDescription = screenshot.title,
+                        contentScale = ContentScale.Fit,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(340.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(Color.Black)
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Text(
+                    text = "${screenshot.resolution} • ${screenshot.formattedSize}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+    }
+}
+
 /**
- * In-app Video Player Dialog with standard playback controls
+ * In-app Video Player Dialog with Fullscreen expansion and Portrait / Landscape / Auto-Rotate controls
  */
 @Composable
 fun VideoPlayerModalDialog(
     video: RecordedVideo,
     onDismiss: () -> Unit
 ) {
-    Dialog(onDismissRequest = onDismiss) {
+    val context = LocalContext.current
+    val activity = context as? Activity
+    var isFullscreen by remember { mutableStateOf(false) }
+
+    val closePlayer: () -> Unit = {
+        activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+        onDismiss()
+    }
+
+    Dialog(
+        onDismissRequest = closePlayer,
+        properties = DialogProperties(
+            usePlatformDefaultWidth = !isFullscreen
+        )
+    ) {
         Surface(
-            shape = RoundedCornerShape(18.dp),
-            color = Color(0xFF0A0F1D),
-            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF1E283E)),
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(vertical = 12.dp)
+            shape = if (isFullscreen) RoundedCornerShape(0.dp) else RoundedCornerShape(18.dp),
+            color = MaterialTheme.colorScheme.surface,
+            border = if (isFullscreen) null else BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)),
+            modifier = if (isFullscreen) Modifier.fillMaxSize() else Modifier.fillMaxWidth().padding(vertical = 12.dp)
         ) {
             Column(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(14.dp)
+                    .fillMaxSize()
+                    .padding(if (isFullscreen) 8.dp else 14.dp)
             ) {
-                // Header
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -981,28 +1834,85 @@ fun VideoPlayerModalDialog(
                 ) {
                     Text(
                         text = video.title,
-                        style = MaterialTheme.typography.titleMedium.copy(
-                            fontWeight = FontWeight.Bold,
-                            color = Color.White
-                        ),
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f)
                     )
-                    IconButton(onClick = onDismiss, modifier = Modifier.size(32.dp)) {
-                        Icon(Icons.Default.Close, contentDescription = "Close", tint = Color.White)
+
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        IconButton(
+                            onClick = {
+                                activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+                            },
+                            modifier = Modifier.size(32.dp)
+                        ) {
+                            Text("P", fontWeight = FontWeight.Bold, color = HubBlue, fontSize = 12.sp)
+                        }
+
+                        IconButton(
+                            onClick = {
+                                activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+                            },
+                            modifier = Modifier.size(32.dp)
+                        ) {
+                            Text("L", fontWeight = FontWeight.Bold, color = HubBlue, fontSize = 12.sp)
+                        }
+
+                        IconButton(
+                            onClick = {
+                                activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR
+                            },
+                            modifier = Modifier.size(32.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.ScreenRotation,
+                                contentDescription = "Auto Rotate",
+                                tint = MaterialTheme.colorScheme.onSurface,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+
+                        IconButton(
+                            onClick = { isFullscreen = !isFullscreen },
+                            modifier = Modifier.size(32.dp)
+                        ) {
+                            Icon(
+                                imageVector = if (isFullscreen) Icons.Default.FullscreenExit else Icons.Default.Fullscreen,
+                                contentDescription = "Toggle Fullscreen",
+                                tint = HubBlue,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+
+                        IconButton(onClick = closePlayer, modifier = Modifier.size(32.dp)) {
+                            Icon(
+                                Icons.Default.Close,
+                                contentDescription = "Close",
+                                tint = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
                     }
                 }
 
-                Spacer(modifier = Modifier.height(10.dp))
+                Spacer(modifier = Modifier.height(8.dp))
 
-                // Video View Area
                 Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .aspectRatio(16f / 9f)
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(Color.Black),
+                    modifier = if (isFullscreen) {
+                        Modifier
+                            .weight(1f)
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(Color.Black)
+                    } else {
+                        Modifier
+                            .fillMaxWidth()
+                            .aspectRatio(16f / 9f)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(Color.Black)
+                    },
                     contentAlignment = Alignment.Center
                 ) {
                     AndroidView(
@@ -1014,7 +1924,16 @@ fun VideoPlayerModalDialog(
                                 val uri = if (video.uriString.startsWith("content://")) {
                                     Uri.parse(video.uriString)
                                 } else {
-                                    Uri.fromFile(File(video.filePath))
+                                    val f = File(video.filePath)
+                                    if (f.exists()) {
+                                        androidx.core.content.FileProvider.getUriForFile(
+                                            ctx,
+                                            "${ctx.packageName}.fileprovider",
+                                            f
+                                        )
+                                    } else {
+                                        Uri.parse(video.uriString)
+                                    }
                                 }
                                 setVideoURI(uri)
                                 setOnPreparedListener { mp ->
@@ -1027,14 +1946,21 @@ fun VideoPlayerModalDialog(
                     )
                 }
 
-                Spacer(modifier = Modifier.height(10.dp))
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.End
-                ) {
-                    TextButton(onClick = onDismiss) {
-                        Text("Close Player", color = CyberCyan)
+                if (!isFullscreen) {
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "${video.formattedDuration} • ${video.resolution}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        TextButton(onClick = closePlayer) {
+                            Text("Close Player", color = HubBlue)
+                        }
                     }
                 }
             }

@@ -243,19 +243,22 @@ fun AntiCheatNoticeDialog(
         title = {
             Text(
                 text = "Anti-Cheat Policy Notice",
-                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold, color = Color.White)
+                style = MaterialTheme.typography.titleMedium.copy(
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
             )
         },
         text = {
             Column {
                 Text(
                     text = "Certain online multiplayer games strictly prohibit screen overlay utilities, custom crosshairs, or external reticles under their Fair Play terms.",
-                    style = MaterialTheme.typography.bodyMedium.copy(color = Color(0xFFD1D5DB))
+                    style = MaterialTheme.typography.bodyMedium.copy(color = MaterialTheme.colorScheme.onSurfaceVariant)
                 )
                 Spacer(modifier = Modifier.height(8.dp))
                 Text(
                     text = "Enabling this feature in competitive games may lead to account penalties or permanent bans by game publishers. Do you understand and wish to activate it?",
-                    style = MaterialTheme.typography.bodySmall.copy(color = Color(0xFFFDBA74), fontWeight = FontWeight.SemiBold)
+                    style = MaterialTheme.typography.bodySmall.copy(color = Color(0xFFF97316), fontWeight = FontWeight.SemiBold)
                 )
             }
         },
@@ -265,15 +268,15 @@ fun AntiCheatNoticeDialog(
                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFEA580C)),
                 shape = RoundedCornerShape(8.dp)
             ) {
-                Text("I Understand & Proceed", fontWeight = FontWeight.Bold)
+                Text("I Understand & Proceed", fontWeight = FontWeight.Bold, color = Color.White)
             }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) {
-                Text("Cancel", color = Color(0xFF9CA3AF))
+                Text("Cancel", color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         },
-        containerColor = Color(0xFF141824)
+        containerColor = MaterialTheme.colorScheme.surface
     )
 }
 
@@ -301,7 +304,10 @@ fun DeveloperModeTutorialDialog(
         title = {
             Text(
                 text = "Activate Android Developer Mode",
-                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold, color = Color.White)
+                style = MaterialTheme.typography.titleMedium.copy(
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
             )
         },
         text = {
@@ -311,7 +317,10 @@ fun DeveloperModeTutorialDialog(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(8.dp))
-                        .background(if (isDevActive) Color(0xFF064E3B) else Color(0xFF374151))
+                        .background(
+                            if (isDevActive) NeonGreen.copy(alpha = 0.16f)
+                            else MaterialTheme.colorScheme.surfaceVariant
+                        )
                         .padding(horizontal = 12.dp, vertical = 8.dp)
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -325,7 +334,7 @@ fun DeveloperModeTutorialDialog(
                         Text(
                             text = if (isDevActive) "Developer Mode is ACTIVE on this phone" else "Developer Mode is NOT yet activated",
                             style = MaterialTheme.typography.labelSmall.copy(
-                                color = if (isDevActive) NeonGreen else Color.White,
+                                color = if (isDevActive) NeonGreen else MaterialTheme.colorScheme.onSurface,
                                 fontWeight = FontWeight.Bold
                             )
                         )
@@ -335,12 +344,14 @@ fun DeveloperModeTutorialDialog(
                 Spacer(modifier = Modifier.height(14.dp))
                 Text(
                     text = "Follow these 4 quick steps:",
-                    style = MaterialTheme.typography.labelMedium.copy(color = TextSecondary, fontWeight = FontWeight.Bold)
+                    style = MaterialTheme.typography.labelMedium.copy(
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontWeight = FontWeight.Bold
+                    )
                 )
 
                 Spacer(modifier = Modifier.height(10.dp))
 
-                // Step 1
                 TutorialStepRow(
                     stepNumber = "1",
                     title = "Open 'About Phone'",
@@ -349,7 +360,6 @@ fun DeveloperModeTutorialDialog(
 
                 Spacer(modifier = Modifier.height(8.dp))
 
-                // Step 2
                 TutorialStepRow(
                     stepNumber = "2",
                     title = "Locate 'Build Number'",
@@ -358,7 +368,6 @@ fun DeveloperModeTutorialDialog(
 
                 Spacer(modifier = Modifier.height(8.dp))
 
-                // Step 3
                 TutorialStepRow(
                     stepNumber = "3",
                     title = "Tap Build Number 7 Times",
@@ -367,7 +376,6 @@ fun DeveloperModeTutorialDialog(
 
                 Spacer(modifier = Modifier.height(8.dp))
 
-                // Step 4
                 TutorialStepRow(
                     stepNumber = "4",
                     title = "Access Developer Options",
@@ -376,7 +384,6 @@ fun DeveloperModeTutorialDialog(
 
                 Spacer(modifier = Modifier.height(16.dp))
 
-                // Quick Launch Buttons
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -403,7 +410,7 @@ fun DeveloperModeTutorialDialog(
                         modifier = Modifier.weight(1f),
                         shape = RoundedCornerShape(8.dp)
                     ) {
-                        Text("2. Open Dev Opts", fontSize = 11.sp, color = Color.Black, fontWeight = FontWeight.Bold)
+                        Text("2. Open Dev Opts", fontSize = 11.sp, color = Color.White, fontWeight = FontWeight.Bold)
                     }
                 }
             }
@@ -411,13 +418,13 @@ fun DeveloperModeTutorialDialog(
         confirmButton = {
             Button(
                 onClick = onDismiss,
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2563EB)),
+                colors = ButtonDefaults.buttonColors(containerColor = CyberCyan),
                 shape = RoundedCornerShape(8.dp)
             ) {
-                Text("Got It", fontWeight = FontWeight.Bold)
+                Text("Got It", fontWeight = FontWeight.Bold, color = Color.White)
             }
         },
-        containerColor = Color(0xFF141824)
+        containerColor = MaterialTheme.colorScheme.surface
     )
 }
 
@@ -442,7 +449,7 @@ private fun TutorialStepRow(
             Text(
                 text = stepNumber,
                 style = MaterialTheme.typography.labelSmall.copy(
-                    color = Color.Black,
+                    color = Color.White,
                     fontWeight = FontWeight.Black,
                     fontSize = 11.sp
                 )
@@ -453,14 +460,14 @@ private fun TutorialStepRow(
             Text(
                 text = title,
                 style = MaterialTheme.typography.bodySmall.copy(
-                    color = Color.White,
+                    color = MaterialTheme.colorScheme.onSurface,
                     fontWeight = FontWeight.Bold
                 )
             )
             Text(
                 text = description,
                 style = MaterialTheme.typography.bodySmall.copy(
-                    color = Color(0xFF9CA3AF),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     fontSize = 11.sp,
                     lineHeight = 15.sp
                 )
@@ -471,8 +478,6 @@ private fun TutorialStepRow(
 
 /**
  * Dedicated, complete interactive Tactical Crosshair Customization Card.
- * Includes live canvas preview, 8 reticle design chips, 8 neon colors, size slider,
- * anti-cheat ban warning banner, and master overlay activation toggle.
  */
 @Composable
 fun TacticalCrosshairCard(
@@ -499,11 +504,13 @@ fun TacticalCrosshairCard(
             .clip(RoundedCornerShape(16.dp))
             .border(
                 1.dp,
-                if (overlaySettings.isEnabled) Color(activeColorLong).copy(alpha = 0.7f) else DarkSurfaceBorder,
+                if (overlaySettings.isEnabled) Color(activeColorLong).copy(alpha = 0.7f)
+                else MaterialTheme.colorScheme.outline.copy(alpha = 0.45f),
                 RoundedCornerShape(16.dp)
             ),
-        colors = CardDefaults.cardColors(containerColor = Color(0xFF131826)),
-        shape = RoundedCornerShape(16.dp)
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        shape = RoundedCornerShape(16.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             // Header Row
@@ -521,7 +528,8 @@ fun TacticalCrosshairCard(
                             .size(38.dp)
                             .clip(CircleShape)
                             .background(
-                                if (overlaySettings.isEnabled) Color(activeColorLong).copy(alpha = 0.2f) else Color(0xFF1E2433)
+                                if (overlaySettings.isEnabled) Color(activeColorLong).copy(alpha = 0.2f)
+                                else MaterialTheme.colorScheme.surfaceVariant
                             ),
                         contentAlignment = Alignment.Center
                     ) {
@@ -539,7 +547,7 @@ fun TacticalCrosshairCard(
                                 text = "Tactical Screen Crosshair",
                                 style = MaterialTheme.typography.titleMedium.copy(
                                     fontWeight = FontWeight.Bold,
-                                    color = Color.White,
+                                    color = MaterialTheme.colorScheme.onSurface,
                                     fontSize = 16.sp
                                 )
                             )
@@ -547,7 +555,7 @@ fun TacticalCrosshairCard(
                             Box(
                                 modifier = Modifier
                                     .clip(RoundedCornerShape(4.dp))
-                                    .background(Color(0xFF0F3B4A))
+                                    .background(CyberCyan.copy(alpha = 0.16f))
                                     .padding(horizontal = 6.dp, vertical = 2.dp)
                             ) {
                                 Text(
@@ -561,7 +569,7 @@ fun TacticalCrosshairCard(
                         Text(
                             text = if (overlaySettings.isEnabled) "ACTIVE • Touch-Through Pass Active" else "Off • 8 Reticle Designs & 8 Colors",
                             style = MaterialTheme.typography.bodySmall.copy(
-                                color = if (overlaySettings.isEnabled) NeonGreen else TextSecondary,
+                                color = if (overlaySettings.isEnabled) NeonGreen else MaterialTheme.colorScheme.onSurfaceVariant,
                                 fontSize = 11.5.sp
                             )
                         )
@@ -579,9 +587,9 @@ fun TacticalCrosshairCard(
                     },
                     colors = SwitchDefaults.colors(
                         checkedThumbColor = Color.White,
-                        checkedTrackColor = Color(activeColorLong).copy(alpha = 0.8f),
-                        uncheckedThumbColor = Color.Gray,
-                        uncheckedTrackColor = Color(0xFF1E2638)
+                        checkedTrackColor = Color(activeColorLong).copy(alpha = 0.85f),
+                        uncheckedThumbColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                        uncheckedTrackColor = MaterialTheme.colorScheme.surfaceVariant
                     ),
                     modifier = Modifier.testTag("crosshair_tweak_card_toggle")
                 )
@@ -589,17 +597,16 @@ fun TacticalCrosshairCard(
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            // Reticle Live Preview Box with subtle crosshair grid
+            // Reticle Live Preview Box (dark viewport so bright reticles remain high-contrast)
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(130.dp)
                     .clip(RoundedCornerShape(12.dp))
-                    .background(Color(0xFF070A12))
-                    .border(1.dp, Color(0xFF1B2436), RoundedCornerShape(12.dp)),
+                    .background(Color(0xFF0A0F1D))
+                    .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.45f), RoundedCornerShape(12.dp)),
                 contentAlignment = Alignment.Center
             ) {
-                // Subtle Center Grid Lines
                 Canvas(modifier = Modifier.matchParentSize()) {
                     val cx = size.width / 2f
                     val cy = size.height / 2f
@@ -617,14 +624,12 @@ fun TacticalCrosshairCard(
                     )
                 }
 
-                // Render Active Crosshair
                 CrosshairPreview(
                     style = overlaySettings.crosshairStyle,
                     color = Color(activeColorLong).copy(alpha = overlaySettings.crosshairAlpha),
                     sizeDp = overlaySettings.crosshairSizeDp
                 )
 
-                // Reticle Info Pill
                 Box(
                     modifier = Modifier
                         .align(Alignment.BottomEnd)
@@ -648,7 +653,7 @@ fun TacticalCrosshairCard(
             Text(
                 text = "Reticle Design (${CrosshairData.styles.size} Styles)",
                 style = MaterialTheme.typography.labelMedium.copy(
-                    color = TextSecondary,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     fontWeight = FontWeight.Bold,
                     fontSize = 12.sp
                 )
@@ -671,15 +676,15 @@ fun TacticalCrosshairCard(
                             )
                         },
                         colors = FilterChipDefaults.filterChipColors(
-                            selectedContainerColor = CyberCyan.copy(alpha = 0.25f),
+                            selectedContainerColor = CyberCyan.copy(alpha = 0.2f),
                             selectedLabelColor = CyberCyan,
-                            containerColor = Color(0xFF161E2E),
-                            labelColor = TextSecondary
+                            containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                            labelColor = MaterialTheme.colorScheme.onSurfaceVariant
                         ),
                         border = FilterChipDefaults.filterChipBorder(
                             enabled = true,
                             selected = isSelected,
-                            borderColor = Color(0xFF263248),
+                            borderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.45f),
                             selectedBorderColor = CyberCyan,
                             borderWidth = 1.dp,
                             selectedBorderWidth = 1.5.dp
@@ -694,7 +699,7 @@ fun TacticalCrosshairCard(
             Text(
                 text = "Reticle Neon Color (${CrosshairData.colors.size} Colors)",
                 style = MaterialTheme.typography.labelMedium.copy(
-                    color = TextSecondary,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     fontWeight = FontWeight.Bold,
                     fontSize = 12.sp
                 )
@@ -714,7 +719,7 @@ fun TacticalCrosshairCard(
                             .background(Color(colorVal))
                             .border(
                                 width = if (isSelected) 3.dp else 1.dp,
-                                color = if (isSelected) Color.White else Color(0x44FFFFFF),
+                                color = if (isSelected) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.outline,
                                 shape = CircleShape
                             )
                             .clickable { onSelectColor(colorVal) },
@@ -742,7 +747,10 @@ fun TacticalCrosshairCard(
             ) {
                 Text(
                     text = "Reticle Size",
-                    style = MaterialTheme.typography.labelMedium.copy(color = TextSecondary, fontWeight = FontWeight.Bold)
+                    style = MaterialTheme.typography.labelMedium.copy(
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontWeight = FontWeight.Bold
+                    )
                 )
                 Text(
                     text = "${overlaySettings.crosshairSizeDp} dp",
@@ -756,7 +764,7 @@ fun TacticalCrosshairCard(
                 colors = SliderDefaults.colors(
                     thumbColor = Color(activeColorLong),
                     activeTrackColor = Color(activeColorLong),
-                    inactiveTrackColor = DarkSurfaceVariant
+                    inactiveTrackColor = MaterialTheme.colorScheme.surfaceVariant
                 )
             )
 
@@ -790,8 +798,8 @@ fun DeveloperModeHelperBanner(
         modifier = modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(12.dp))
-            .background(Color(0xFF1A2338))
-            .border(1.dp, Color(0xFF2E3E66), RoundedCornerShape(12.dp))
+            .background(MaterialTheme.colorScheme.surface)
+            .border(1.dp, CyberCyan.copy(alpha = 0.45f), RoundedCornerShape(12.dp))
             .clickable { onClick() }
             .padding(14.dp),
         verticalAlignment = Alignment.CenterVertically
@@ -816,14 +824,14 @@ fun DeveloperModeHelperBanner(
                 text = "Developer Mode Required for System Tweaks",
                 style = MaterialTheme.typography.bodyMedium.copy(
                     fontWeight = FontWeight.Bold,
-                    color = Color.White
+                    color = MaterialTheme.colorScheme.onSurface
                 )
             )
             Spacer(modifier = Modifier.height(2.dp))
             Text(
                 text = "Tap for step-by-step 4-step tutorial with direct settings shortcuts.",
                 style = MaterialTheme.typography.bodySmall.copy(
-                    color = Color(0xFF9CA3AF),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     fontSize = 11.sp
                 )
             )

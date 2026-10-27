@@ -70,12 +70,12 @@ class ExampleRobolectricTest {
     assertEquals("Gaming Mode", gamingMode.title)
     assertEquals("Beast Mode", beastMode.title)
 
-    val themes = com.example.model.AppBackgroundTheme.values()
+    val themes = com.example.model.AppBackgroundTheme.entries
     assertEquals(4, themes.size)
-    assertNotNull(themes.find { it.name == "DARK_SLATE" })
-    assertNotNull(themes.find { it.name == "OLED_BLACK" })
-    assertNotNull(themes.find { it.name == "DEEP_NAVY" })
-    assertNotNull(themes.find { it.name == "CARBON_GREY" })
+    assertNotNull(themes.find { it.name == "AUTO_SYSTEM" })
+    assertNotNull(themes.find { it.name == "LIGHT_HUB" })
+    assertNotNull(themes.find { it.name == "DARK_HUB" })
+    assertNotNull(themes.find { it.name == "CUSTOM_COLOR" })
   }
 
   @Test
@@ -85,14 +85,22 @@ class ExampleRobolectricTest {
     assertTrue(config.showTemp)
     assertTrue(config.showBattery)
     assertTrue(config.showTimer)
+    assertTrue(config.showRamPct)
+    assertTrue(config.showClock)
   }
 
   @Test
-  fun `verify ShizukuManager status query`() {
-    val info = com.example.util.ShizukuManager.checkStatus()
-    assertNotNull(info)
-    assertNotNull(info.state)
-    assertTrue(info.explanation.isNotBlank())
+  fun `verify EfpsEngine multi-sensor initialization and non-root explanation`() {
+    val context = ApplicationProvider.getApplicationContext<Context>()
+    com.example.util.EfpsEngine.init(context)
+    com.example.util.EfpsEngine.setTargetCapMode(context, "60")
+    val state = com.example.util.EfpsEngine.telemetry.value
+    assertNotNull(state)
+    assertTrue(state.confidencePercent >= 96)
+    assertTrue(state.onePercentLowEfps in 1..state.currentEfps)
+    assertEquals("60", state.targetCapMode)
+    assertTrue(com.example.util.EfpsEngine.NON_ROOT_EXPLANATION_BODY.isNotBlank())
+    com.example.util.EfpsEngine.setTargetCapMode(context, "AUTO")
   }
 
   @Test
@@ -219,6 +227,38 @@ class ExampleRobolectricTest {
 
     com.example.util.ScreenRecordingManager.setOverlayEnabled(context, false)
     assertTrue(!com.example.util.ScreenRecordingManager.loadSettings(context).isOverlayEnabled)
+  }
+
+  @Test
+  fun `verify 45 premade profile tags and exclusive Albertomiller747 developer verification`() {
+    val allTags = com.example.util.PremadeTagsCatalog.ALL_TAGS
+    assertTrue("Must have 40+ premade tags", allTags.size >= 45)
+
+    // Verify 4-tag limit and rejection of fake developer tag IDs
+    val sanitized = com.example.util.PremadeTagsCatalog.sanitizeSelectedTags(
+      listOf(
+        "developer",
+        "fps_veteran",
+        "120hz_enthusiast",
+        "esports_ready",
+        "night_owl",
+        "sniper_main"
+      )
+    )
+    assertEquals(4, sanitized.size)
+    assertTrue(!sanitized.contains("developer"))
+    assertEquals(listOf("fps_veteran", "120hz_enthusiast", "esports_ready", "night_owl"), sanitized)
+
+    // Verify exclusive Developer Gold-Star email check
+    assertTrue(com.example.util.PremadeTagsCatalog.isOfficialDeveloperEmail("Albertomiller747@gmail.com"))
+    assertTrue(com.example.util.PremadeTagsCatalog.isOfficialDeveloperEmail("  albertomiller747@gmail.com "))
+    assertTrue(!com.example.util.PremadeTagsCatalog.isOfficialDeveloperEmail("randomfaker@gmail.com"))
+    assertTrue(!com.example.util.PremadeTagsCatalog.isOfficialDeveloperEmail("Albertomiller747@fake.com"))
+
+    // Verify display name anti-spoofing for non-developers
+    val strippedName = com.example.util.PremadeTagsCatalog.sanitizeDisplayName("Random User ★ Verified Developer", false)
+    assertTrue(!strippedName.contains("★"))
+    assertTrue(!strippedName.lowercase().contains("verified developer"))
   }
 }
 

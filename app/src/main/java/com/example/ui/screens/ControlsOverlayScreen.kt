@@ -88,6 +88,7 @@ fun ControlsOverlayScreen(
 ) {
     val context = LocalContext.current
     val overlaySettings by viewModel.overlaySettings.collectAsState()
+    val overlayConfig by viewModel.overlayConfig.collectAsState()
     val gamepads by viewModel.gamepads.collectAsState()
     var showAntiCheatNotice by remember { mutableStateOf(false) }
 
@@ -111,9 +112,9 @@ fun ControlsOverlayScreen(
         contentPadding = PaddingValues(top = 12.dp, bottom = 96.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        // Floating Gaming HUD & Crosshair Master Toggle
+        // Floating Gaming HUD Master Toggle
         item {
-            CyberCard(borderColor = if (overlaySettings.isEnabled) CyberCyan else DarkSurfaceBorder) {
+            CyberCard(borderColor = if (overlayConfig.isEnabled) CyberCyan else DarkSurfaceBorder) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -138,14 +139,14 @@ fun ControlsOverlayScreen(
                         }
                         Spacer(modifier = Modifier.height(4.dp))
                         Text(
-                            text = "Renders a movable HUD overlay with tactical crosshair & boss respawn match timer over all games.",
+                            text = "Renders a movable HUD overlay with FPS, battery temperature & gauge over all games.",
                             style = MaterialTheme.typography.bodySmall.copy(color = TextSecondary)
                         )
                     }
 
                     Switch(
-                        checked = overlaySettings.isEnabled,
-                        onCheckedChange = { viewModel.toggleOverlay() },
+                        checked = overlayConfig.isEnabled,
+                        onCheckedChange = { viewModel.toggleOverlayEnabled(context, it) },
                         colors = SwitchDefaults.colors(
                             checkedThumbColor = Color.White,
                             checkedTrackColor = CyberCyan

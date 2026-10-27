@@ -1,0 +1,216 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Global default-deny safety net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isOfficialDeveloperAuth() {
+      return request.auth != null &&
+             request.auth.token.keys().hasAny(['email']) &&
+             request.auth.token.email is string &&
+             request.auth.token.email.lower() == 'albertomiller747@gmail.com';
+    }
+
+    function allowedProfileKeys() {
+      return [
+        'userId',
+        'displayName',
+        'email',
+        'photoUrl',
+        'dateOfBirth',
+        'bio',
+        'selectedTags',
+        'isVerifiedDeveloper',
+        'mostPlayedGameName',
+        'mostPlayedGamePkg',
+        'mostPlayedMinutes',
+        'totalPlayTimeMinutes',
+        'totalSessionsCount',
+        'themeMode',
+        'customBgColor',
+        'reducedAnimations',
+        'autoBigScreenLandscape',
+        'showControllerLegendBar',
+        'suppressActivationWarning',
+        'selectedBoostMode',
+        'appliedOptionIds',
+        'hudEnabled',
+        'hudFpsMode',
+        'hudTargetCap',
+        'hudPosition',
+        'hudScalePct',
+        'hudOpacityPct',
+        'hudShowFps',
+        'hudShowTemp',
+        'hudShowBattery',
+        'hudShowTime',
+        'hudShowRamPct',
+        'hudShowClock',
+        'crosshairEnabled',
+        'crosshairType',
+        'crosshairColorArgb',
+        'crosshairSizeDp',
+        'lightbarColorHex',
+        'recResolutionLabel',
+        'recFps',
+        'recBitrateMbps',
+        'recMicEnabled',
+        'recShowTimerHud',
+        'recOverlayEnabled',
+        'recBubbleSizeDp',
+        'targetGamePkg',
+        'targetGameName',
+        'libraryPackages',
+        'createdAt',
+        'updatedAt'
+      ];
+    }
+
+    function isValidUserCloudProfile(data) {
+      return data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 &&
+             data.userId == request.auth.uid &&
+             data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 100 &&
+             data.email is string && data.email.size() <= 200 &&
+             data.photoUrl is string && data.photoUrl.size() <= 1000 &&
+             data.dateOfBirth is string && data.dateOfBirth.size() >= 1 && data.dateOfBirth.size() <= 40 &&
+             data.bio is string && data.bio.size() <= 300 &&
+             data.selectedTags is list && data.selectedTags.size() <= 4 &&
+             (data.selectedTags.size() == 0 || (data.selectedTags[0] is string && data.selectedTags[0].size() <= 50 && data.selectedTags[0] != 'developer')) &&
+             data.isVerifiedDeveloper is bool &&
+             (data.isVerifiedDeveloper == false || isOfficialDeveloperAuth()) &&
+             data.mostPlayedGameName is string && data.mostPlayedGameName.size() >= 1 && data.mostPlayedGameName.size() <= 120 &&
+             data.mostPlayedGamePkg is string && data.mostPlayedGamePkg.size() <= 150 &&
+             data.mostPlayedMinutes is int && data.mostPlayedMinutes >= 0 && data.mostPlayedMinutes <= 10000000 &&
+             data.totalPlayTimeMinutes is int && data.totalPlayTimeMinutes >= 0 && data.totalPlayTimeMinutes <= 100000000 &&
+             data.totalSessionsCount is int && data.totalSessionsCount >= 0 && data.totalSessionsCount <= 10000000 &&
+             data.themeMode is string && data.themeMode.size() >= 1 && data.themeMode.size() <= 40 &&
+             data.customBgColor is int &&
+             data.reducedAnimations is bool &&
+             data.autoBigScreenLandscape is bool &&
+             data.showControllerLegendBar is bool &&
+             data.suppressActivationWarning is bool &&
+             data.selectedBoostMode is string && data.selectedBoostMode.size() >= 1 && data.selectedBoostMode.size() <= 30 &&
+             data.appliedOptionIds is list && data.appliedOptionIds.size() <= 50 &&
+             (data.appliedOptionIds.size() == 0 || (data.appliedOptionIds[0] is string && data.appliedOptionIds[0].size() <= 80)) &&
+             data.hudEnabled is bool &&
+             data.hudFpsMode is string && data.hudFpsMode.size() >= 1 && data.hudFpsMode.size() <= 30 &&
+             data.hudTargetCap is string && data.hudTargetCap.size() >= 1 && data.hudTargetCap.size() <= 20 &&
+             data.hudPosition is string && data.hudPosition.size() >= 1 && data.hudPosition.size() <= 30 &&
+             data.hudScalePct is int && data.hudScalePct >= 50 && data.hudScalePct <= 200 &&
+             data.hudOpacityPct is int && data.hudOpacityPct >= 10 && data.hudOpacityPct <= 100 &&
+             data.hudShowFps is bool &&
+             data.hudShowTemp is bool &&
+             data.hudShowBattery is bool &&
+             data.hudShowTime is bool &&
+             data.hudShowRamPct is bool &&
+             data.hudShowClock is bool &&
+             data.crosshairEnabled is bool &&
+             data.crosshairType is string && data.crosshairType.size() >= 1 && data.crosshairType.size() <= 30 &&
+             data.crosshairColorArgb is int &&
+             data.crosshairSizeDp is int && data.crosshairSizeDp >= 8 && data.crosshairSizeDp <= 100 &&
+             data.lightbarColorHex is string && data.lightbarColorHex.size() >= 1 && data.lightbarColorHex.size() <= 20 &&
+             data.recResolutionLabel is string && data.recResolutionLabel.size() >= 1 && data.recResolutionLabel.size() <= 20 &&
+             data.recFps is int && data.recFps >= 15 && data.recFps <= 240 &&
+             data.recBitrateMbps is int && data.recBitrateMbps >= 1 && data.recBitrateMbps <= 100 &&
+             data.recMicEnabled is bool &&
+             data.recShowTimerHud is bool &&
+             data.recOverlayEnabled is bool &&
+             data.recBubbleSizeDp is int && data.recBubbleSizeDp >= 24 && data.recBubbleSizeDp <= 80 &&
+             data.targetGamePkg is string && data.targetGamePkg.size() <= 150 &&
+             data.targetGameName is string && data.targetGameName.size() <= 120 &&
+             data.libraryPackages is list && data.libraryPackages.size() <= 100 &&
+             (data.libraryPackages.size() == 0 || (data.libraryPackages[0] is string && data.libraryPackages[0].size() <= 150)) &&
+             data.createdAt is timestamp && data.createdAt <= request.time &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    match /users/{userId} {
+      allow get: if isSignedIn() && isValidId(userId) && request.auth.uid == userId;
+      allow list: if isSignedIn() && resource.data.userId == request.auth.uid;
+
+      allow create: if isSignedIn() &&
+                       isValidId(userId) &&
+                       request.auth.uid == userId &&
+                       incoming().keys().hasAll(allowedProfileKeys()) &&
+                       incoming().keys().hasOnly(allowedProfileKeys()) &&
+                       isValidUserCloudProfile(incoming());
+
+      allow update: if isSignedIn() &&
+                       isValidId(userId) &&
+                       request.auth.uid == userId &&
+                       isValidUserCloudProfile(incoming()) &&
+                       incoming().userId == existing().userId &&
+                       incoming().createdAt == existing().createdAt &&
+                       incoming().diff(existing()).affectedKeys().hasOnly([
+                         'displayName',
+                         'email',
+                         'photoUrl',
+                         'dateOfBirth',
+                         'bio',
+                         'selectedTags',
+                         'isVerifiedDeveloper',
+                         'mostPlayedGameName',
+                         'mostPlayedGamePkg',
+                         'mostPlayedMinutes',
+                         'totalPlayTimeMinutes',
+                         'totalSessionsCount',
+                         'themeMode',
+                         'customBgColor',
+                         'reducedAnimations',
+                         'autoBigScreenLandscape',
+                         'showControllerLegendBar',
+                         'suppressActivationWarning',
+                         'selectedBoostMode',
+                         'appliedOptionIds',
+                         'hudEnabled',
+                         'hudFpsMode',
+                         'hudTargetCap',
+                         'hudPosition',
+                         'hudScalePct',
+                         'hudOpacityPct',
+                         'hudShowFps',
+                         'hudShowTemp',
+                         'hudShowBattery',
+                         'hudShowTime',
+                         'hudShowRamPct',
+                         'hudShowClock',
+                         'crosshairEnabled',
+                         'crosshairType',
+                         'crosshairColorArgb',
+                         'crosshairSizeDp',
+                         'lightbarColorHex',
+                         'recResolutionLabel',
+                         'recFps',
+                         'recBitrateMbps',
+                         'recMicEnabled',
+                         'recShowTimerHud',
+                         'recOverlayEnabled',
+                         'recBubbleSizeDp',
+                         'targetGamePkg',
+                         'targetGameName',
+                         'libraryPackages',
+                         'updatedAt'
+                       ]);
+
+      allow delete: if isSignedIn() && isValidId(userId) && request.auth.uid == userId;
+    }
+  }
+}

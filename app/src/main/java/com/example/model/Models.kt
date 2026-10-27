@@ -121,35 +121,47 @@ enum class AppBackgroundTheme(
     val surfaceColor: Color,
     val borderColor: Color
 ) {
-    DARK_SLATE(
-        title = "Dark Slate",
-        description = "Balanced cyber slate with dark charcoal accents",
-        backgroundColor = Color(0xFF0D111A),
-        surfaceColor = Color(0xFF131826),
-        borderColor = Color(0xFF1E2638)
+    AUTO_SYSTEM(
+        title = "Auto (System Light / Dark)",
+        description = "Automatically switches between Light and Dark to match your device display",
+        backgroundColor = Color(0xFF121417),
+        surfaceColor = Color(0xFF1C1F24),
+        borderColor = Color(0xFF2E333D)
     ),
-    OLED_BLACK(
-        title = "Pure OLED Black",
-        description = "Deepest black for maximum contrast and battery savings",
-        backgroundColor = Color(0xFF000000),
-        surfaceColor = Color(0xFF0C0C0D),
-        borderColor = Color(0xFF202022)
+    LIGHT_HUB(
+        title = "Light Mode",
+        description = "Clean, high-contrast alabaster and pure white consumer theme",
+        backgroundColor = Color(0xFFF8FAFC),
+        surfaceColor = Color(0xFFFFFFFF),
+        borderColor = Color(0xFFE2E8F0)
     ),
-    DEEP_NAVY(
-        title = "Deep Navy",
-        description = "Subtle midnight sapphire glow",
-        backgroundColor = Color(0xFF070E1E),
-        surfaceColor = Color(0xFF0D172E),
-        borderColor = Color(0xFF152240)
+    DARK_HUB(
+        title = "Dark Mode",
+        description = "Console charcoal background with elevated carbon surfaces",
+        backgroundColor = Color(0xFF121417),
+        surfaceColor = Color(0xFF1C1F24),
+        borderColor = Color(0xFF2E333D)
     ),
-    CARBON_GREY(
-        title = "Carbon Grey",
-        description = "Matte stealth carbon weave tone",
-        backgroundColor = Color(0xFF121316),
-        surfaceColor = Color(0xFF1A1C22),
-        borderColor = Color(0xFF282C36)
-    )
+    CUSTOM_COLOR(
+        title = "Custom Background",
+        description = "Personalize the hub with your own custom background color or preset",
+        backgroundColor = Color(0xFF181C24),
+        surfaceColor = Color(0xFF222733),
+        borderColor = Color(0xFF333B4D)
+    );
+
+    companion object {
+        val DARK_SLATE = AUTO_SYSTEM
+    }
 }
+
+data class CustomBackgroundPreset(
+    val name: String,
+    val bgHex: Long,
+    val surfaceHex: Long,
+    val borderHex: Long,
+    val isLight: Boolean = false
+)
 
 enum class BoostMode(
     val title: String,
@@ -200,5 +212,9 @@ data class OverlayHudConfig(
     val showFps: Boolean = true,
     val showTemp: Boolean = true,
     val showBattery: Boolean = true,
-    val showTimer: Boolean = true
+    val showTimer: Boolean = true,
+    val showRamPct: Boolean = true,
+    val showClock: Boolean = true,
+    val fpsMode: String = "BALANCED", // "FAST", "BALANCED", "SMOOTH"
+    val targetCapMode: String = "AUTO" // "AUTO", "30", "45", "60", "90", "120", "144", "165"
 )

@@ -1,7 +1,6 @@
 package com.example.ui.screens
 
 import android.content.Context
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -18,7 +17,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
@@ -31,8 +29,6 @@ import androidx.compose.material.icons.filled.BatteryAlert
 import androidx.compose.material.icons.filled.BatteryChargingFull
 import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.BrightnessAuto
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.ContentCopy
@@ -45,10 +41,8 @@ import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material.icons.filled.Pin
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.SportsEsports
-import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material.icons.filled.Thermostat
 import androidx.compose.material.icons.filled.ViewCarousel
 import androidx.compose.material.icons.filled.Warning
@@ -57,17 +51,6 @@ import androidx.compose.material.icons.filled.WifiTethering
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FilterChipDefaults
-import androidx.compose.material3.Slider
-import androidx.compose.material3.SliderDefaults
-import com.example.ui.components.AntiCheatNoticeDialog
-import com.example.ui.components.CrosshairData
-import com.example.ui.components.CrosshairPreview
-import com.example.ui.components.DeveloperModeTutorialDialog
-import com.example.ui.components.TacticalCrosshairCard
-import com.example.ui.components.DeveloperModeHelperBanner
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.material3.Divider
@@ -79,7 +62,6 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
@@ -108,18 +90,17 @@ import com.example.data.PerformanceOptionsRepository
 import com.example.model.OptionActionType
 import com.example.model.OptionIconType
 import com.example.model.PerformanceOption
+import com.example.ui.components.AntiCheatNoticeDialog
+import com.example.ui.components.DeveloperModeHelperBanner
+import com.example.ui.components.DeveloperModeTutorialDialog
+import com.example.ui.components.TacticalCrosshairCard
 import com.example.ui.components.copyToClipboard
-import com.example.util.SystemSettingsHelper
+import com.example.ui.theme.HubBlue
+import com.example.ui.theme.LaunchGreen
 import com.example.viewmodel.GameBoosterViewModel
 
-// Dark Cyber aesthetic palette matching reference screenshot
-val ScreenshotBg = Color(0xFF0D111A)
-val SearchBarBg = Color(0xFF191D28)
-val SearchBarText = Color(0xFF8B94A6)
-val CardBg = Color(0xFF141824)
-val DividerColor = Color(0xFF1C2230)
-val BoostBlue = Color(0xFF2563EB)
-val BoostActiveCyan = Color(0xFF00E5FF)
+val BoostBlue = HubBlue
+val BoostActiveCyan = Color(0xFF0EA5E9)
 val RankGold = Color(0xFFF59E0B)
 val RankBlue = Color(0xFF3B82F6)
 val RankBronze = Color(0xFFEA580C)
@@ -136,9 +117,7 @@ fun OptionsScreen(
     val appliedOptionIds by viewModel.appliedOptionIds.collectAsState()
     val suppressActivationWarning by viewModel.suppressActivationWarning.collectAsState()
     var pendingOptionToActivate by remember { mutableStateOf<PerformanceOption?>(null) }
-    val isBoosting by viewModel.isBoosting.collectAsState()
     val boostFeedback by viewModel.boostFeedback.collectAsState()
-    val currentTheme by viewModel.appTheme.collectAsState()
     val overlaySettings by viewModel.overlaySettings.collectAsState()
     var showAntiCheatNotice by remember { mutableStateOf(false) }
     var showDevModeTutorial by remember { mutableStateOf(false) }
@@ -181,17 +160,18 @@ fun OptionsScreen(
     val secureSettingsTweaks = remember(context) { PerformanceOptionsRepository.getSecureSettingsTweaks(context) }
 
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val dividerColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.35f)
 
     Box(
         modifier = modifier
             .fillMaxSize()
-            .background(currentTheme.backgroundColor)
+            .background(MaterialTheme.colorScheme.background)
     ) {
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(top = 16.dp, bottom = 100.dp)
+            contentPadding = PaddingValues(top = 12.dp, bottom = 100.dp)
         ) {
-            // 1. Search Bar (matches pill in reference screenshot)
+            // 1. Search Bar following MaterialTheme.colorScheme
             item {
                 Box(modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)) {
                     Row(
@@ -199,14 +179,15 @@ fun OptionsScreen(
                             .fillMaxWidth()
                             .height(48.dp)
                             .clip(RoundedCornerShape(24.dp))
-                            .background(SearchBarBg)
+                            .background(MaterialTheme.colorScheme.surface)
+                            .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.45f), RoundedCornerShape(24.dp))
                             .padding(horizontal = 16.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Icon(
                             imageVector = Icons.Default.Search,
                             contentDescription = "Search",
-                            tint = SearchBarText,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.size(20.dp)
                         )
                         Spacer(modifier = Modifier.width(10.dp))
@@ -216,7 +197,7 @@ fun OptionsScreen(
                             placeholder = {
                                 Text(
                                     text = "Search Options & Performance Tweaks",
-                                    color = SearchBarText,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     fontSize = 14.sp
                                 )
                             },
@@ -229,8 +210,8 @@ fun OptionsScreen(
                                 unfocusedContainerColor = Color.Transparent,
                                 focusedBorderColor = Color.Transparent,
                                 unfocusedBorderColor = Color.Transparent,
-                                focusedTextColor = Color.White,
-                                unfocusedTextColor = Color.White
+                                focusedTextColor = MaterialTheme.colorScheme.onSurface,
+                                unfocusedTextColor = MaterialTheme.colorScheme.onSurface
                             )
                         )
                     }
@@ -245,8 +226,8 @@ fun OptionsScreen(
                             .fillMaxWidth()
                             .padding(horizontal = 16.dp, vertical = 4.dp)
                             .clip(RoundedCornerShape(12.dp))
-                            .background(Color(0xFF003D47))
-                            .border(1.dp, BoostActiveCyan.copy(alpha = 0.6f), RoundedCornerShape(12.dp))
+                            .background(HubBlue.copy(alpha = 0.14f))
+                            .border(1.dp, HubBlue.copy(alpha = 0.5f), RoundedCornerShape(12.dp))
                             .padding(12.dp)
                     ) {
                         Row(
@@ -256,8 +237,9 @@ fun OptionsScreen(
                         ) {
                             Text(
                                 text = boostFeedback ?: "",
-                                color = BoostActiveCyan,
+                                color = MaterialTheme.colorScheme.onSurface,
                                 fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold,
                                 modifier = Modifier.weight(1f)
                             )
                             IconButton(
@@ -267,7 +249,7 @@ fun OptionsScreen(
                                 Icon(
                                     imageVector = Icons.Default.Close,
                                     contentDescription = "Close",
-                                    tint = BoostActiveCyan,
+                                    tint = HubBlue,
                                     modifier = Modifier.size(16.dp)
                                 )
                             }
@@ -276,7 +258,7 @@ fun OptionsScreen(
                 }
             }
 
-            // 2. Featured Horizontal Carousel Banner (matches top card in reference screenshot)
+            // 2. Featured Horizontal Carousel Banner
             if (searchQuery.isBlank()) {
                 item {
                     Spacer(modifier = Modifier.height(10.dp))
@@ -311,7 +293,10 @@ fun OptionsScreen(
                                         .padding(horizontal = 3.dp)
                                         .size(width = if (isSelected) 18.dp else 6.dp, height = 6.dp)
                                         .clip(CircleShape)
-                                        .background(if (isSelected) Color.White else Color(0xFF374151))
+                                        .background(
+                                            if (isSelected) HubBlue
+                                            else MaterialTheme.colorScheme.outline
+                                        )
                                 )
                             }
                         }
@@ -323,8 +308,8 @@ fun OptionsScreen(
             if (searchQuery.isNotBlank()) {
                 val matches = allOptions.filter {
                     it.title.contains(searchQuery, ignoreCase = true) ||
-                            it.tags.contains(searchQuery, ignoreCase = true) ||
-                            it.description.contains(searchQuery, ignoreCase = true)
+                        it.tags.contains(searchQuery, ignoreCase = true) ||
+                        it.description.contains(searchQuery, ignoreCase = true)
                 }
 
                 item {
@@ -333,14 +318,14 @@ fun OptionsScreen(
                         text = "Search Results (${matches.size})",
                         style = MaterialTheme.typography.titleMedium.copy(
                             fontWeight = FontWeight.Bold,
-                            color = Color.White
+                            color = MaterialTheme.colorScheme.onBackground
                         ),
                         modifier = Modifier.padding(horizontal = 16.dp)
                     )
                     Spacer(modifier = Modifier.height(8.dp))
                 }
 
-                items(matches, key = { it.id }) { option ->
+                items(matches, key = { "search_${it.id}" }) { option ->
                     PerformanceOptionRow(
                         option = option,
                         isApplied = appliedOptionIds.contains(option.id),
@@ -352,7 +337,7 @@ fun OptionsScreen(
                         }
                     )
                     Box(modifier = Modifier.padding(horizontal = 16.dp)) {
-                        Divider(color = DividerColor, thickness = 0.8.dp)
+                        Divider(color = dividerColor, thickness = 0.8.dp)
                     }
                 }
             } else {
@@ -377,7 +362,7 @@ fun OptionsScreen(
                         text = "Most Popular Tweaks",
                         style = MaterialTheme.typography.titleLarge.copy(
                             fontWeight = FontWeight.Bold,
-                            color = Color.White,
+                            color = MaterialTheme.colorScheme.onBackground,
                             fontSize = 20.sp
                         ),
                         modifier = Modifier.padding(horizontal = 16.dp)
@@ -385,7 +370,7 @@ fun OptionsScreen(
                     Spacer(modifier = Modifier.height(10.dp))
                 }
 
-                items(popularTweaks, key = { it.id }) { option ->
+                items(popularTweaks, key = { "pop_${it.id}" }) { option ->
                     PerformanceOptionRow(
                         option = option,
                         isApplied = appliedOptionIds.contains(option.id),
@@ -397,18 +382,18 @@ fun OptionsScreen(
                         }
                     )
                     Box(modifier = Modifier.padding(horizontal = 16.dp)) {
-                        Divider(color = DividerColor, thickness = 0.8.dp)
+                        Divider(color = dividerColor, thickness = 0.8.dp)
                     }
                 }
 
-                // 2. Section: Hardware & Kernel Governors
+                // 4. Section: Hardware & Kernel Governors
                 item {
                     Spacer(modifier = Modifier.height(24.dp))
                     Text(
                         text = "Hardware & Kernel Governors",
                         style = MaterialTheme.typography.titleLarge.copy(
                             fontWeight = FontWeight.Bold,
-                            color = Color.White,
+                            color = MaterialTheme.colorScheme.onBackground,
                             fontSize = 20.sp
                         ),
                         modifier = Modifier.padding(horizontal = 16.dp)
@@ -416,7 +401,7 @@ fun OptionsScreen(
                     Spacer(modifier = Modifier.height(10.dp))
                 }
 
-                items(directHardwareTweaks, key = { it.id }) { option ->
+                items(directHardwareTweaks, key = { "hw_${it.id}" }) { option ->
                     PerformanceOptionRow(
                         option = option,
                         isApplied = appliedOptionIds.contains(option.id),
@@ -428,18 +413,18 @@ fun OptionsScreen(
                         }
                     )
                     Box(modifier = Modifier.padding(horizontal = 16.dp)) {
-                        Divider(color = DividerColor, thickness = 0.8.dp)
+                        Divider(color = dividerColor, thickness = 0.8.dp)
                     }
                 }
 
-                // 3. Section: System Latency & Compilers
+                // 5. Section: System Latency & Compilers
                 item {
                     Spacer(modifier = Modifier.height(24.dp))
                     Text(
                         text = "System Latency & Compilers",
                         style = MaterialTheme.typography.titleLarge.copy(
                             fontWeight = FontWeight.Bold,
-                            color = Color.White,
+                            color = MaterialTheme.colorScheme.onBackground,
                             fontSize = 20.sp
                         ),
                         modifier = Modifier.padding(horizontal = 16.dp)
@@ -452,7 +437,7 @@ fun OptionsScreen(
                     Spacer(modifier = Modifier.height(10.dp))
                 }
 
-                items(secureSettingsTweaks, key = { it.id }) { option ->
+                items(secureSettingsTweaks, key = { "sec_${it.id}" }) { option ->
                     PerformanceOptionRow(
                         option = option,
                         isApplied = appliedOptionIds.contains(option.id),
@@ -464,26 +449,26 @@ fun OptionsScreen(
                         }
                     )
                     Box(modifier = Modifier.padding(horizontal = 16.dp)) {
-                        Divider(color = DividerColor, thickness = 0.8.dp)
+                        Divider(color = dividerColor, thickness = 0.8.dp)
                     }
                 }
             }
         }
 
-        // 3. Option Action & Detail Modal Bottom Sheet
+        // Option Action & Detail Modal Bottom Sheet
         selectedOptionForModal?.let { option ->
             val isApplied = appliedOptionIds.contains(option.id)
             ModalBottomSheet(
                 onDismissRequest = { selectedOptionForModal = null },
                 sheetState = sheetState,
-                containerColor = Color(0xFF141824),
+                containerColor = MaterialTheme.colorScheme.surface,
                 dragHandle = {
                     Box(
                         modifier = Modifier
                             .padding(vertical = 10.dp)
                             .size(width = 40.dp, height = 4.dp)
                             .clip(CircleShape)
-                            .background(Color(0xFF374151))
+                            .background(MaterialTheme.colorScheme.outline)
                     )
                 }
             ) {
@@ -509,7 +494,7 @@ fun OptionsScreen(
             }
         }
 
-        // 4. Pre-Activation Warning & Details Dialog
+        // Pre-Activation Warning & Details Dialog
         pendingOptionToActivate?.let { opt ->
             ActivationWarningDialog(
                 optionTitle = opt.title,
@@ -567,10 +552,17 @@ fun FeaturedHeroCard(
             .clip(RoundedCornerShape(16.dp))
             .background(
                 Brush.linearGradient(
-                    colors = listOf(Color(0xFF232938), Color(0xFF151922))
+                    colors = listOf(
+                        MaterialTheme.colorScheme.surface,
+                        MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.85f)
+                    )
                 )
             )
-            .border(1.dp, Color(0xFF2C3446), RoundedCornerShape(16.dp))
+            .border(
+                1.dp,
+                if (isApplied) LaunchGreen.copy(alpha = 0.6f) else HubBlue.copy(alpha = 0.4f),
+                RoundedCornerShape(16.dp)
+            )
             .alpha(if (isSupported) 1f else 0.55f)
             .clickable { onActionClick() }
             .padding(16.dp)
@@ -579,7 +571,7 @@ fun FeaturedHeroCard(
         Icon(
             imageVector = getIconForType(option.iconType),
             contentDescription = null,
-            tint = Color(0x15FFFFFF),
+            tint = HubBlue.copy(alpha = 0.12f),
             modifier = Modifier
                 .size(110.dp)
                 .align(Alignment.CenterEnd)
@@ -596,13 +588,13 @@ fun FeaturedHeroCard(
                     Box(
                         modifier = Modifier
                             .clip(RoundedCornerShape(4.dp))
-                            .background(BoostBlue.copy(alpha = 0.3f))
+                            .background(HubBlue.copy(alpha = 0.16f))
                             .padding(horizontal = 6.dp, vertical = 2.dp)
                     ) {
                         Text(
                             text = option.category.uppercase(),
                             style = MaterialTheme.typography.labelSmall.copy(
-                                color = BoostActiveCyan,
+                                color = HubBlue,
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 10.sp
                             )
@@ -614,13 +606,13 @@ fun FeaturedHeroCard(
                         Box(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(4.dp))
-                                .background(Color(0xFF451A1A))
+                                .background(Color(0xFFEF4444).copy(alpha = 0.15f))
                                 .padding(horizontal = 6.dp, vertical = 2.dp)
                         ) {
                             Text(
                                 text = "UNSUPPORTED",
                                 style = MaterialTheme.typography.labelSmall.copy(
-                                    color = Color(0xFFF87171),
+                                    color = Color(0xFFEF4444),
                                     fontWeight = FontWeight.Bold,
                                     fontSize = 9.sp
                                 )
@@ -634,7 +626,7 @@ fun FeaturedHeroCard(
                     text = option.title,
                     style = MaterialTheme.typography.titleMedium.copy(
                         fontWeight = FontWeight.Bold,
-                        color = Color.White
+                        color = MaterialTheme.colorScheme.onSurface
                     ),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
@@ -643,7 +635,7 @@ fun FeaturedHeroCard(
                 Text(
                     text = if (!isSupported && option.unsupportedReason != null) "Requires: ${option.unsupportedReason}" else option.description,
                     style = MaterialTheme.typography.bodySmall.copy(
-                        color = if (!isSupported) Color(0xFFFCA5A5) else Color(0xFF9CA3AF),
+                        color = if (!isSupported) Color(0xFFEF4444) else MaterialTheme.colorScheme.onSurfaceVariant,
                         fontSize = 12.sp
                     ),
                     maxLines = 2,
@@ -652,18 +644,25 @@ fun FeaturedHeroCard(
             }
         }
 
-        // Pill button matching "Discover" in screenshot
         Button(
             onClick = onActionClick,
             enabled = isSupported,
             colors = ButtonDefaults.buttonColors(
-                containerColor = if (!isSupported) Color(0xFF1E2536) else if (isApplied) Color(0xFF003844) else Color(0x22FFFFFF),
-                contentColor = if (!isSupported) Color(0xFF6B7280) else if (isApplied) BoostActiveCyan else Color.White,
-                disabledContainerColor = Color(0xFF1A1F2C),
-                disabledContentColor = Color(0xFF4B5563)
+                containerColor = when {
+                    !isSupported -> MaterialTheme.colorScheme.surfaceVariant
+                    isApplied -> LaunchGreen.copy(alpha = 0.18f)
+                    else -> HubBlue
+                },
+                contentColor = when {
+                    !isSupported -> MaterialTheme.colorScheme.onSurfaceVariant
+                    isApplied -> LaunchGreen
+                    else -> Color.White
+                },
+                disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant
             ),
             shape = RoundedCornerShape(20.dp),
-            border = if (!isSupported) null else if (isApplied) androidx.compose.foundation.BorderStroke(1.dp, BoostActiveCyan) else androidx.compose.foundation.BorderStroke(1.dp, Color(0x44FFFFFF)),
+            border = if (!isSupported) null else if (isApplied) androidx.compose.foundation.BorderStroke(1.dp, LaunchGreen) else null,
             modifier = Modifier
                 .align(Alignment.BottomEnd)
                 .height(34.dp)
@@ -700,7 +699,6 @@ fun PerformanceOptionRow(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier.weight(1f)
         ) {
-            // Ribbon Rank Badge (1, 2, 3) as seen in screenshot
             option.rank?.let { rankNum ->
                 val ribbonColor = when (rankNum) {
                     1 -> RankGold
@@ -726,13 +724,12 @@ fun PerformanceOptionRow(
                 Spacer(modifier = Modifier.width(8.dp))
             }
 
-            // Title & Tags / Unsupported reason
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = option.title,
                     style = MaterialTheme.typography.titleSmall.copy(
                         fontWeight = FontWeight.Bold,
-                        color = Color.White
+                        color = MaterialTheme.colorScheme.onSurface
                     ),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
@@ -742,7 +739,7 @@ fun PerformanceOptionRow(
                     Text(
                         text = "Unavailable: ${option.unsupportedReason}",
                         style = MaterialTheme.typography.bodySmall.copy(
-                            color = Color(0xFFF87171),
+                            color = Color(0xFFEF4444),
                             fontSize = 11.sp,
                             fontWeight = FontWeight.SemiBold
                         ),
@@ -753,7 +750,7 @@ fun PerformanceOptionRow(
                     Text(
                         text = option.tags,
                         style = MaterialTheme.typography.bodySmall.copy(
-                            color = Color(0xFF818C9E),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                             fontSize = 12.sp
                         ),
                         maxLines = 1,
@@ -765,24 +762,24 @@ fun PerformanceOptionRow(
 
         Spacer(modifier = Modifier.width(12.dp))
 
-        // Right Pill Button: "Boost" or "Active" or "N/A"
         Button(
             onClick = onBoostClick,
             enabled = isSupported,
             colors = ButtonDefaults.buttonColors(
                 containerColor = when {
-                    !isSupported -> Color(0xFF1E2536)
-                    isApplied -> Color(0xFF003844)
-                    else -> BoostBlue
+                    !isSupported -> MaterialTheme.colorScheme.surfaceVariant
+                    isApplied -> LaunchGreen.copy(alpha = 0.16f)
+                    else -> HubBlue
                 },
                 contentColor = when {
-                    !isSupported -> Color(0xFF6B7280)
-                    isApplied -> BoostActiveCyan
+                    !isSupported -> MaterialTheme.colorScheme.onSurfaceVariant
+                    isApplied -> LaunchGreen
                     else -> Color.White
                 },
-                disabledContainerColor = Color(0xFF1A1F2C),
-                disabledContentColor = Color(0xFF4B5563)
+                disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant
             ),
+            border = if (isApplied && isSupported) androidx.compose.foundation.BorderStroke(1.dp, LaunchGreen) else null,
             shape = RoundedCornerShape(20.dp),
             modifier = Modifier
                 .height(34.dp)
@@ -813,8 +810,8 @@ fun OptionDetailModal(
     val context = LocalContext.current
     val isSupported = option.isSupported
     val requiresDevMode = option.actionType == OptionActionType.DIRECT_SECURE_SETTINGS_ANIMATIONS ||
-            option.actionType == OptionActionType.DIRECT_SECURE_SETTINGS_DNS ||
-            option.tags.contains("Developer", ignoreCase = true)
+        option.actionType == OptionActionType.DIRECT_SECURE_SETTINGS_DNS ||
+        option.tags.contains("Developer", ignoreCase = true)
 
     Column(
         modifier = Modifier
@@ -822,7 +819,6 @@ fun OptionDetailModal(
             .padding(horizontal = 20.dp, vertical = 12.dp)
             .padding(bottom = 32.dp)
     ) {
-        // Top Header
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -833,64 +829,69 @@ fun OptionDetailModal(
                     text = option.title,
                     style = MaterialTheme.typography.titleMedium.copy(
                         fontWeight = FontWeight.Bold,
-                        color = Color.White
+                        color = MaterialTheme.colorScheme.onSurface
                     ),
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis
                 )
                 Text(
                     text = option.category,
-                    style = MaterialTheme.typography.labelSmall.copy(color = Color(0xFF818C9E))
+                    style = MaterialTheme.typography.labelSmall.copy(color = MaterialTheme.colorScheme.onSurfaceVariant)
                 )
             }
 
             IconButton(onClick = onDismiss) {
-                Icon(imageVector = Icons.Default.Close, contentDescription = "Close", tint = Color.White)
+                Icon(
+                    imageVector = Icons.Default.Close,
+                    contentDescription = "Close",
+                    tint = MaterialTheme.colorScheme.onSurface
+                )
             }
         }
 
         Spacer(modifier = Modifier.height(16.dp))
 
-
-
-        // Developer Mode Tutorial prompt button for tweaks requiring developer options
         if (requiresDevMode) {
             Button(
                 onClick = onOpenDevTutorial,
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1B2438)),
-                border = androidx.compose.foundation.BorderStroke(1.dp, BoostActiveCyan),
+                colors = ButtonDefaults.buttonColors(containerColor = HubBlue.copy(alpha = 0.14f)),
+                border = androidx.compose.foundation.BorderStroke(1.dp, HubBlue),
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(48.dp),
                 shape = RoundedCornerShape(12.dp)
             ) {
-                Icon(imageVector = Icons.Default.DeveloperMode, contentDescription = null, tint = BoostActiveCyan, modifier = Modifier.size(18.dp))
+                Icon(
+                    imageVector = Icons.Default.DeveloperMode,
+                    contentDescription = null,
+                    tint = HubBlue,
+                    modifier = Modifier.size(18.dp)
+                )
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
                     text = "Developer Mode 4-Step Tutorial",
                     fontWeight = FontWeight.Bold,
                     fontSize = 13.sp,
-                    color = BoostActiveCyan
+                    color = HubBlue
                 )
             }
             Spacer(modifier = Modifier.height(14.dp))
         }
 
-        // Device Support Banner if not supported
         if (!isSupported) {
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(10.dp))
-                    .background(Color(0xFF331414))
-                    .border(1.dp, Color(0xFF7F1D1D), RoundedCornerShape(10.dp))
+                    .background(Color(0xFFEF4444).copy(alpha = 0.14f))
+                    .border(1.dp, Color(0xFFEF4444).copy(alpha = 0.5f), RoundedCornerShape(10.dp))
                     .padding(12.dp)
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(
                         imageVector = Icons.Default.Warning,
                         contentDescription = null,
-                        tint = Color(0xFFF87171),
+                        tint = Color(0xFFEF4444),
                         modifier = Modifier.size(20.dp)
                     )
                     Spacer(modifier = Modifier.width(10.dp))
@@ -898,14 +899,14 @@ fun OptionDetailModal(
                         Text(
                             text = "Not Supported on This Phone",
                             style = MaterialTheme.typography.labelMedium.copy(
-                                color = Color(0xFFF87171),
+                                color = Color(0xFFEF4444),
                                 fontWeight = FontWeight.Bold
                             )
                         )
                         Text(
                             text = option.unsupportedReason ?: "Required hardware or Android API is absent on this device.",
                             style = MaterialTheme.typography.bodySmall.copy(
-                                color = Color(0xFFFCA5A5),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 fontSize = 11.sp
                             )
                         )
@@ -915,20 +916,18 @@ fun OptionDetailModal(
             Spacer(modifier = Modifier.height(12.dp))
         }
 
-        // Description
         Text(
             text = option.description,
-            style = MaterialTheme.typography.bodyMedium.copy(color = Color(0xFFD1D5DB))
+            style = MaterialTheme.typography.bodyMedium.copy(color = MaterialTheme.colorScheme.onSurfaceVariant)
         )
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        // Status Card
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(12.dp))
-                .background(Color(0xFF1E2433))
+                .background(MaterialTheme.colorScheme.surfaceVariant)
                 .padding(14.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
@@ -936,11 +935,16 @@ fun OptionDetailModal(
             Column {
                 Text(
                     text = "Applied on Phone",
-                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold, color = Color.White)
+                    style = MaterialTheme.typography.bodyMedium.copy(
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
                 )
                 Text(
                     text = if (isApplied) "Option marked as active on this device" else "Not yet enabled",
-                    style = MaterialTheme.typography.labelSmall.copy(color = if (isApplied) BoostActiveCyan else Color(0xFF9CA3AF))
+                    style = MaterialTheme.typography.labelSmall.copy(
+                        color = if (isApplied) LaunchGreen else MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 )
             }
             Switch(
@@ -949,18 +953,17 @@ fun OptionDetailModal(
                 onCheckedChange = { onToggleApplied() },
                 colors = SwitchDefaults.colors(
                     checkedThumbColor = Color.White,
-                    checkedTrackColor = BoostBlue
+                    checkedTrackColor = HubBlue
                 )
             )
         }
 
         Spacer(modifier = Modifier.height(14.dp))
 
-        // Open Direct System Settings Button if applicable
         if (option.actionType != OptionActionType.ADB_ONLY_COMMAND) {
             Button(
                 onClick = onOpenSettings,
-                colors = ButtonDefaults.buttonColors(containerColor = BoostBlue),
+                colors = ButtonDefaults.buttonColors(containerColor = HubBlue, contentColor = Color.White),
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(48.dp),
@@ -976,20 +979,22 @@ fun OptionDetailModal(
             }
         }
 
-        // ADB Command snippet if available
         option.adbCommand?.let { adbCmd ->
             Spacer(modifier = Modifier.height(12.dp))
             Text(
-                text = "ADB / Shizuku Command (Power Users)",
-                style = MaterialTheme.typography.labelSmall.copy(color = Color(0xFF818C9E), fontWeight = FontWeight.Bold)
+                text = "ADB Command (Power Users)",
+                style = MaterialTheme.typography.labelSmall.copy(
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontWeight = FontWeight.Bold
+                )
             )
             Spacer(modifier = Modifier.height(6.dp))
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(8.dp))
-                    .background(Color(0xFF070A12))
-                    .border(1.dp, Color(0xFF1F2636), RoundedCornerShape(8.dp))
+                    .background(MaterialTheme.colorScheme.surfaceVariant)
+                    .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.45f), RoundedCornerShape(8.dp))
                     .padding(10.dp)
             ) {
                 Row(
@@ -1001,7 +1006,7 @@ fun OptionDetailModal(
                         text = adbCmd,
                         style = MaterialTheme.typography.bodySmall.copy(
                             fontFamily = FontFamily.Monospace,
-                            color = BoostActiveCyan,
+                            color = HubBlue,
                             fontSize = 11.sp
                         ),
                         modifier = Modifier.weight(1f)
@@ -1012,7 +1017,12 @@ fun OptionDetailModal(
                         },
                         modifier = Modifier.size(32.dp)
                     ) {
-                        Icon(imageVector = Icons.Default.ContentCopy, contentDescription = "Copy", tint = BoostActiveCyan, modifier = Modifier.size(16.dp))
+                        Icon(
+                            imageVector = Icons.Default.ContentCopy,
+                            contentDescription = "Copy",
+                            tint = HubBlue,
+                            modifier = Modifier.size(16.dp)
+                        )
                     }
                 }
             }
@@ -1061,34 +1071,6 @@ fun getIconForType(type: OptionIconType): ImageVector {
     }
 }
 
-fun getIconContainerColor(type: OptionIconType): Color {
-    return when (type) {
-        OptionIconType.REFRESH_RATE -> Color(0xFF1E2D4A)
-        OptionIconType.DND_FOCUS -> Color(0xFF381E2E)
-        OptionIconType.RAM_CLEAN -> Color(0xFF1E383A)
-        OptionIconType.WIFI_5G, OptionIconType.WIFI_LOW_LATENCY -> Color(0xFF1C3224)
-        OptionIconType.THERMAL_HEADROOM -> Color(0xFF3D2518)
-        OptionIconType.GAMEPAD_CONTROLLER, OptionIconType.CROSSHAIR_HUD -> Color(0xFF291F44)
-        OptionIconType.SUSTAINED_PERFORMANCE -> Color(0xFF3D1E1E)
-        OptionIconType.THREAD_PRIORITY -> Color(0xFF1E293B)
-        else -> Color(0xFF1E2536)
-    }
-}
-
-fun getIconTintColor(type: OptionIconType): Color {
-    return when (type) {
-        OptionIconType.REFRESH_RATE -> Color(0xFF60A5FA)
-        OptionIconType.DND_FOCUS -> Color(0xFFF43F5E)
-        OptionIconType.RAM_CLEAN -> Color(0xFF2DD4BF)
-        OptionIconType.WIFI_5G, OptionIconType.WIFI_LOW_LATENCY -> Color(0xFF4ADE80)
-        OptionIconType.THERMAL_HEADROOM -> Color(0xFFFB923C)
-        OptionIconType.GAMEPAD_CONTROLLER, OptionIconType.CROSSHAIR_HUD -> Color(0xFFA78BFA)
-        OptionIconType.SUSTAINED_PERFORMANCE -> Color(0xFFEF4444)
-        OptionIconType.THREAD_PRIORITY -> Color(0xFF38BDF8)
-        else -> Color(0xFF93C5FD)
-    }
-}
-
 @Composable
 fun ActivationWarningDialog(
     optionTitle: String,
@@ -1112,7 +1094,7 @@ fun ActivationWarningDialog(
                     text = "Performance Notice",
                     style = MaterialTheme.typography.titleMedium.copy(
                         fontWeight = FontWeight.Bold,
-                        color = Color.White
+                        color = MaterialTheme.colorScheme.onSurface
                     )
                 )
             }
@@ -1122,7 +1104,7 @@ fun ActivationWarningDialog(
                 Text(
                     text = "Before activating \"$optionTitle\", note the following trade-offs:",
                     style = MaterialTheme.typography.bodyMedium.copy(
-                        color = Color(0xFFD1D5DB),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                         fontWeight = FontWeight.SemiBold
                     )
                 )
@@ -1131,14 +1113,14 @@ fun ActivationWarningDialog(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(10.dp))
-                        .background(Color(0xFF241A12))
-                        .border(1.dp, Color(0xFF92400E), RoundedCornerShape(10.dp))
+                        .background(Color(0xFFF59E0B).copy(alpha = 0.14f))
+                        .border(1.dp, Color(0xFFF59E0B).copy(alpha = 0.45f), RoundedCornerShape(10.dp))
                         .padding(12.dp)
                 ) {
                     Text(
                         text = "• Online games might see this as cheating.\n• Your phone might heat up under sustained boost.\n• System loses some animations to perform better.",
                         style = MaterialTheme.typography.bodySmall.copy(
-                            color = Color(0xFFFDE68A),
+                            color = MaterialTheme.colorScheme.onSurface,
                             fontSize = 12.sp,
                             lineHeight = 18.sp
                         )
@@ -1157,8 +1139,8 @@ fun ActivationWarningDialog(
                         checked = dontAskAgain,
                         onCheckedChange = { dontAskAgain = it },
                         colors = CheckboxDefaults.colors(
-                            checkedColor = Color(0xFF3B82F6),
-                            uncheckedColor = Color(0xFF9CA3AF),
+                            checkedColor = HubBlue,
+                            uncheckedColor = MaterialTheme.colorScheme.onSurfaceVariant,
                             checkmarkColor = Color.White
                         )
                     )
@@ -1166,7 +1148,7 @@ fun ActivationWarningDialog(
                     Text(
                         text = "Do not ask again",
                         style = MaterialTheme.typography.bodySmall.copy(
-                            color = Color.White,
+                            color = MaterialTheme.colorScheme.onSurface,
                             fontWeight = FontWeight.Medium
                         )
                     )
@@ -1176,7 +1158,7 @@ fun ActivationWarningDialog(
         confirmButton = {
             Button(
                 onClick = { onConfirm(dontAskAgain) },
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2563EB)),
+                colors = ButtonDefaults.buttonColors(containerColor = HubBlue, contentColor = Color.White),
                 shape = RoundedCornerShape(8.dp)
             ) {
                 Text("Proceed & Activate", fontWeight = FontWeight.Bold)
@@ -1187,10 +1169,10 @@ fun ActivationWarningDialog(
                 onClick = onDismiss,
                 shape = RoundedCornerShape(8.dp)
             ) {
-                Text("Cancel", color = Color(0xFF9CA3AF))
+                Text("Cancel", color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         },
-        containerColor = Color(0xFF131826),
+        containerColor = MaterialTheme.colorScheme.surface,
         shape = RoundedCornerShape(16.dp)
     )
 }

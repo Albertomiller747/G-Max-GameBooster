@@ -67,11 +67,16 @@ fun CyberCard(
     borderColor: Color = DarkSurfaceBorder,
     content: @Composable () -> Unit
 ) {
+    val effectiveBorder = if (borderColor == DarkSurfaceBorder) {
+        MaterialTheme.colorScheme.outline
+    } else {
+        borderColor
+    }
     Card(
         modifier = modifier
             .fillMaxWidth()
-            .border(1.dp, borderColor, RoundedCornerShape(16.dp)),
-        colors = CardDefaults.cardColors(containerColor = DarkSurface),
+            .border(1.dp, effectiveBorder, RoundedCornerShape(16.dp)),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         shape = RoundedCornerShape(16.dp),
         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
     ) {
@@ -100,7 +105,7 @@ fun SectionTitle(
                 style = MaterialTheme.typography.titleMedium.copy(
                     fontWeight = FontWeight.Bold,
                     letterSpacing = 0.5.sp,
-                    color = TextPrimary
+                    color = MaterialTheme.colorScheme.onSurface
                 )
             )
             badge?.let {
@@ -126,7 +131,7 @@ fun SectionTitle(
             Spacer(modifier = Modifier.height(2.dp))
             Text(
                 text = it,
-                style = MaterialTheme.typography.bodySmall.copy(color = TextSecondary)
+                style = MaterialTheme.typography.bodySmall.copy(color = MaterialTheme.colorScheme.onSurfaceVariant)
             )
         }
     }
@@ -144,8 +149,8 @@ fun MetricGauge(
 ) {
     Card(
         modifier = modifier
-            .border(1.dp, DarkSurfaceBorder, RoundedCornerShape(14.dp)),
-        colors = CardDefaults.cardColors(containerColor = DarkSurfaceVariant),
+            .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(14.dp)),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
         shape = RoundedCornerShape(14.dp)
     ) {
         Column(modifier = Modifier.padding(12.dp)) {
@@ -165,7 +170,7 @@ fun MetricGauge(
                     Text(
                         text = label,
                         style = MaterialTheme.typography.labelMedium.copy(
-                            color = TextSecondary,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                             fontWeight = FontWeight.Medium
                         )
                     )
@@ -173,7 +178,7 @@ fun MetricGauge(
                 Text(
                     text = value,
                     style = MaterialTheme.typography.titleSmall.copy(
-                        color = TextPrimary,
+                        color = MaterialTheme.colorScheme.onSurface,
                         fontWeight = FontWeight.Bold
                     )
                 )
@@ -185,7 +190,7 @@ fun MetricGauge(
                     .fillMaxWidth()
                     .height(6.dp)
                     .clip(RoundedCornerShape(3.dp))
-                    .background(Color(0xFF0F1524))
+                    .background(MaterialTheme.colorScheme.outline.copy(alpha = 0.4f))
             ) {
                 Box(
                     modifier = Modifier
@@ -199,7 +204,7 @@ fun MetricGauge(
             Text(
                 text = subValue,
                 style = MaterialTheme.typography.labelSmall.copy(
-                    color = TextMuted,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     fontSize = 11.sp
                 )
             )

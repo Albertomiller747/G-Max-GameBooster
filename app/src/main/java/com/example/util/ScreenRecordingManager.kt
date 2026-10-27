@@ -2,15 +2,22 @@ package com.example.util
 
 import android.content.ContentUris
 import android.content.Context
+import android.content.Intent
 import android.content.SharedPreferences
 import android.net.Uri
 import android.os.Build
 import android.provider.MediaStore
 import android.view.WindowManager
+import com.example.model.CapturedScreenshot
+import com.example.model.GameMediaGroup
 import com.example.model.RecordedVideo
 import com.example.model.ResolutionPreset
 import com.example.model.VideoQualitySettings
+import org.json.JSONObject
 import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 object ScreenRecordingManager {
 
@@ -23,7 +30,11 @@ object ScreenRecordingManager {
     private const val KEY_RECORD_MIC = "rec_mic"
     private const val KEY_SHOW_TIMER_HUD = "rec_show_timer_hud"
     private const val KEY_OVERLAY_ENABLED = "rec_overlay_enabled"
+    private const val KEY_BUBBLE_SIZE_DP = "rec_bubble_size_dp"
     private const val KEY_PERMISSION_ASKED = "rec_permissions_asked_once"
+    private const val KEY_ACTIVE_GAME_PKG = "rec_active_game_pkg"
+    private const val KEY_ACTIVE_GAME_NAME = "rec_active_game_name"
+    private const val KEY_MEDIA_GAME_TAGS_JSON = "rec_media_game_tags_json"
 
     // Master list of standard presets
     val ALL_PRESETS = listOf(
@@ -50,20 +61,210 @@ object ScreenRecordingManager {
     }
 
     /**
+     * Records the active game context so subsequent recordings and screenshots are automatically
+     * associated with that game.
+     */
+    fun setActiveGameContext(context: Context, packageName: String?, appName: String?) {
+        getPrefs(context).edit()
+            .putString(KEY_ACTIVE_GAME_PKG, packageName)
+            .putString(KEY_ACTIVE_GAME_NAME, appName)
+            .apply()
+    }
+
+    private fun getPublicMediaTagsFile(): File {
+        val docs = android.os.Environment.getExternalStoragePublicDirectory(
+            android.os.Environment.DIRECTORY_DOCUMENTS
+        )
+        val hubDir = File(docs, "GMaxHub")
+        if (!hubDir.exists()) hubDir.mkdirs()
+        return File(hubDir, "media_game_tags.json")
+    }
+
+    private fun saveMediaTagMapping(context: Context, fileName: String, gameName: String, gamePackage: String?) {
+        try {
+            val prefs = getPrefs(context)
+            var raw = prefs.getString(KEY_MEDIA_GAME_TAGS_JSON, null)
+            if (raw.isNullOrBlank()) {
+                val f = getPublicMediaTagsFile()
+                if (f.exists()) raw = f.readText()
+            }
+            val root = if (!raw.isNullOrBlank()) JSONObject(raw) else JSONObject()
+            val entry = JSONObject().apply {
+                put("gameName", gameName)
+                put("gamePackage", gamePackage ?: "")
+            }
+            root.put(fileName, entry)
+            val str = root.toString()
+            prefs.edit().putString(KEY_MEDIA_GAME_TAGS_JSON, str).apply()
+            try {
+                getPublicMediaTagsFile().writeText(str)
+            } catch (_: Exception) {}
+        } catch (_: Exception) {}
+    }
+
+    private fun sanitizeGameSlug(appName: String): String {
+        val cleaned = appName.replace(Regex("[^A-Za-z0-9]"), "")
+        return if (cleaned.isNotBlank()) cleaned.take(18) else "Gameplay"
+    }
+
+    /**
+     * Resolves the currently active or most recent game for tagging a new capture,
+     * returning Triple(gameSlug, gameName, gamePackage).
+     */
+    private fun resolveActiveGameForNewCapture(context: Context): Triple<String, String, String?> {
+        // 1. Check live foreground / recent game via GamePlayStatsHelper
+        val detected = GamePlayStatsHelper.resolveCurrentOrRecentGame(context)
+        if (detected != null) {
+            val (pkg, name) = detected
+            return Triple(sanitizeGameSlug(name), name, pkg)
+        }
+
+        // 2. Check saved active game in Recorder prefs
+        val prefs = getPrefs(context)
+        val savedPkg = prefs.getString(KEY_ACTIVE_GAME_PKG, null)
+        val savedName = prefs.getString(KEY_ACTIVE_GAME_NAME, null)
+        if (!savedName.isNullOrBlank()) {
+            return Triple(sanitizeGameSlug(savedName), savedName, savedPkg)
+        }
+
+        return Triple("General", "General Gameplay", null)
+    }
+
+    fun buildTaggedVideoFileName(context: Context): String {
+        val (slug, gameName, gamePkg) = resolveActiveGameForNewCapture(context)
+        val timeStamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
+        val fileName = "GMax_${slug}_${timeStamp}.mp4"
+        saveMediaTagMapping(context, fileName, gameName, gamePkg)
+        return fileName
+    }
+
+    fun buildTaggedScreenshotFileName(context: Context): String {
+        val (slug, gameName, gamePkg) = resolveActiveGameForNewCapture(context)
+        val timeStamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
+        val fileName = "GMax_Shot_${slug}_${timeStamp}.png"
+        saveMediaTagMapping(context, fileName, gameName, gamePkg)
+        return fileName
+    }
+
+    /**
+     * Resolves (gameName, gamePackage) for an existing video or screenshot file.
+     */
+    fun resolveGameForMediaFile(context: Context, fileName: String): Pair<String, String?> {
+        // 1. Check persisted JSON tag map
+        try {
+            val prefs = getPrefs(context)
+            var raw = prefs.getString(KEY_MEDIA_GAME_TAGS_JSON, null)
+            if (raw.isNullOrBlank()) {
+                val f = getPublicMediaTagsFile()
+                if (f.exists()) {
+                    raw = f.readText()
+                    if (!raw.isNullOrBlank()) {
+                        prefs.edit().putString(KEY_MEDIA_GAME_TAGS_JSON, raw).apply()
+                    }
+                }
+            }
+            if (!raw.isNullOrBlank()) {
+                val root = JSONObject(raw)
+                val obj = root.optJSONObject(fileName)
+                if (obj != null) {
+                    val gName = obj.optString("gameName", "")
+                    val gPkg = obj.optString("gamePackage", "").takeIf { it.isNotBlank() }
+                    if (gName.isNotBlank()) {
+                        return Pair(gName, gPkg)
+                    }
+                }
+            }
+        } catch (_: Exception) {}
+
+        // 2. Parse slug from filename: GMax_<Slug>_<yyyyMMdd>_<HHmmss>.mp4 or GMax_Shot_<Slug>_<yyyyMMdd>_<HHmmss>.png
+        val base = fileName.substringBeforeLast(".")
+        val parts = base.split("_")
+        val candidateSlug = when {
+            parts.size >= 4 && parts[0] == "GMax" && parts[1] == "Shot" && !parts[2].all { it.isDigit() } -> parts[2]
+            parts.size >= 3 && parts[0] == "GMax" && parts[1] != "Shot" && !parts[1].all { it.isDigit() } -> parts[1]
+            else -> null
+        }
+
+        if (!candidateSlug.isNullOrBlank() && !candidateSlug.equals("General", ignoreCase = true)) {
+            // Match slug against installed or library games for exact title and icon package
+            try {
+                val sessionMgr = BoosterSessionManager(context)
+                val libPkgs = sessionMgr.getLibraryGamePackages()
+                val pm = context.packageManager
+                for (pkg in libPkgs) {
+                    try {
+                        val info = pm.getApplicationInfo(pkg, 0)
+                        val label = pm.getApplicationLabel(info).toString()
+                        if (sanitizeGameSlug(label).equals(candidateSlug, ignoreCase = true)) {
+                            return Pair(label, pkg)
+                        }
+                    } catch (_: Exception) {}
+                }
+            } catch (_: Exception) {}
+
+            // Convert CamelCase slug back to spaced readable title
+            val readable = candidateSlug.replace(Regex("([a-z])([A-Z])"), "$1 $2")
+            return Pair(readable, null)
+        }
+
+        // 3. Fallback to last target game if available, else General Gameplay
+        val sessionMgr = BoosterSessionManager(context)
+        val (lastPkg, lastName) = sessionMgr.getLastTargetGame()
+        if (!lastName.isNullOrBlank()) {
+            return Pair(lastName, lastPkg)
+        }
+
+        return Pair("General Gameplay", null)
+    }
+
+    fun groupVideosByGame(videos: List<RecordedVideo>): List<GameMediaGroup<RecordedVideo>> {
+        if (videos.isEmpty()) return emptyList()
+        return videos
+            .groupBy { it.gameName }
+            .map { (gameName, list) ->
+                val pkg = list.firstNotNullOfOrNull { it.gamePackage }
+                GameMediaGroup(
+                    gameName = gameName,
+                    gamePackage = pkg,
+                    items = list.sortedByDescending { it.dateAddedSec }
+                )
+            }
+            .sortedWith(
+                compareBy<GameMediaGroup<RecordedVideo>> { it.gameName == "General Gameplay" }
+                    .thenByDescending { it.items.maxOfOrNull { v -> v.dateAddedSec } ?: 0L }
+            )
+    }
+
+    fun groupScreenshotsByGame(screenshots: List<CapturedScreenshot>): List<GameMediaGroup<CapturedScreenshot>> {
+        if (screenshots.isEmpty()) return emptyList()
+        return screenshots
+            .groupBy { it.gameName }
+            .map { (gameName, list) ->
+                val pkg = list.firstNotNullOfOrNull { it.gamePackage }
+                GameMediaGroup(
+                    gameName = gameName,
+                    gamePackage = pkg,
+                    items = list.sortedByDescending { it.dateAddedSec }
+                )
+            }
+            .sortedWith(
+                compareBy<GameMediaGroup<CapturedScreenshot>> { it.gameName == "General Gameplay" }
+                    .thenByDescending { it.items.maxOfOrNull { s -> s.dateAddedSec } ?: 0L }
+            )
+    }
+
+    /**
      * Determines which resolutions the device actually supports based on screen dimensions and hardware.
      * Only displays resolutions > 1080p if the physical display supports it.
      */
     fun getSupportedResolutions(context: Context): List<ResolutionPreset> {
-        val windowManager = context.getSystemService(Context.WINDOW_SERVICE) as? WindowManager
         val displayMetrics = context.resources.displayMetrics
         val maxScreenDimension = maxOf(displayMetrics.widthPixels, displayMetrics.heightPixels)
 
         return ALL_PRESETS.filter { preset ->
-            // Resolutions <= 1080p are always supported as scaled projections
             if (preset.width <= 1920 && preset.height <= 1080) {
                 true
             } else {
-                // Higher resolutions (> 1080p, like 1440p, 2K, 4K) only if physical display supports it
                 maxScreenDimension >= preset.width - 200
             }
         }
@@ -102,36 +303,32 @@ object ScreenRecordingManager {
             memInfo.totalMem / (1024 * 1024)
         } catch (_: Exception) { 4000L }
 
-        // Pick ideal resolution:
-        // High RAM (>= 6GB): 1080p (or 1440p if available)
-        // Mid RAM (3GB - 6GB): 1080p or 720p
-        // Budget (< 3GB): 720p or 540p
         val idealPreset = when {
-            totalRamMb >= 6000 && supportedResolutions.any { it.label == "1080p" } ->
+            totalRamMb >= 10000 && supportedResolutions.any { it.label == "4K" } ->
+                supportedResolutions.first { it.label == "4K" }
+            totalRamMb >= 7000 && supportedResolutions.any { it.label == "1440p" || it.label == "2K" } ->
+                supportedResolutions.first { it.label == "1440p" || it.label == "2K" }
+            totalRamMb >= 3500 && supportedResolutions.any { it.label == "1080p" } ->
                 supportedResolutions.first { it.label == "1080p" }
-            totalRamMb >= 3000 && supportedResolutions.any { it.label == "720p" } ->
-                supportedResolutions.first { it.label == "720p" }
             supportedResolutions.any { it.label == "720p" } ->
                 supportedResolutions.first { it.label == "720p" }
-            else -> supportedResolutions.firstOrNull() ?: ResolutionPreset("720p", 1280, 720)
+            else -> supportedResolutions.firstOrNull() ?: ResolutionPreset("1080p", 1920, 1080)
         }
 
-        // Pick ideal FPS:
-        // High RAM: 60 FPS
-        // Budget: 30 FPS
         val idealFps = when {
-            totalRamMb >= 4000 && supportedFps.contains(60) -> 60
+            totalRamMb >= 10000 && supportedFps.contains(120) -> 120
+            totalRamMb >= 7000 && supportedFps.contains(90) -> 90
+            totalRamMb >= 3500 && supportedFps.contains(60) -> 60
+            supportedFps.contains(60) -> 60
             supportedFps.contains(30) -> 30
             else -> 60
         }
 
-        // Bitrate without lag:
-        // 1080p: 8 Mbps
-        // 720p: 6 Mbps
-        // 480p/540p: 3 Mbps
-        val idealBitrate = when (idealPreset.height) {
-            in 1080..2160 -> 8
-            in 720..1079 -> 6
+        val idealBitrate = when {
+            idealPreset.height >= 2160 -> 16
+            idealPreset.height >= 1440 -> 12
+            idealPreset.height >= 1080 -> 8
+            idealPreset.height >= 720 -> 6
             else -> 4
         }
 
@@ -141,31 +338,28 @@ object ScreenRecordingManager {
             height = idealPreset.height,
             fps = idealFps,
             bitrateMbps = idealBitrate,
-            recordMic = true,
-            showTimerHud = true,
-            isOverlayEnabled = true
+            recordMic = false,
+            showTimerHud = false,
+            isOverlayEnabled = false
         )
     }
 
     fun loadSettings(context: Context): VideoQualitySettings {
         val prefs = getPrefs(context)
-        if (!prefs.contains(KEY_RESOLUTION_LABEL)) {
-            // First time load: use auto-configured ideal
-            val defaults = getAutoConfiguredIdealSettings(context)
-            saveSettings(context, defaults)
-            return defaults
-        }
+        val hasResolution = prefs.contains(KEY_RESOLUTION_LABEL)
+        val defaultIdeal = if (!hasResolution) getAutoConfiguredIdealSettings(context) else null
 
-        val resLabel = prefs.getString(KEY_RESOLUTION_LABEL, "1080p") ?: "1080p"
-        val width = prefs.getInt(KEY_RES_WIDTH, 1920)
-        val height = prefs.getInt(KEY_RES_HEIGHT, 1080)
-        val fps = prefs.getInt(KEY_FPS, 60)
-        val bitrate = prefs.getInt(KEY_BITRATE_MBPS, 8)
-        val mic = prefs.getBoolean(KEY_RECORD_MIC, true)
-        val showTimer = prefs.getBoolean(KEY_SHOW_TIMER_HUD, true)
+        val resLabel = prefs.getString(KEY_RESOLUTION_LABEL, defaultIdeal?.resolutionLabel ?: "1080p") ?: "1080p"
+        val width = prefs.getInt(KEY_RES_WIDTH, defaultIdeal?.width ?: 1920)
+        val height = prefs.getInt(KEY_RES_HEIGHT, defaultIdeal?.height ?: 1080)
+        val fps = prefs.getInt(KEY_FPS, defaultIdeal?.fps ?: 60)
+        val bitrate = prefs.getInt(KEY_BITRATE_MBPS, defaultIdeal?.bitrateMbps ?: 8)
+        val mic = prefs.getBoolean(KEY_RECORD_MIC, false)
+        val showTimer = prefs.getBoolean(KEY_SHOW_TIMER_HUD, false)
         val overlay = prefs.getBoolean(KEY_OVERLAY_ENABLED, false)
+        val bubbleSize = prefs.getInt(KEY_BUBBLE_SIZE_DP, 38).coerceIn(28, 64)
 
-        return VideoQualitySettings(
+        val settings = VideoQualitySettings(
             resolutionLabel = resLabel,
             width = width,
             height = height,
@@ -173,8 +367,13 @@ object ScreenRecordingManager {
             bitrateMbps = bitrate,
             recordMic = mic,
             showTimerHud = showTimer,
-            isOverlayEnabled = overlay
+            isOverlayEnabled = overlay,
+            bubbleSizeDp = bubbleSize
         )
+        if (!hasResolution) {
+            saveSettings(context, settings)
+        }
+        return settings
     }
 
     fun saveSettings(context: Context, settings: VideoQualitySettings) {
@@ -187,6 +386,7 @@ object ScreenRecordingManager {
             .putBoolean(KEY_RECORD_MIC, settings.recordMic)
             .putBoolean(KEY_SHOW_TIMER_HUD, settings.showTimerHud)
             .putBoolean(KEY_OVERLAY_ENABLED, settings.isOverlayEnabled)
+            .putInt(KEY_BUBBLE_SIZE_DP, settings.bubbleSizeDp.coerceIn(28, 64))
             .apply()
     }
 
@@ -195,7 +395,8 @@ object ScreenRecordingManager {
     }
 
     /**
-     * Queries past GMax screen recordings from device MediaStore Video table
+     * Queries past GMax screen recordings from device MediaStore Video table and public folders,
+     * automatically resolving the associated game for each video.
      */
     fun queryRecordedVideos(context: Context): List<RecordedVideo> {
         val list = mutableListOf<RecordedVideo>()
@@ -234,13 +435,13 @@ object ScreenRecordingManager {
                     val name = c.getString(nameCol) ?: "Recording"
                     val path = c.getString(dataCol) ?: ""
 
-                    // Filter to GMax recordings or videos in GMaxRecordings folder
                     if (name.startsWith("GMax_") || path.contains("GMaxRecordings") || path.contains("ScreenRecording")) {
                         val duration = c.getLong(durCol)
                         val size = c.getLong(sizeCol)
                         val date = c.getLong(dateCol)
                         val resolution = c.getString(resCol) ?: "HD"
                         val contentUri = ContentUris.withAppendedId(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, id)
+                        val (gameTitle, gamePkg) = resolveGameForMediaFile(context, name)
 
                         list.add(
                             RecordedVideo(
@@ -251,7 +452,9 @@ object ScreenRecordingManager {
                                 sizeBytes = size,
                                 dateAddedSec = date,
                                 resolution = resolution,
-                                filePath = path
+                                filePath = path,
+                                gameName = gameTitle,
+                                gamePackage = gamePkg
                             )
                         )
                     }
@@ -259,29 +462,37 @@ object ScreenRecordingManager {
             }
         } catch (_: Exception) {}
 
-        // Also check app-specific Movies/GMaxRecordings files in case MediaStore sync is delayed
-        try {
-            val moviesDir = File(context.getExternalFilesDir(android.os.Environment.DIRECTORY_MOVIES), "GMaxRecordings")
-            if (moviesDir.exists()) {
-                val files = moviesDir.listFiles { f -> f.extension.equals("mp4", ignoreCase = true) }
-                files?.forEach { file ->
-                    if (list.none { it.filePath == file.absolutePath }) {
-                        list.add(
-                            RecordedVideo(
-                                id = file.hashCode().toLong(),
-                                uriString = Uri.fromFile(file).toString(),
-                                title = file.name,
-                                durationMs = 0L,
-                                sizeBytes = file.length(),
-                                dateAddedSec = file.lastModified() / 1000,
-                                resolution = "HD",
-                                filePath = file.absolutePath
+        // Also check public Movies/GMaxRecordings and app-specific Movies/GMaxRecordings files
+        val candidateMovieDirs = listOfNotNull(
+            File(android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_MOVIES), "GMaxRecordings"),
+            context.getExternalFilesDir(android.os.Environment.DIRECTORY_MOVIES)?.let { File(it, "GMaxRecordings") }
+        )
+        for (moviesDir in candidateMovieDirs) {
+            try {
+                if (moviesDir.exists()) {
+                    val files = moviesDir.listFiles { f -> f.extension.equals("mp4", ignoreCase = true) }
+                    files?.forEach { file ->
+                        if (list.none { it.filePath == file.absolutePath || it.title == file.name }) {
+                            val (gameTitle, gamePkg) = resolveGameForMediaFile(context, file.name)
+                            list.add(
+                                RecordedVideo(
+                                    id = file.hashCode().toLong(),
+                                    uriString = Uri.fromFile(file).toString(),
+                                    title = file.name,
+                                    durationMs = 0L,
+                                    sizeBytes = file.length(),
+                                    dateAddedSec = file.lastModified() / 1000,
+                                    resolution = "HD",
+                                    filePath = file.absolutePath,
+                                    gameName = gameTitle,
+                                    gamePackage = gamePkg
+                                )
                             )
-                        )
+                        }
                     }
                 }
-            }
-        } catch (_: Exception) {}
+            } catch (_: Exception) {}
+        }
 
         return list.sortedByDescending { it.dateAddedSec }
     }
@@ -308,5 +519,312 @@ object ScreenRecordingManager {
         } catch (_: Exception) {}
 
         return success
+    }
+
+    /**
+     * Resolves a safe content Uri for sharing via FileProvider or MediaStore
+     */
+    fun getShareUri(context: Context, video: RecordedVideo): Uri? {
+        return try {
+            if (video.uriString.startsWith("content://")) {
+                Uri.parse(video.uriString)
+            } else {
+                val file = File(video.filePath)
+                if (file.exists()) {
+                    androidx.core.content.FileProvider.getUriForFile(
+                        context,
+                        "${context.packageName}.fileprovider",
+                        file
+                    )
+                } else null
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    /**
+     * Exports and saves the video directly into the device's public Movies/Photos gallery
+     */
+    fun saveVideoToGallery(context: Context, video: RecordedVideo): Boolean {
+        return try {
+            val file = File(video.filePath)
+            if (!file.exists()) return false
+
+            val values = android.content.ContentValues().apply {
+                put(MediaStore.Video.Media.DISPLAY_NAME, file.name)
+                put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
+                put(MediaStore.Video.Media.DATE_ADDED, System.currentTimeMillis() / 1000)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    put(MediaStore.Video.Media.RELATIVE_PATH, android.os.Environment.DIRECTORY_MOVIES + "/GMaxRecordings")
+                    put(MediaStore.Video.Media.IS_PENDING, 1)
+                }
+            }
+
+            val uri = context.contentResolver.insert(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, values)
+            if (uri != null) {
+                context.contentResolver.openOutputStream(uri)?.use { out ->
+                    file.inputStream().use { input ->
+                        input.copyTo(out)
+                    }
+                }
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    values.clear()
+                    values.put(MediaStore.Video.Media.IS_PENDING, 0)
+                    context.contentResolver.update(uri, values, null, null)
+                }
+                true
+            } else {
+                @Suppress("DEPRECATION")
+                context.sendBroadcast(Intent(Intent.ACTION_MEDIA_SCANNER_SCAN_FILE, Uri.fromFile(file)))
+                true
+            }
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    /**
+     * Queries captured GMax screenshots from MediaStore and public/app Pictures/GMaxScreenshots,
+     * automatically resolving the associated game for each screenshot.
+     */
+    fun queryCapturedScreenshots(context: Context): List<CapturedScreenshot> {
+        val list = mutableListOf<CapturedScreenshot>()
+        val projection = arrayOf(
+            MediaStore.Images.Media._ID,
+            MediaStore.Images.Media.DISPLAY_NAME,
+            MediaStore.Images.Media.SIZE,
+            MediaStore.Images.Media.DATE_ADDED,
+            MediaStore.Images.Media.WIDTH,
+            MediaStore.Images.Media.HEIGHT,
+            MediaStore.Images.Media.DATA
+        )
+        val sortOrder = "${MediaStore.Images.Media.DATE_ADDED} DESC"
+
+        try {
+            val cursor = context.contentResolver.query(
+                MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                projection,
+                null,
+                null,
+                sortOrder
+            )
+            cursor?.use { c ->
+                val idCol = c.getColumnIndexOrThrow(MediaStore.Images.Media._ID)
+                val nameCol = c.getColumnIndexOrThrow(MediaStore.Images.Media.DISPLAY_NAME)
+                val sizeCol = c.getColumnIndexOrThrow(MediaStore.Images.Media.SIZE)
+                val dateCol = c.getColumnIndexOrThrow(MediaStore.Images.Media.DATE_ADDED)
+                val widthCol = c.getColumnIndexOrThrow(MediaStore.Images.Media.WIDTH)
+                val heightCol = c.getColumnIndexOrThrow(MediaStore.Images.Media.HEIGHT)
+                val dataCol = c.getColumnIndexOrThrow(MediaStore.Images.Media.DATA)
+
+                while (c.moveToNext()) {
+                    val id = c.getLong(idCol)
+                    val name = c.getString(nameCol) ?: "Screenshot"
+                    val path = c.getString(dataCol) ?: ""
+
+                    if (name.startsWith("GMax_Shot_") || path.contains("GMaxScreenshots")) {
+                        val size = c.getLong(sizeCol)
+                        val date = c.getLong(dateCol)
+                        val w = c.getInt(widthCol)
+                        val h = c.getInt(heightCol)
+                        val contentUri = ContentUris.withAppendedId(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, id)
+                        val (gameTitle, gamePkg) = resolveGameForMediaFile(context, name)
+
+                        list.add(
+                            CapturedScreenshot(
+                                id = id,
+                                uriString = contentUri.toString(),
+                                title = name,
+                                sizeBytes = size,
+                                dateAddedSec = date,
+                                width = if (w > 0) w else 1920,
+                                height = if (h > 0) h else 1080,
+                                filePath = path,
+                                gameName = gameTitle,
+                                gamePackage = gamePkg
+                            )
+                        )
+                    }
+                }
+            }
+        } catch (_: Exception) {}
+
+        // Also check public Pictures/GMaxScreenshots and app-specific Pictures/GMaxScreenshots
+        val candidatePicDirs = listOfNotNull(
+            File(android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_PICTURES), "GMaxScreenshots"),
+            context.getExternalFilesDir(android.os.Environment.DIRECTORY_PICTURES)?.let { File(it, "GMaxScreenshots") }
+        )
+        for (picsDir in candidatePicDirs) {
+            try {
+                if (picsDir.exists()) {
+                    val files = picsDir.listFiles { f ->
+                        f.extension.equals("png", ignoreCase = true) || f.extension.equals("jpg", ignoreCase = true)
+                    }
+                    files?.forEach { file ->
+                        if (list.none { it.filePath == file.absolutePath || it.title == file.name }) {
+                            val (gameTitle, gamePkg) = resolveGameForMediaFile(context, file.name)
+                            list.add(
+                                CapturedScreenshot(
+                                    id = file.hashCode().toLong(),
+                                    uriString = Uri.fromFile(file).toString(),
+                                    title = file.name,
+                                    sizeBytes = file.length(),
+                                    dateAddedSec = file.lastModified() / 1000,
+                                    width = 1920,
+                                    height = 1080,
+                                    filePath = file.absolutePath,
+                                    gameName = gameTitle,
+                                    gamePackage = gamePkg
+                                )
+                            )
+                        }
+                    }
+                }
+            } catch (_: Exception) {}
+        }
+
+        return list.sortedByDescending { it.dateAddedSec }
+    }
+
+    /**
+     * Saves a Bitmap as a PNG screenshot into Pictures/GMaxScreenshots and MediaStore,
+     * tagging the filename with the active game.
+     */
+    fun saveScreenshotBitmap(context: Context, bitmap: android.graphics.Bitmap): CapturedScreenshot? {
+        return try {
+            val fileName = buildTaggedScreenshotFileName(context)
+            val (gameTitle, gamePkg) = resolveGameForMediaFile(context, fileName)
+            val picsDir = File(context.getExternalFilesDir(android.os.Environment.DIRECTORY_PICTURES), "GMaxScreenshots")
+            if (!picsDir.exists()) picsDir.mkdirs()
+
+            val file = File(picsDir, fileName)
+            file.outputStream().use { out ->
+                bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, out)
+            }
+
+            // Also copy to public Pictures/GMaxScreenshots
+            try {
+                val pubPics = File(android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_PICTURES), "GMaxScreenshots")
+                if (!pubPics.exists()) pubPics.mkdirs()
+                file.copyTo(File(pubPics, fileName), overwrite = true)
+            } catch (_: Exception) {}
+
+            // Publish to public MediaStore Pictures/GMaxScreenshots
+            try {
+                val values = android.content.ContentValues().apply {
+                    put(MediaStore.Images.Media.DISPLAY_NAME, fileName)
+                    put(MediaStore.Images.Media.MIME_TYPE, "image/png")
+                    put(MediaStore.Images.Media.DATE_ADDED, System.currentTimeMillis() / 1000)
+                    put(MediaStore.Images.Media.WIDTH, bitmap.width)
+                    put(MediaStore.Images.Media.HEIGHT, bitmap.height)
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        put(MediaStore.Images.Media.RELATIVE_PATH, android.os.Environment.DIRECTORY_PICTURES + "/GMaxScreenshots")
+                        put(MediaStore.Images.Media.IS_PENDING, 1)
+                    }
+                }
+                val uri = context.contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
+                if (uri != null) {
+                    context.contentResolver.openOutputStream(uri)?.use { out ->
+                        file.inputStream().use { it.copyTo(out) }
+                    }
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        values.clear()
+                        values.put(MediaStore.Images.Media.IS_PENDING, 0)
+                        context.contentResolver.update(uri, values, null, null)
+                    }
+                }
+            } catch (_: Exception) {}
+
+            CapturedScreenshot(
+                id = file.hashCode().toLong(),
+                uriString = Uri.fromFile(file).toString(),
+                title = fileName,
+                sizeBytes = file.length(),
+                dateAddedSec = System.currentTimeMillis() / 1000,
+                width = bitmap.width,
+                height = bitmap.height,
+                filePath = file.absolutePath,
+                gameName = gameTitle,
+                gamePackage = gamePkg
+            )
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    fun deleteScreenshot(context: Context, shot: CapturedScreenshot): Boolean {
+        var success = false
+        try {
+            if (shot.uriString.startsWith("content://")) {
+                val rows = context.contentResolver.delete(Uri.parse(shot.uriString), null, null)
+                if (rows > 0) success = true
+            }
+        } catch (_: Exception) {}
+        try {
+            val f = File(shot.filePath)
+            if (f.exists()) {
+                f.delete()
+                success = true
+            }
+        } catch (_: Exception) {}
+        return success
+    }
+
+    fun getScreenshotShareUri(context: Context, shot: CapturedScreenshot): Uri? {
+        return try {
+            if (shot.uriString.startsWith("content://")) {
+                Uri.parse(shot.uriString)
+            } else {
+                val file = File(shot.filePath)
+                if (file.exists()) {
+                    androidx.core.content.FileProvider.getUriForFile(
+                        context,
+                        "${context.packageName}.fileprovider",
+                        file
+                    )
+                } else null
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    /**
+     * Computes live available storage in GB and estimated recordable duration based on current video bitrate.
+     */
+    fun getStorageCapacityInfo(context: Context): com.example.model.StorageCapacityInfo {
+        return try {
+            val stat = android.os.StatFs(android.os.Environment.getDataDirectory().path)
+            val freeBytes = stat.availableBlocksLong * stat.blockSizeLong
+            val totalBytes = stat.blockCountLong * stat.blockSizeLong
+            val freeGb = freeBytes.toDouble() / (1024.0 * 1024.0 * 1024.0)
+            val usedRatio = if (totalBytes > 0L) {
+                ((totalBytes - freeBytes).toFloat() / totalBytes.toFloat()).coerceIn(0.05f, 0.98f)
+            } else 0.5f
+
+            val settings = loadSettings(context)
+            val bytesPerSecond = (settings.bitrateMbps.coerceAtLeast(1) * 1_000_000L) / 8L
+            val recordableSeconds = (freeBytes / bytesPerSecond).coerceAtLeast(0L)
+            val hours = recordableSeconds / 3600
+            val minutes = (recordableSeconds % 3600) / 60
+            val seconds = recordableSeconds % 60
+
+            com.example.model.StorageCapacityInfo(
+                freeBytes = freeBytes,
+                totalBytes = totalBytes,
+                availableGbText = String.format(Locale.US, "%.2f GB available", freeGb),
+                recordableTimeText = String.format(
+                    Locale.US,
+                    "(%02d:%02d:%02d can be recorded)",
+                    hours,
+                    minutes,
+                    seconds
+                ),
+                usedRatio = usedRatio
+            )
+        } catch (_: Exception) {
+            com.example.model.StorageCapacityInfo()
+        }
     }
 }

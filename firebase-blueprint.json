@@ -1,0 +1,273 @@
+{
+  "entities": {
+    "UserCloudProfile": {
+      "title": "UserCloudProfile",
+      "description": "Per-user cloud profile and synchronized G-Max Game Booster settings and options.",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "The authenticated Firebase user UID owning this profile."
+        },
+        "displayName": {
+          "type": "string",
+          "description": "User display name from Google Sign-In or profile customization."
+        },
+        "email": {
+          "type": "string",
+          "description": "User email address from Google Sign-In."
+        },
+        "photoUrl": {
+          "type": "string",
+          "description": "User profile picture URL."
+        },
+        "dateOfBirth": {
+          "type": "string",
+          "description": "User date of birth string (e.g., YYYY-MM-DD or Not Set)."
+        },
+        "bio": {
+          "type": "string",
+          "description": "User profile bio text."
+        },
+        "selectedTags": {
+          "type": "array",
+          "description": "Up to 4 premade profile tag IDs chosen from the 45-tag catalog."
+        },
+        "isVerifiedDeveloper": {
+          "type": "boolean",
+          "description": "True exclusively for the verified developer account Albertomiller747@gmail.com."
+        },
+        "mostPlayedGameName": {
+          "type": "string",
+          "description": "Display name of the user's most played game."
+        },
+        "mostPlayedGamePkg": {
+          "type": "string",
+          "description": "Package name of the user's most played game."
+        },
+        "mostPlayedMinutes": {
+          "type": "integer",
+          "description": "Total minutes played for the user's most played game."
+        },
+        "totalPlayTimeMinutes": {
+          "type": "integer",
+          "description": "Cumulative minutes played across every game session together."
+        },
+        "totalSessionsCount": {
+          "type": "integer",
+          "description": "Total number of game sessions recorded across all games."
+        },
+        "themeMode": {
+          "type": "string",
+          "description": "App background theme mode (AUTO_SYSTEM, LIGHT_HUB, DARK_HUB, CUSTOM_COLOR)."
+        },
+        "customBgColor": {
+          "type": "integer",
+          "description": "Custom background ARGB color value."
+        },
+        "reducedAnimations": {
+          "type": "boolean",
+          "description": "Whether Lite Mode / Reduced Animations is enabled."
+        },
+        "autoBigScreenLandscape": {
+          "type": "boolean",
+          "description": "Whether Big Screen Console Mode activates automatically in landscape."
+        },
+        "showControllerLegendBar": {
+          "type": "boolean",
+          "description": "Whether the controller shortcut legend bar is shown."
+        },
+        "suppressActivationWarning": {
+          "type": "boolean",
+          "description": "Whether boost activation confirmation dialog is suppressed."
+        },
+        "selectedBoostMode": {
+          "type": "string",
+          "description": "Selected boost mode (GAMING or BEAST)."
+        },
+        "appliedOptionIds": {
+          "type": "array",
+          "description": "Bounded list of applied boost and tweak option IDs."
+        },
+        "hudEnabled": {
+          "type": "boolean",
+          "description": "Whether the floating in-game performance HUD is enabled."
+        },
+        "hudFpsMode": {
+          "type": "string",
+          "description": "EFPS sampling profile (FAST, BALANCED, SMOOTH)."
+        },
+        "hudTargetCap": {
+          "type": "string",
+          "description": "Target FPS cap calibration mode (AUTO, 30, 45, 60, 90, 120, 144, 165)."
+        },
+        "hudPosition": {
+          "type": "string",
+          "description": "Floating HUD screen corner position."
+        },
+        "hudScalePct": {
+          "type": "integer",
+          "description": "HUD scale percentage (50 to 200)."
+        },
+        "hudOpacityPct": {
+          "type": "integer",
+          "description": "HUD opacity percentage (10 to 100)."
+        },
+        "hudShowFps": {
+          "type": "boolean",
+          "description": "Whether EFPS is shown in the floating HUD."
+        },
+        "hudShowTemp": {
+          "type": "boolean",
+          "description": "Whether temperature is shown in the floating HUD."
+        },
+        "hudShowBattery": {
+          "type": "boolean",
+          "description": "Whether battery level is shown in the floating HUD."
+        },
+        "hudShowTime": {
+          "type": "boolean",
+          "description": "Whether match stopwatch timer is shown in the floating HUD."
+        },
+        "hudShowRamPct": {
+          "type": "boolean",
+          "description": "Whether RAM usage percentage is shown in the floating HUD."
+        },
+        "hudShowClock": {
+          "type": "boolean",
+          "description": "Whether current time of day is shown in the floating HUD."
+        },
+        "crosshairEnabled": {
+          "type": "boolean",
+          "description": "Whether tactical crosshair overlay is enabled."
+        },
+        "crosshairType": {
+          "type": "string",
+          "description": "Selected crosshair reticle style."
+        },
+        "crosshairColorArgb": {
+          "type": "integer",
+          "description": "Selected crosshair ARGB color."
+        },
+        "crosshairSizeDp": {
+          "type": "integer",
+          "description": "Selected crosshair size in dp."
+        },
+        "lightbarColorHex": {
+          "type": "string",
+          "description": "Selected controller lightbar color hex string."
+        },
+        "recResolutionLabel": {
+          "type": "string",
+          "description": "Screen recorder resolution preset label."
+        },
+        "recFps": {
+          "type": "integer",
+          "description": "Screen recorder target frame rate."
+        },
+        "recBitrateMbps": {
+          "type": "integer",
+          "description": "Screen recorder video bitrate in Mbps."
+        },
+        "recMicEnabled": {
+          "type": "boolean",
+          "description": "Whether microphone audio is recorded."
+        },
+        "recShowTimerHud": {
+          "type": "boolean",
+          "description": "Whether recording timer HUD is displayed."
+        },
+        "recOverlayEnabled": {
+          "type": "boolean",
+          "description": "Whether floating recording bubble is enabled."
+        },
+        "recBubbleSizeDp": {
+          "type": "integer",
+          "description": "Floating recording bubble diameter in dp (28 to 64)."
+        },
+        "targetGamePkg": {
+          "type": "string",
+          "description": "Last selected target game package name."
+        },
+        "targetGameName": {
+          "type": "string",
+          "description": "Last selected target game display name."
+        },
+        "libraryPackages": {
+          "type": "array",
+          "description": "Bounded list of user library game package names."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the profile was created (clients write FieldValue.serverTimestamp())."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the profile was last updated (clients write FieldValue.serverTimestamp())."
+        }
+      },
+      "required": [
+        "userId",
+        "displayName",
+        "email",
+        "photoUrl",
+        "dateOfBirth",
+        "bio",
+        "selectedTags",
+        "isVerifiedDeveloper",
+        "mostPlayedGameName",
+        "mostPlayedGamePkg",
+        "mostPlayedMinutes",
+        "totalPlayTimeMinutes",
+        "totalSessionsCount",
+        "themeMode",
+        "customBgColor",
+        "reducedAnimations",
+        "autoBigScreenLandscape",
+        "showControllerLegendBar",
+        "suppressActivationWarning",
+        "selectedBoostMode",
+        "appliedOptionIds",
+        "hudEnabled",
+        "hudFpsMode",
+        "hudTargetCap",
+        "hudPosition",
+        "hudScalePct",
+        "hudOpacityPct",
+        "hudShowFps",
+        "hudShowTemp",
+        "hudShowBattery",
+        "hudShowTime",
+        "hudShowRamPct",
+        "hudShowClock",
+        "crosshairEnabled",
+        "crosshairType",
+        "crosshairColorArgb",
+        "crosshairSizeDp",
+        "lightbarColorHex",
+        "recResolutionLabel",
+        "recFps",
+        "recBitrateMbps",
+        "recMicEnabled",
+        "recShowTimerHud",
+        "recOverlayEnabled",
+        "recBubbleSizeDp",
+        "targetGamePkg",
+        "targetGameName",
+        "libraryPackages",
+        "createdAt",
+        "updatedAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": {
+        "$ref": "#/entities/UserCloudProfile"
+      },
+      "description": "Stores each authenticated user's personal profile, most played game summary, date of birth, and synchronized app/boost/HUD/controller/recorder settings."
+    }
+  }
+}

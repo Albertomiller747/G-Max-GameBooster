@@ -13,9 +13,10 @@ data class VideoQualitySettings(
     val height: Int = 1080,
     val fps: Int = 60,
     val bitrateMbps: Int = 8,
-    val recordMic: Boolean = true,
-    val showTimerHud: Boolean = true,
-    val isOverlayEnabled: Boolean = false
+    val recordMic: Boolean = false,
+    val showTimerHud: Boolean = false,
+    val isOverlayEnabled: Boolean = false,
+    val bubbleSizeDp: Int = 38
 )
 
 data class RecordedVideo(
@@ -26,7 +27,9 @@ data class RecordedVideo(
     val sizeBytes: Long,
     val dateAddedSec: Long,
     val resolution: String,
-    val filePath: String
+    val filePath: String,
+    val gameName: String = "General Gameplay",
+    val gamePackage: String? = null
 ) {
     val formattedDuration: String
         get() {
@@ -46,3 +49,43 @@ data class RecordedVideo(
             }
         }
 }
+
+data class CapturedScreenshot(
+    val id: Long,
+    val uriString: String,
+    val title: String,
+    val sizeBytes: Long,
+    val dateAddedSec: Long,
+    val width: Int,
+    val height: Int,
+    val filePath: String,
+    val gameName: String = "General Gameplay",
+    val gamePackage: String? = null
+) {
+    val resolution: String
+        get() = "${width}x${height}"
+
+    val formattedSize: String
+        get() {
+            val kb = sizeBytes / 1024.0
+            return if (kb >= 1024) {
+                String.format(java.util.Locale.US, "%.2f MB", kb / 1024.0)
+            } else {
+                String.format(java.util.Locale.US, "%.0f KB", kb)
+            }
+        }
+}
+
+data class GameMediaGroup<T>(
+    val gameName: String,
+    val gamePackage: String?,
+    val items: List<T>
+)
+
+data class StorageCapacityInfo(
+    val freeBytes: Long = 0L,
+    val totalBytes: Long = 0L,
+    val availableGbText: String = "0.00 GB available",
+    val recordableTimeText: String = "(00:00:00 can be recorded)",
+    val usedRatio: Float = 0.5f
+)

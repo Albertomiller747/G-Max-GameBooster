@@ -37,14 +37,49 @@ class CrosshairOverlayService : Service() {
         const val ACTION_START = "com.example.service.CROSSHAIR_START"
         const val ACTION_STOP = "com.example.service.CROSSHAIR_STOP"
         const val ACTION_UPDATE = "com.example.service.CROSSHAIR_UPDATE"
+        const val ACTION_RESTORE = "com.example.service.CROSSHAIR_RESTORE"
 
         const val EXTRA_STYLE = "EXTRA_STYLE"
         const val EXTRA_COLOR = "EXTRA_COLOR"
         const val EXTRA_SIZE_DP = "EXTRA_SIZE_DP"
         const val EXTRA_ALPHA = "EXTRA_ALPHA"
 
+        private const val PREFS_NAME = "gmax_crosshair_prefs"
+        private const val KEY_IS_ENABLED = "crosshair_enabled"
+        private const val KEY_STYLE = "crosshair_style"
+        private const val KEY_COLOR = "crosshair_color"
+        private const val KEY_SIZE_DP = "crosshair_size_dp"
+        private const val KEY_ALPHA = "crosshair_alpha"
+
+        private var activeViewInstance: CrosshairView? = null
+
         var isRunning: Boolean = false
             private set
+
+        fun isSavedEnabled(context: Context): Boolean {
+            return context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).getBoolean(KEY_IS_ENABLED, false)
+        }
+
+        fun getSavedConfig(context: Context): com.example.model.OverlaySettings {
+            val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            return com.example.model.OverlaySettings(
+                isEnabled = prefs.getBoolean(KEY_IS_ENABLED, false),
+                crosshairStyle = prefs.getInt(KEY_STYLE, 0),
+                crosshairColor = prefs.getLong(KEY_COLOR, 0xFF00E5FFL),
+                crosshairSizeDp = prefs.getInt(KEY_SIZE_DP, 32),
+                crosshairAlpha = prefs.getFloat(KEY_ALPHA, 0.95f)
+            )
+        }
+
+        fun saveConfig(context: Context, enabled: Boolean, style: Int, color: Long, sizeDp: Int, alpha: Float) {
+            context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit()
+                .putBoolean(KEY_IS_ENABLED, enabled)
+                .putInt(KEY_STYLE, style)
+                .putLong(KEY_COLOR, color)
+                .putInt(KEY_SIZE_DP, sizeDp)
+                .putFloat(KEY_ALPHA, alpha)
+                .apply()
+        }
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -52,8 +87,21 @@ class CrosshairOverlayService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_STOP) {
             stopCrosshair()
+            val saved = getSavedConfig(this)
+            saveConfig(this, false, saved.crosshairStyle, saved.crosshairColor, saved.crosshairSizeDp, saved.crosshairAlpha)
             stopSelf()
             return START_NOT_STICKY
+        }
+
+        if (intent?.action == ACTION_RESTORE) {
+            val saved = getSavedConfig(this)
+            if (saved.isEnabled && Settings.canDrawOverlays(this)) {
+                showCrosshair(saved.crosshairStyle, saved.crosshairColor, saved.crosshairSizeDp, saved.crosshairAlpha)
+                return START_STICKY
+            } else {
+                stopSelf()
+                return START_NOT_STICKY
+            }
         }
 
         val style = intent?.getIntExtra(EXTRA_STYLE, 0) ?: 0
@@ -66,7 +114,9 @@ class CrosshairOverlayService : Service() {
             return START_NOT_STICKY
         }
 
-        if (crosshairView == null) {
+        saveConfig(this, true, style, colorLong, sizeDp, alpha)
+
+        if (crosshairView == null && activeViewInstance == null) {
             showCrosshair(style, colorLong, sizeDp, alpha)
         } else {
             updateCrosshair(style, colorLong, sizeDp, alpha)
@@ -79,6 +129,9 @@ class CrosshairOverlayService : Service() {
     private fun showCrosshair(style: Int, colorLong: Long, sizeDp: Int, alpha: Float) {
         windowManager = getSystemService(Context.WINDOW_SERVICE) as? WindowManager ?: return
 
+        // Clean up any stale view before creating new one
+        stopCrosshair()
+
         val density = resources.displayMetrics.density
         val sizePx = (sizeDp * density).toInt()
 
@@ -89,9 +142,11 @@ class CrosshairOverlayService : Service() {
             WindowManager.LayoutParams.TYPE_PHONE
         }
 
-        crosshairView = CrosshairView(this).apply {
+        val newView = CrosshairView(this).apply {
             updateConfig(style, colorLong, sizePx.toFloat(), alpha)
         }
+        crosshairView = newView
+        activeViewInstance = newView
 
         val params = WindowManager.LayoutParams(
             sizePx * 2, // Allow ample canvas bounds for tick marks and rings
@@ -100,20 +155,26 @@ class CrosshairOverlayService : Service() {
             WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
                     WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
                     WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+                    WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or
                     WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED,
             PixelFormat.TRANSLUCENT
         ).apply {
             gravity = Gravity.CENTER
             x = 0
             y = 0
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
+            }
         }
 
         windowParams = params
 
         try {
-            windowManager?.addView(crosshairView, params)
+            windowManager?.addView(newView, params)
             isRunning = true
         } catch (_: Exception) {
+            crosshairView = null
+            activeViewInstance = null
             stopSelf()
         }
     }
@@ -122,30 +183,42 @@ class CrosshairOverlayService : Service() {
         val density = resources.displayMetrics.density
         val sizePx = (sizeDp * density).toInt()
 
-        crosshairView?.updateConfig(style, colorLong, sizePx.toFloat(), alpha)
+        (crosshairView ?: activeViewInstance)?.updateConfig(style, colorLong, sizePx.toFloat(), alpha)
 
         windowParams?.let { params ->
             params.width = sizePx * 2
             params.height = sizePx * 2
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                params.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
+            }
             try {
-                windowManager?.updateViewLayout(crosshairView, params)
+                windowManager?.updateViewLayout(crosshairView ?: activeViewInstance, params)
             } catch (_: Exception) {}
         }
     }
 
     private fun stopCrosshair() {
-        if (crosshairView != null && windowManager != null) {
+        if (windowManager == null) {
+            windowManager = getSystemService(Context.WINDOW_SERVICE) as? WindowManager
+        }
+        val view = crosshairView ?: activeViewInstance
+        if (view != null && windowManager != null) {
             try {
-                windowManager?.removeView(crosshairView)
-            } catch (_: Exception) {}
+                windowManager?.removeViewImmediate(view)
+            } catch (_: Exception) {
+                try {
+                    windowManager?.removeView(view)
+                } catch (_: Exception) {}
+            }
             crosshairView = null
+            activeViewInstance = null
         }
         isRunning = false
     }
 
     override fun onDestroy() {
-        super.onDestroy()
         stopCrosshair()
+        super.onDestroy()
     }
 
     /**

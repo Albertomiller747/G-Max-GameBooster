@@ -97,15 +97,29 @@ class BoosterSessionManager(context: Context) {
 
     /**
      * Starts a booster session with the specified mode and target game.
+     * If a session is already active, preserves the existing expiration timestamp
+     * so choosing a different game does not reset the remaining boost duration.
      */
-    fun startSession(mode: BoostMode, targetPackage: String? = null, targetAppName: String? = null) {
-        val durationMs = if (mode == BoostMode.BEAST) {
-            DURATION_BEAST_MODE_MS
-        } else {
-            DURATION_NORMAL_BOOST_MS
-        }
+    fun startSession(
+        mode: BoostMode,
+        targetPackage: String? = null,
+        targetAppName: String? = null,
+        forceResetTime: Boolean = false
+    ) {
+        val currentExpiresAt = prefs.getLong(KEY_EXPIRES_AT, 0L)
+        val now = System.currentTimeMillis()
 
-        val expiresAt = System.currentTimeMillis() + durationMs
+        // Preserve countdown if already active and not explicitly forced to reset
+        val expiresAt = if (!forceResetTime && isSessionActive() && currentExpiresAt > now) {
+            currentExpiresAt
+        } else {
+            val durationMs = if (mode == BoostMode.BEAST) {
+                DURATION_BEAST_MODE_MS
+            } else {
+                DURATION_NORMAL_BOOST_MS
+            }
+            now + durationMs
+        }
 
         val editor = prefs.edit()
             .putBoolean(KEY_IS_ACTIVE, true)

@@ -20,8 +20,13 @@ function buildValidProfile(uid, serverTimestamp) {
   return {
     userId: uid,
     displayName: "Alice Gamer",
+    username: "alice_gamer",
+    countryCode: "US",
+    countryName: "United States",
     email: "alice@example.com",
     photoUrl: "https://example.com/avatar.png",
+    bannerUrl: "cyber_neon_grid",
+    gamerscore: 4850,
     dateOfBirth: "2002-05-14",
     bio: "Competitive FPS & MOBA player",
     selectedTags: ["fps_veteran", "120hz_enthusiast", "esports_ready", "night_owl"],
@@ -137,6 +142,7 @@ test("Authenticated user: cannot spoof another userId or inject ghost fields", a
 test("Random user: cannot fake or claim isVerifiedDeveloper == true", async () => {
   const aliceDb = testEnv.authenticatedContext(ALICE_UID, {
     email: "randomuser@gmail.com",
+    email_verified: true,
   }).firestore();
   const ts = new Date();
   const fakeDevPayload = {
@@ -150,11 +156,13 @@ test("Official developer (Albertomiller747@gmail.com): can claim isVerifiedDevel
   const devUid = "alberto_dev_747";
   const devDb = testEnv.authenticatedContext(devUid, {
     email: "Albertomiller747@gmail.com",
+    email_verified: true,
   }).firestore();
   const ts = new Date();
   const devPayload = {
     ...buildValidProfile(devUid, ts),
     displayName: "Alberto Miller",
+    username: "Albertomiller747",
     email: "Albertomiller747@gmail.com",
     isVerifiedDeveloper: true,
   };
@@ -170,11 +178,78 @@ test("Authenticated user: can update allowed settings fields on their own profil
 
   await assertSucceeds(
     aliceDb.collection("users").doc(ALICE_UID).update({
+      username: "alice_pro",
+      countryCode: "CA",
+      countryName: "Canada",
       themeMode: "LIGHT_HUB",
       dateOfBirth: "2001-11-20",
       selectedBoostMode: "GAMING",
       selectedTags: ["sniper_main", "clutch_specialist"],
       updatedAt: new Date(),
+    })
+  );
+});
+
+test("Leaderboard: authenticated users can publish their own score and list top players", async () => {
+  const aliceDb = testEnv.authenticatedContext(ALICE_UID).firestore();
+  const bobDb = testEnv.authenticatedContext(BOB_UID).firestore();
+  const ts = new Date();
+
+  await assertSucceeds(
+    aliceDb.collection("leaderboard").doc(ALICE_UID).set({
+      userId: ALICE_UID,
+      username: "alice_gamer",
+      photoUrl: "https://example.com/alice.png",
+      countryCode: "US",
+      countryName: "United States",
+      gamerscore: 5400,
+      isVerifiedDeveloper: false,
+      updatedAt: ts,
+    })
+  );
+
+  // Bob cannot overwrite Alice's leaderboard entry
+  await assertFails(
+    bobDb.collection("leaderboard").doc(ALICE_UID).set({
+      userId: ALICE_UID,
+      username: "hacked",
+      photoUrl: "",
+      countryCode: "US",
+      countryName: "United States",
+      gamerscore: 999999,
+      isVerifiedDeveloper: false,
+      updatedAt: ts,
+    })
+  );
+
+  // Bob can query the worldwide leaderboard with gamerscore >= 0
+  await assertSucceeds(
+    bobDb.collection("leaderboard").where("gamerscore", ">=", 0).orderBy("gamerscore", "desc").limit(50).get()
+  );
+});
+
+test("Usernames: authenticated user can claim an available username and cannot overwrite another user's claim", async () => {
+  const aliceDb = testEnv.authenticatedContext(ALICE_UID).firestore();
+  const bobDb = testEnv.authenticatedContext(BOB_UID).firestore();
+  const ts = new Date();
+
+  await assertSucceeds(
+    aliceDb.collection("usernames").doc("cyber_ace").set({
+      userId: ALICE_UID,
+      username: "Cyber_Ace",
+      updatedAt: ts,
+    })
+  );
+
+  // Bob can check if "cyber_ace" exists via get()
+  await assertSucceeds(bobDb.collection("usernames").doc("cyber_ace").get());
+
+  // Bob cannot overwrite Alice's claimed username
+  await assertFails(
+    bobDb.collection("usernames").doc("cyber_ace").set({
+      userId: BOB_UID,
+      username: "Cyber_Ace",
+      updatedAt: ts,
     })
   );
 });

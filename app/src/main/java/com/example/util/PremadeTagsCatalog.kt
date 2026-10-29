@@ -21,12 +21,66 @@ data class PremadeProfileTag(
 
 object PremadeTagsCatalog {
     const val MAX_EQUIPPED_TAGS = 4
+    const val MAX_USERNAME_LENGTH = 20
 
     const val OFFICIAL_DEVELOPER_EMAIL = "albertomiller747@gmail.com"
     const val OFFICIAL_DEVELOPER_DISPLAY_email_DISPLAY = "Albertomiller747@gmail.com"
     const val OFFICIAL_DEVELOPER_NAME = "Alberto Miller"
+    const val OFFICIAL_DEVELOPER_USERNAME = "Albertomiller747"
     const val OFFICIAL_DEVELOPER_BIO = "Official Creator & Lead Developer of G-Max Game Booster ★"
     const val OFFICIAL_DEVELOPER_DOB = "1999-07-07"
+
+    private val USERNAME_REGEX = Regex("^[a-zA-Z0-9_]{3,20}$")
+    private val RESERVED_DEV_USERNAMES = setOf(
+        "albertomiller747",
+        "alberto_miller",
+        "albertomiller",
+        "gmax_developer",
+        "official_developer",
+        "titanbooster_dev"
+    )
+
+    /**
+     * Validates a custom username.
+     * Rules:
+     * - Strips leading '@' if entered.
+     * - 3 to 20 characters: letters, numbers, and underscores only.
+     * - Reserved developer handles are blocked for non-developers.
+     */
+    fun validateUsername(rawUsername: String, isVerifiedDeveloper: Boolean): Result<String> {
+        val cleaned = rawUsername.trim().removePrefix("@").trim()
+        if (cleaned.length < 3) {
+            return Result.failure(IllegalArgumentException("Username must be at least 3 characters."))
+        }
+        if (cleaned.length > 20) {
+            return Result.failure(IllegalArgumentException("Username must be 20 characters or fewer."))
+        }
+        if (!USERNAME_REGEX.matches(cleaned)) {
+            return Result.failure(IllegalArgumentException("Only letters, numbers, and underscores (_) are allowed."))
+        }
+        val lower = cleaned.lowercase(Locale.ROOT)
+        if (!isVerifiedDeveloper && (lower in RESERVED_DEV_USERNAMES || lower.contains("albertomiller"))) {
+            return Result.failure(IllegalArgumentException("This username is reserved for the official developer."))
+        }
+        return Result.success(cleaned)
+    }
+
+    fun sanitizeUsername(rawUsername: String, displayNameFallback: String, isVerifiedDeveloper: Boolean): String {
+        val cleaned = rawUsername.trim().removePrefix("@").trim()
+        val validated = validateUsername(cleaned, isVerifiedDeveloper).getOrNull()
+        if (validated != null) return validated
+        if (isVerifiedDeveloper) return OFFICIAL_DEVELOPER_USERNAME
+        val base = displayNameFallback
+            .replace(Regex("[^a-zA-Z0-9_]"), "_")
+            .replace(Regex("_+"), "_")
+            .trim('_')
+            .take(16)
+        return when {
+            base.length >= 3 -> base
+            base.isNotEmpty() -> "${base}_gamer"
+            else -> "gamer_pro"
+        }
+    }
 
     val OFFICIAL_DEVELOPER_DEFAULT_TAGS: List<String> = listOf(
         "max_efps_hunter",

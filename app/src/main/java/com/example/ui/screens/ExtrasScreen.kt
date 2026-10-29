@@ -427,6 +427,15 @@ fun ExtrasScreen(
                                     onCheckedChange = { viewModel.toggleOverlayTimer(context, it) },
                                     accentColor = Color(0xFF0EA5E9)
                                 )
+
+                                ExtrasTelemetryRow(
+                                    icon = Icons.Default.Layers,
+                                    label = "Auto-Scale for Smaller Phone Screens",
+                                    description = "Automatically shrinks HUD text & spacing so all 6 metrics fit on 1 row",
+                                    isChecked = overlayConfig.autoScaleSmallScreens,
+                                    onCheckedChange = { viewModel.toggleOverlayAutoScale(context, it) },
+                                    accentColor = LaunchGreen
+                                )
                             }
                         }
                     }
@@ -515,7 +524,11 @@ fun ExtrasScreen(
                                             text = "${efpsTelemetry.currentEfps} EFPS",
                                             style = MaterialTheme.typography.titleMedium.copy(
                                                 fontWeight = FontWeight.Black,
-                                                color = LaunchGreen,
+                                                color = when {
+                                                    efpsTelemetry.currentEfps < 30 -> ElectricCrimson
+                                                    efpsTelemetry.currentEfps < (efpsTelemetry.effectiveCapFps * 0.75f).toInt() -> SolarGold
+                                                    else -> LaunchGreen
+                                                },
                                                 fontSize = 15.sp
                                             )
                                         )
@@ -533,7 +546,7 @@ fun ExtrasScreen(
                                             text = "${efpsTelemetry.onePercentLowEfps} EFPS",
                                             style = MaterialTheme.typography.titleMedium.copy(
                                                 fontWeight = FontWeight.Black,
-                                                color = HubBlue,
+                                                color = if (efpsTelemetry.onePercentLowEfps < 30) ElectricCrimson else HubBlue,
                                                 fontSize = 15.sp
                                             )
                                         )
@@ -766,32 +779,14 @@ fun ExtrasScreen(
                             )
                             Spacer(modifier = Modifier.height(6.dp))
 
-                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                Text(
-                                    text = "• 1. Hardware VRR DisplayHz: Tracks live LTPO/VRR refresh stepping (60/90/120/144/165Hz) driven by the active game.",
-                                    style = MaterialTheme.typography.bodySmall.copy(color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
+                            Text(
+                                text = com.example.util.EfpsEngine.SENSOR_FUSION_SUMMARY_BODY,
+                                style = MaterialTheme.typography.bodySmall.copy(
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    fontSize = 11.sp,
+                                    lineHeight = 16.sp
                                 )
-                                Text(
-                                    text = "• 2. VSYNC Cadence & Missed Cycles: Quantizes nanosecond Choreographer intervals when 3D load skips refresh cycles.",
-                                    style = MaterialTheme.typography.bodySmall.copy(color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
-                                )
-                                Text(
-                                    text = "• 3. GPU Compositor Swap Probe: Measures SurfaceFlinger render swap stall (${String.format(Locale.US, "%.1f ms", efpsTelemetry.gpuCompositionLagMs)}) during heavy shader load.",
-                                    style = MaterialTheme.typography.bodySmall.copy(color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
-                                )
-                                Text(
-                                    text = "• 4. Sub-Harmonic Game Cap Detection: Detects bimodal GPU cadence when a 60 FPS game runs on a 120Hz display.",
-                                    style = MaterialTheme.typography.bodySmall.copy(color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
-                                )
-                                Text(
-                                    text = "• 5. Per-Core CPU Clock & RAM Probe: Reads hardware CPU scaling utilization (${efpsTelemetry.cpuLoadPercent}%) and memory contention.",
-                                    style = MaterialTheme.typography.bodySmall.copy(color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
-                                )
-                                Text(
-                                    text = "• 6. Predictive Thermal & Kalman Filter: Fuses Android thermal headroom with adaptive Kalman gain and 1% Low tracking.",
-                                    style = MaterialTheme.typography.bodySmall.copy(color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
-                                )
-                            }
+                            )
 
                             Spacer(modifier = Modifier.height(14.dp))
 

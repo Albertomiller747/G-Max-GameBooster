@@ -8,6 +8,7 @@ import android.net.Uri
 import android.os.Build
 import android.provider.MediaStore
 import android.view.WindowManager
+import com.example.model.AudioSourceMode
 import com.example.model.CapturedScreenshot
 import com.example.model.GameMediaGroup
 import com.example.model.RecordedVideo
@@ -28,6 +29,7 @@ object ScreenRecordingManager {
     private const val KEY_FPS = "rec_fps"
     private const val KEY_BITRATE_MBPS = "rec_bitrate_mbps"
     private const val KEY_RECORD_MIC = "rec_mic"
+    private const val KEY_AUDIO_SOURCE_MODE = "rec_audio_source_mode"
     private const val KEY_SHOW_TIMER_HUD = "rec_show_timer_hud"
     private const val KEY_OVERLAY_ENABLED = "rec_overlay_enabled"
     private const val KEY_BUBBLE_SIZE_DP = "rec_bubble_size_dp"
@@ -339,6 +341,7 @@ object ScreenRecordingManager {
             fps = idealFps,
             bitrateMbps = idealBitrate,
             recordMic = false,
+            audioSourceMode = AudioSourceMode.INTERNAL_ONLY,
             showTimerHud = false,
             isOverlayEnabled = false
         )
@@ -355,6 +358,18 @@ object ScreenRecordingManager {
         val fps = prefs.getInt(KEY_FPS, defaultIdeal?.fps ?: 60)
         val bitrate = prefs.getInt(KEY_BITRATE_MBPS, defaultIdeal?.bitrateMbps ?: 8)
         val mic = prefs.getBoolean(KEY_RECORD_MIC, false)
+        val savedAudioModeStr = prefs.getString(KEY_AUDIO_SOURCE_MODE, null)
+        val audioMode = when {
+            !savedAudioModeStr.isNullOrBlank() -> {
+                try {
+                    AudioSourceMode.valueOf(savedAudioModeStr)
+                } catch (_: Exception) {
+                    AudioSourceMode.INTERNAL_ONLY
+                }
+            }
+            mic -> AudioSourceMode.INTERNAL_AND_MIC
+            else -> AudioSourceMode.INTERNAL_ONLY
+        }
         val showTimer = prefs.getBoolean(KEY_SHOW_TIMER_HUD, false)
         val overlay = prefs.getBoolean(KEY_OVERLAY_ENABLED, false)
         val bubbleSize = prefs.getInt(KEY_BUBBLE_SIZE_DP, 38).coerceIn(28, 64)
@@ -365,25 +380,29 @@ object ScreenRecordingManager {
             height = height,
             fps = fps,
             bitrateMbps = bitrate,
-            recordMic = mic,
+            recordMic = audioMode == AudioSourceMode.INTERNAL_AND_MIC || audioMode == AudioSourceMode.MIC_ONLY,
+            audioSourceMode = audioMode,
             showTimerHud = showTimer,
             isOverlayEnabled = overlay,
             bubbleSizeDp = bubbleSize
         )
-        if (!hasResolution) {
+        if (!hasResolution || savedAudioModeStr == null) {
             saveSettings(context, settings)
         }
         return settings
     }
 
     fun saveSettings(context: Context, settings: VideoQualitySettings) {
+        val micIncluded = settings.audioSourceMode == AudioSourceMode.INTERNAL_AND_MIC ||
+            settings.audioSourceMode == AudioSourceMode.MIC_ONLY
         getPrefs(context).edit()
             .putString(KEY_RESOLUTION_LABEL, settings.resolutionLabel)
             .putInt(KEY_RES_WIDTH, settings.width)
             .putInt(KEY_RES_HEIGHT, settings.height)
             .putInt(KEY_FPS, settings.fps)
             .putInt(KEY_BITRATE_MBPS, settings.bitrateMbps)
-            .putBoolean(KEY_RECORD_MIC, settings.recordMic)
+            .putBoolean(KEY_RECORD_MIC, micIncluded)
+            .putString(KEY_AUDIO_SOURCE_MODE, settings.audioSourceMode.name)
             .putBoolean(KEY_SHOW_TIMER_HUD, settings.showTimerHud)
             .putBoolean(KEY_OVERLAY_ENABLED, settings.isOverlayEnabled)
             .putInt(KEY_BUBBLE_SIZE_DP, settings.bubbleSizeDp.coerceIn(28, 64))

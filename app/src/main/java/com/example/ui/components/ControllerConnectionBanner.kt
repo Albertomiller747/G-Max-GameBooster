@@ -93,20 +93,10 @@ fun ControllerConnectionBanner(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Box(
-                            modifier = Modifier
-                                .size(36.dp)
-                                .clip(CircleShape)
-                                .background(accentColor.copy(alpha = 0.16f)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.SportsEsports,
-                                contentDescription = null,
-                                tint = accentColor,
-                                modifier = Modifier.size(20.dp)
-                            )
-                        }
+                        GMaxControllerBadge(
+                            size = 36.dp,
+                            accentColor = accentColor
+                        )
 
                         Spacer(modifier = Modifier.width(12.dp))
 

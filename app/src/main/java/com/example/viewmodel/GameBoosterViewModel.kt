@@ -10,6 +10,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.data.AdbCommandsRepository
 import com.example.data.GameGuidanceDatabase
+import com.example.data.repository.LeaderboardEntry
 import com.example.data.repository.UserAccountRepository
 import com.example.data.repository.UserCloudProfile
 import com.google.firebase.Firebase
@@ -17,6 +18,9 @@ import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.FirebaseUser
 import com.google.firebase.auth.auth
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.stateIn
 import com.example.model.AdbCommandTweak
 import com.example.model.AppBackgroundTheme
 import com.example.model.BenchmarkRun
@@ -228,9 +232,16 @@ class GameBoosterViewModel(application: Application) : AndroidViewModel(applicat
     )
     val currentFirebaseUser: StateFlow<FirebaseUser?> = _currentFirebaseUser.asStateFlow()
 
+    private val _socialSignedInProvider = MutableStateFlow(
+        hubPrefs.getString("hub_social_auth_provider", "") ?: ""
+    )
+    val socialSignedInProvider: StateFlow<String> = _socialSignedInProvider.asStateFlow()
+
     // Tracks whether the user has completed the post-splash Sign In / Create Account step
     private val _hasCompletedAuthStep = MutableStateFlow(
-        (_currentFirebaseUser.value != null) || hubPrefs.getBoolean("hub_auth_step_completed", false)
+        (_currentFirebaseUser.value != null) ||
+            _socialSignedInProvider.value.isNotBlank() ||
+            hubPrefs.getBoolean("hub_auth_step_completed", false)
     )
     val hasCompletedAuthStep: StateFlow<Boolean> = _hasCompletedAuthStep.asStateFlow()
 
@@ -238,7 +249,11 @@ class GameBoosterViewModel(application: Application) : AndroidViewModel(applicat
     val cloudProfile: StateFlow<UserCloudProfile?> = _cloudProfile.asStateFlow()
 
     private val _cloudSyncStatus = MutableStateFlow(
-        if (_currentFirebaseUser.value != null) "Cloud Sync Active" else "Guest Mode (Local Storage Only)"
+        when {
+            _currentFirebaseUser.value != null -> "Cloud Sync Active"
+            _socialSignedInProvider.value.isNotBlank() -> "Signed in with ${_socialSignedInProvider.value} • Profile Active"
+            else -> "Guest Mode (Local Storage Only)"
+        }
     )
     val cloudSyncStatus: StateFlow<String> = _cloudSyncStatus.asStateFlow()
 
@@ -259,6 +274,37 @@ class GameBoosterViewModel(application: Application) : AndroidViewModel(applicat
         hubPrefs.getString("hub_user_custom_name", "") ?: ""
     )
     val customDisplayName: StateFlow<String> = _customDisplayName.asStateFlow()
+
+    private val _userUsername = MutableStateFlow(
+        hubPrefs.getString("hub_user_username", "") ?: ""
+    )
+    val userUsername: StateFlow<String> = _userUsername.asStateFlow()
+
+    private val _userCountryCode = MutableStateFlow(
+        hubPrefs.getString("hub_user_country_code", null)
+            ?.takeIf { it.isNotBlank() }
+            ?: com.example.util.CountryCatalog.getDefaultCountry().code
+    )
+    val userCountryCode: StateFlow<String> = _userCountryCode.asStateFlow()
+
+    private val _userCountryName = MutableStateFlow(
+        hubPrefs.getString("hub_user_country_name", null)
+            ?.takeIf { it.isNotBlank() }
+            ?: com.example.util.CountryCatalog.getDefaultCountry().name
+    )
+    val userCountryName: StateFlow<String> = _userCountryName.asStateFlow()
+
+    private val _leaderboardEntries = MutableStateFlow<List<LeaderboardEntry>>(emptyList())
+    val leaderboardEntries: StateFlow<List<LeaderboardEntry>> = _leaderboardEntries.asStateFlow()
+
+    private val _isLeaderboardLoading = MutableStateFlow(false)
+    val isLeaderboardLoading: StateFlow<Boolean> = _isLeaderboardLoading.asStateFlow()
+
+    private val _isCheckingUsername = MutableStateFlow(false)
+    val isCheckingUsername: StateFlow<Boolean> = _isCheckingUsername.asStateFlow()
+
+    private val _usernameError = MutableStateFlow<String?>(null)
+    val usernameError: StateFlow<String?> = _usernameError.asStateFlow()
 
     private val _customEmail = MutableStateFlow(
         hubPrefs.getString("hub_user_custom_email", "") ?: ""
@@ -281,7 +327,65 @@ class GameBoosterViewModel(application: Application) : AndroidViewModel(applicat
     )
     val isVerifiedDeveloperAccount: StateFlow<Boolean> = _isVerifiedDeveloperAccount.asStateFlow()
 
+    fun getAccountKey(email: String? = null, uid: String? = null): String {
+        val raw = email?.takeIf { it.isNotBlank() }
+            ?: uid?.takeIf { it.isNotBlank() }
+            ?: _currentFirebaseUser.value?.email
+            ?: _currentFirebaseUser.value?.uid
+            ?: _customEmail.value.takeIf { it.isNotBlank() }
+            ?: "guest"
+        return raw.lowercase().trim().replace("[^a-zA-Z0-9_]".toRegex(), "_")
+    }
+
+    private val _userAvatarUrl = MutableStateFlow(
+        hubPrefs.getString("hub_avatar_${getAccountKey()}", "") ?: ""
+    )
+    val userAvatarUrl: StateFlow<String> = _userAvatarUrl.asStateFlow()
+
+    private val _userBannerUrl = MutableStateFlow(
+        hubPrefs.getString("hub_banner_${getAccountKey()}", "cyber_neon_grid") ?: "cyber_neon_grid"
+    )
+    val userBannerUrl: StateFlow<String> = _userBannerUrl.asStateFlow()
+
+    private fun reloadAccountMedia(user: FirebaseUser?) {
+        val key = getAccountKey(user?.email, user?.uid)
+        val savedAvatar = hubPrefs.getString("hub_avatar_$key", "") ?: ""
+        val savedBanner = hubPrefs.getString("hub_banner_$key", "cyber_neon_grid") ?: "cyber_neon_grid"
+        _userAvatarUrl.value = if (savedAvatar.isNotBlank()) savedAvatar else (user?.photoUrl?.toString() ?: "")
+        _userBannerUrl.value = savedBanner
+    }
+
+    private val _customDeletionUrl = MutableStateFlow(
+        hubPrefs.getString("hub_custom_deletion_url", "") ?: ""
+    )
+    val customDeletionUrl: StateFlow<String> = _customDeletionUrl.asStateFlow()
+
+    fun setCustomDeletionUrl(url: String) {
+        val trimmed = url.trim()
+        hubPrefs.edit().putString("hub_custom_deletion_url", trimmed).apply()
+        _customDeletionUrl.value = trimmed
+    }
+
+    val gamerscoreData: StateFlow<com.example.util.GamerscoreData> = combine(
+        _totalPlayTimeSummary,
+        _cloudProfile
+    ) { summary, cloud ->
+        val mins = maxOf(summary.totalMinutes, cloud?.totalPlayTimeMinutes ?: 0L)
+        val sessions = maxOf(summary.totalSessions.toLong(), cloud?.totalSessionsCount ?: 0L)
+        com.example.util.GamerscoreEngine.calculateGamerscore(mins, sessions)
+    }.stateIn(
+        viewModelScope,
+        SharingStarted.Eagerly,
+        com.example.util.GamerscoreEngine.calculateGamerscore(0L, 0L)
+    )
+
+    fun get7DayGamingHistory(): List<com.example.util.DailyPlayTime> {
+        val currentMins = maxOf(_totalPlayTimeSummary.value.totalMinutes, _cloudProfile.value?.totalPlayTimeMinutes ?: 0L)
+        return com.example.util.GamerscoreEngine.get7DayGamingHistory(context, currentMins)
+    }
+
     private var profileObserverJob: Job? = null
+    private var leaderboardObserverJob: Job? = null
     private var cloudSyncDebounceJob: Job? = null
     private var isApplyingCloudSettings = false
 
@@ -291,17 +395,23 @@ class GameBoosterViewModel(application: Application) : AndroidViewModel(applicat
         if (user != null) {
             _hasCompletedAuthStep.value = true
             hubPrefs.edit().putBoolean("hub_auth_step_completed", true).apply()
+            reloadAccountMedia(user)
             if (com.example.util.PremadeTagsCatalog.isOfficialDeveloperEmail(user.email)) {
                 ensurePrecreatedDeveloperAccountSeeded(user.email ?: com.example.util.PremadeTagsCatalog.OFFICIAL_DEVELOPER_EMAIL)
             } else {
                 _isVerifiedDeveloperAccount.value = false
             }
             startCloudProfileSyncForUser(user)
+            startWorldwideLeaderboardSync()
         } else {
             profileObserverJob?.cancel()
             profileObserverJob = null
+            leaderboardObserverJob?.cancel()
+            leaderboardObserverJob = null
             _cloudProfile.value = null
             _isVerifiedDeveloperAccount.value = com.example.util.PremadeTagsCatalog.isOfficialDeveloperEmail(_customEmail.value)
+            _userAvatarUrl.value = ""
+            _userBannerUrl.value = "cyber_neon_grid"
             _cloudSyncStatus.value = "Guest Mode (Local Storage Only)"
         }
     }
@@ -319,19 +429,18 @@ class GameBoosterViewModel(application: Application) : AndroidViewModel(applicat
         }
     }
 
-    // Lite Mode / Reduced Animations for low-end phones (auto-enables on <= 4GB RAM if not manually set)
+    // Lite Mode / Reduced Animations (disabled by default for all installations unless manually enabled by the user)
     private val _reducedAnimations = MutableStateFlow(
-        if (hubPrefs.contains("hub_reduced_animations")) {
-            hubPrefs.getBoolean("hub_reduced_animations", false)
-        } else {
-            isLowRamDeviceDetected
-        }
+        hubPrefs.getBoolean("hub_lite_mode_manual", false)
     )
     val reducedAnimations: StateFlow<Boolean> = _reducedAnimations.asStateFlow()
 
     fun setReducedAnimations(enabled: Boolean) {
         _reducedAnimations.value = enabled
-        hubPrefs.edit().putBoolean("hub_reduced_animations", enabled).apply()
+        hubPrefs.edit()
+            .putBoolean("hub_lite_mode_manual", enabled)
+            .putBoolean("hub_reduced_animations", enabled)
+            .apply()
         scheduleCloudSettingsSync()
     }
 
@@ -469,11 +578,13 @@ class GameBoosterViewModel(application: Application) : AndroidViewModel(applicat
             val normalizedCap = if (savedCap in com.example.util.EfpsEngine.SUPPORTED_CAP_MODES) savedCap else "AUTO"
             val savedRamPct = hudPrefs.getBoolean("hud_show_ram_pct", true)
             val savedClock = hudPrefs.getBoolean("hud_show_clock", true)
+            val savedAutoScale = hudPrefs.getBoolean("hud_auto_scale", true)
             _overlayConfig.value = _overlayConfig.value.copy(
                 fpsMode = normalizedMode,
                 targetCapMode = normalizedCap,
                 showRamPct = savedRamPct,
-                showClock = savedClock
+                showClock = savedClock,
+                autoScaleSmallScreens = savedAutoScale
             )
         } catch (_: Exception) {}
 
@@ -571,6 +682,7 @@ class GameBoosterViewModel(application: Application) : AndroidViewModel(applicat
             Firebase.auth.removeAuthStateListener(authStateListener)
         } catch (_: Exception) {}
         profileObserverJob?.cancel()
+        leaderboardObserverJob?.cancel()
         cloudSyncDebounceJob?.cancel()
         thermalMonitor.stop()
         networkTester.setLowLatencyWifiLock(false)
@@ -904,6 +1016,14 @@ class GameBoosterViewModel(application: Application) : AndroidViewModel(applicat
         scheduleCloudSettingsSync()
     }
 
+    fun toggleOverlayAutoScale(context: Context, enabled: Boolean) {
+        _overlayConfig.value = _overlayConfig.value.copy(autoScaleSmallScreens = enabled)
+        context.getSharedPreferences("gmax_hud_prefs", Context.MODE_PRIVATE)
+            .edit().putBoolean("hud_auto_scale", enabled).apply()
+        syncOverlayService(context)
+        scheduleCloudSettingsSync()
+    }
+
     fun setFpsMode(context: Context, mode: String) {
         val normalized = com.example.util.EfpsSamplingProfile.fromKey(mode).key
         _overlayConfig.value = _overlayConfig.value.copy(fpsMode = normalized)
@@ -934,6 +1054,7 @@ class GameBoosterViewModel(application: Application) : AndroidViewModel(applicat
             putExtra(GamingOverlayService.EXTRA_SHOW_TIMER, cfg.showTimer)
             putExtra(GamingOverlayService.EXTRA_SHOW_RAM_PCT, cfg.showRamPct && cfg.isEnabled)
             putExtra(GamingOverlayService.EXTRA_SHOW_CLOCK, cfg.showClock && cfg.isEnabled)
+            putExtra(GamingOverlayService.EXTRA_AUTO_SCALE, cfg.autoScaleSmallScreens)
             putExtra("EXTRA_FPS_MODE", cfg.fpsMode)
             putExtra("EXTRA_TARGET_CAP", cfg.targetCapMode)
         }
@@ -1345,29 +1466,115 @@ class GameBoosterViewModel(application: Application) : AndroidViewModel(applicat
         _cloudSyncStatus.value = "Guest Mode (Local Storage Only)"
     }
 
-    fun onUserSignedInSuccess() {
+    fun onUserSignedInSuccess(providerLabel: String = "Google") {
         val user = try { Firebase.auth.currentUser } catch (_: Exception) { null }
         _currentFirebaseUser.value = user
+        _socialSignedInProvider.value = providerLabel
         _hasCompletedAuthStep.value = true
-        hubPrefs.edit().putBoolean("hub_auth_step_completed", true).apply()
+        hubPrefs.edit()
+            .putBoolean("hub_auth_step_completed", true)
+            .putString("hub_social_auth_provider", providerLabel)
+            .apply()
+        reloadAccountMedia(user)
         if (user != null) {
             startCloudProfileSyncForUser(user)
+        } else {
+            _cloudSyncStatus.value = "Signed in with $providerLabel • Profile Active"
         }
+    }
+
+    fun onSocialAccountSignedIn(providerLabel: String, fullName: String, email: String) {
+        val cleanName = fullName.trim().ifBlank { "$providerLabel Gamer" }
+        val cleanEmail = email.trim().ifBlank { "gamer@${providerLabel.lowercase(java.util.Locale.US)}.com" }
+        setCustomProfileCredentials(cleanName, cleanEmail)
+        if (_userUsername.value.isBlank()) {
+            val baseHandle = com.example.util.PremadeTagsCatalog.sanitizeUsername(
+                cleanName.lowercase(java.util.Locale.US).replace(" ", "_"),
+                cleanName,
+                _isVerifiedDeveloperAccount.value
+            )
+            _userUsername.value = baseHandle
+            hubPrefs.edit().putString("hub_user_username", baseHandle).apply()
+        }
+        onUserSignedInSuccess(providerLabel)
     }
 
     fun onUserSignedOut() {
         profileObserverJob?.cancel()
         profileObserverJob = null
         _currentFirebaseUser.value = null
+        _socialSignedInProvider.value = ""
         _cloudProfile.value = null
         _customEmail.value = ""
         _customDisplayName.value = ""
+        _userAvatarUrl.value = ""
+        _userBannerUrl.value = "cyber_neon_grid"
         _isVerifiedDeveloperAccount.value = false
         hubPrefs.edit()
             .remove("hub_user_custom_email")
             .remove("hub_user_custom_name")
+            .remove("hub_social_auth_provider")
             .apply()
         _cloudSyncStatus.value = "Signed out — using local device settings"
+    }
+
+    fun deleteCurrentAccount(onComplete: (Boolean, String?) -> Unit) {
+        val repo = userAccountRepository
+        val key = getAccountKey()
+        viewModelScope.launch {
+            try {
+                if (repo != null && _currentFirebaseUser.value != null) {
+                    val result = repo.deleteUserProfileAndAccount()
+                    if (result.isFailure) {
+                        onComplete(false, result.exceptionOrNull()?.message ?: "Failed to delete remote cloud profile")
+                        return@launch
+                    }
+                }
+                // Wipe local account profile prefs
+                hubPrefs.edit()
+                    .remove("hub_avatar_$key")
+                    .remove("hub_banner_$key")
+                    .remove("hub_user_custom_email")
+                    .remove("hub_user_custom_name")
+                    .remove("hub_user_bio")
+                    .remove("hub_user_dob")
+                    .remove("hub_user_selected_tags_csv")
+                    .apply()
+
+                onUserSignedOut()
+                onComplete(true, null)
+            } catch (e: Exception) {
+                onComplete(false, e.localizedMessage ?: "Account deletion failed")
+            }
+        }
+    }
+
+    fun setUserAvatar(urlOrUri: String) {
+        val safe = urlOrUri.trim()
+        _userAvatarUrl.value = safe
+        val key = getAccountKey()
+        hubPrefs.edit().putString("hub_avatar_$key", safe).apply()
+        val user = _currentFirebaseUser.value
+        if (user != null && userAccountRepository != null) {
+            viewModelScope.launch {
+                userAccountRepository.updatePhotoUrl(safe)
+            }
+        }
+        scheduleCloudSettingsSync()
+    }
+
+    fun setUserBanner(bannerKeyOrUri: String) {
+        val safe = bannerKeyOrUri.trim()
+        _userBannerUrl.value = safe
+        val key = getAccountKey()
+        hubPrefs.edit().putString("hub_banner_$key", safe).apply()
+        val user = _currentFirebaseUser.value
+        if (user != null && userAccountRepository != null) {
+            viewModelScope.launch {
+                userAccountRepository.updateBannerUrl(safe)
+            }
+        }
+        scheduleCloudSettingsSync()
     }
 
     fun setUserDateOfBirth(dob: String) {
@@ -1409,6 +1616,105 @@ class GameBoosterViewModel(application: Application) : AndroidViewModel(applicat
         return false
     }
 
+    fun clearUsernameError() {
+        _usernameError.value = null
+    }
+
+    fun updateUsername(
+        rawNewUsername: String,
+        onComplete: (Boolean, String) -> Unit = { _, _ -> }
+    ) {
+        val isDev = _isVerifiedDeveloperAccount.value
+        val validation = com.example.util.PremadeTagsCatalog.validateUsername(rawNewUsername, isDev)
+        if (validation.isFailure) {
+            val msg = validation.exceptionOrNull()?.message ?: "Invalid username format"
+            _usernameError.value = msg
+            onComplete(false, msg)
+            return
+        }
+        val cleanUsername = validation.getOrThrow()
+        val prevUsername = _userUsername.value
+
+        val user = _currentFirebaseUser.value
+        val repo = userAccountRepository
+        if (user != null && repo != null) {
+            viewModelScope.launch {
+                _isCheckingUsername.value = true
+                _usernameError.value = null
+                val claimResult = repo.claimAndSaveUsername(cleanUsername, prevUsername)
+                _isCheckingUsername.value = false
+                if (claimResult.isSuccess) {
+                    val claimed = claimResult.getOrNull() ?: cleanUsername
+                    _userUsername.value = claimed
+                    hubPrefs.edit().putString("hub_user_username", claimed).apply()
+                    scheduleCloudSettingsSync()
+                    onComplete(true, "Username @$claimed saved!")
+                } else {
+                    val err = claimResult.exceptionOrNull()?.message ?: "Could not claim username."
+                    _usernameError.value = err
+                    onComplete(false, err)
+                }
+            }
+        } else {
+            // Check against cached leaderboard entries in guest mode
+            val lower = cleanUsername.lowercase()
+            val collision = _leaderboardEntries.value.any {
+                it.username.lowercase() == lower && it.userId != "guest"
+            }
+            if (collision) {
+                val msg = "Username @$cleanUsername is already taken on the leaderboard."
+                _usernameError.value = msg
+                onComplete(false, msg)
+                return
+            }
+            _usernameError.value = null
+            _userUsername.value = cleanUsername
+            hubPrefs.edit().putString("hub_user_username", cleanUsername).apply()
+            onComplete(true, "Username @$cleanUsername saved!")
+        }
+    }
+
+    fun setUserCountry(countryCode: String, countryName: String) {
+        val safeCode = countryCode.trim().uppercase().ifEmpty { "US" }
+        val safeName = countryName.trim().ifEmpty { "United States" }
+        _userCountryCode.value = safeCode
+        _userCountryName.value = safeName
+        hubPrefs.edit()
+            .putString("hub_user_country_code", safeCode)
+            .putString("hub_user_country_name", safeName)
+            .apply()
+        val user = _currentFirebaseUser.value
+        val repo = userAccountRepository
+        if (user != null && repo != null) {
+            viewModelScope.launch {
+                repo.updateCountry(safeCode, safeName)
+            }
+        }
+        scheduleCloudSettingsSync()
+    }
+
+    fun startWorldwideLeaderboardSync() {
+        val repo = userAccountRepository ?: return
+        val user = _currentFirebaseUser.value ?: return
+        leaderboardObserverJob?.cancel()
+        leaderboardObserverJob = viewModelScope.launch {
+            _isLeaderboardLoading.value = true
+            try {
+                // Ensure current user's score & handle are published to leaderboard
+                repo.syncLeaderboardEntry(buildCurrentCloudProfile(user))
+            } catch (_: Exception) {}
+
+            repo.observeWorldwideLeaderboard(100L)
+                .catch {
+                    _isLeaderboardLoading.value = false
+                }
+                .collect { remoteEntries ->
+                    _leaderboardEntries.value = remoteEntries
+                    _isLeaderboardLoading.value = false
+                }
+        }
+    }
+
     /**
      * Pre-provisioned account initializer for Albertomiller747@gmail.com.
      * Grants the exclusive Verified Developer Gold-Star status and seeds default creator profile fields.
@@ -1426,6 +1732,10 @@ class GameBoosterViewModel(application: Application) : AndroidViewModel(applicat
         if (_customDisplayName.value.isBlank() || _customDisplayName.value == "Gamer") {
             _customDisplayName.value = com.example.util.PremadeTagsCatalog.OFFICIAL_DEVELOPER_NAME
             editor.putString("hub_user_custom_name", com.example.util.PremadeTagsCatalog.OFFICIAL_DEVELOPER_NAME)
+        }
+        if (_userUsername.value.isBlank()) {
+            _userUsername.value = com.example.util.PremadeTagsCatalog.OFFICIAL_DEVELOPER_USERNAME
+            editor.putString("hub_user_username", com.example.util.PremadeTagsCatalog.OFFICIAL_DEVELOPER_USERNAME)
         }
         if (_userBio.value.isBlank()) {
             _userBio.value = com.example.util.PremadeTagsCatalog.OFFICIAL_DEVELOPER_BIO
@@ -1601,14 +1911,40 @@ class GameBoosterViewModel(application: Application) : AndroidViewModel(applicat
             ?: _cloudProfile.value?.displayName?.takeIf { it.isNotBlank() }
             ?: if (isVerifiedDev) com.example.util.PremadeTagsCatalog.OFFICIAL_DEVELOPER_NAME else "G-Max Gamer"
         val resolvedDisplayName = com.example.util.PremadeTagsCatalog.sanitizeDisplayName(rawDisplayName, isVerifiedDev)
+        val rawUsername = _userUsername.value.takeIf { it.isNotBlank() }
+            ?: _cloudProfile.value?.username?.takeIf { it.isNotBlank() }
+            ?: ""
+        val resolvedUsername = com.example.util.PremadeTagsCatalog.sanitizeUsername(
+            rawUsername,
+            resolvedDisplayName,
+            isVerifiedDev
+        )
+        val resolvedCountryCode = _userCountryCode.value.takeIf { it.isNotBlank() }
+            ?: _cloudProfile.value?.countryCode?.takeIf { it.isNotBlank() }
+            ?: com.example.util.CountryCatalog.getDefaultCountry().code
+        val resolvedCountryName = _userCountryName.value.takeIf { it.isNotBlank() }
+            ?: _cloudProfile.value?.countryName?.takeIf { it.isNotBlank() }
+            ?: com.example.util.CountryCatalog.getDefaultCountry().name
         val safeTags = com.example.util.PremadeTagsCatalog.sanitizeSelectedTags(_selectedProfileTags.value)
+
+        val key = getAccountKey(resolvedEmail, user.uid)
+        val finalPhoto = _userAvatarUrl.value.ifBlank {
+            user.photoUrl?.toString() ?: (hubPrefs.getString("hub_avatar_$key", "") ?: "")
+        }
+        val finalBanner = _userBannerUrl.value.ifBlank {
+            hubPrefs.getString("hub_banner_$key", "cyber_neon_grid") ?: "cyber_neon_grid"
+        }
+        val computedGamerscore = com.example.util.GamerscoreEngine.calculateGamerscore(cumulativeMins, cumulativeSessions).totalScore
 
         return UserCloudProfile(
             id = user.uid,
             userId = user.uid,
             displayName = resolvedDisplayName,
+            username = resolvedUsername,
+            countryCode = resolvedCountryCode,
+            countryName = resolvedCountryName,
             email = resolvedEmail,
-            photoUrl = user.photoUrl?.toString() ?: "",
+            photoUrl = finalPhoto,
             dateOfBirth = _userDateOfBirth.value.ifBlank { "Not Set" },
             bio = _userBio.value,
             selectedTags = safeTags,
@@ -1653,6 +1989,8 @@ class GameBoosterViewModel(application: Application) : AndroidViewModel(applicat
             targetGamePkg = _selectedTargetGame.value?.packageName ?: "",
             targetGameName = _selectedTargetGame.value?.appName ?: "",
             libraryPackages = _libraryPackages.value.toList().take(100),
+            bannerUrl = finalBanner,
+            gamerscore = computedGamerscore,
             createdAt = _cloudProfile.value?.createdAt,
             updatedAt = _cloudProfile.value?.updatedAt
         )
@@ -1669,7 +2007,19 @@ class GameBoosterViewModel(application: Application) : AndroidViewModel(applicat
     private fun applyCloudProfileToLocalSettings(profile: UserCloudProfile) {
         isApplyingCloudSettings = true
         try {
-            // 1. Date of Birth, Bio, Selected Tags & Developer Verification
+            // 1. Date of Birth, Bio, Username, Country, Selected Tags & Developer Verification
+            if (profile.username.isNotBlank()) {
+                _userUsername.value = profile.username
+                hubPrefs.edit().putString("hub_user_username", profile.username).apply()
+            }
+            if (profile.countryCode.isNotBlank()) {
+                _userCountryCode.value = profile.countryCode
+                hubPrefs.edit().putString("hub_user_country_code", profile.countryCode).apply()
+            }
+            if (profile.countryName.isNotBlank()) {
+                _userCountryName.value = profile.countryName
+                hubPrefs.edit().putString("hub_user_country_name", profile.countryName).apply()
+            }
             if (profile.dateOfBirth.isNotBlank()) {
                 _userDateOfBirth.value = profile.dateOfBirth
                 hubPrefs.edit().putString("hub_user_dob", profile.dateOfBirth).apply()
@@ -1686,6 +2036,16 @@ class GameBoosterViewModel(application: Application) : AndroidViewModel(applicat
             val authEmail = _currentFirebaseUser.value?.email ?: profile.email
             _isVerifiedDeveloperAccount.value =
                 profile.isVerifiedDeveloper && com.example.util.PremadeTagsCatalog.isOfficialDeveloperEmail(authEmail)
+
+            val accountKey = getAccountKey(profile.email, profile.userId)
+            if (profile.photoUrl.isNotBlank()) {
+                _userAvatarUrl.value = profile.photoUrl
+                hubPrefs.edit().putString("hub_avatar_$accountKey", profile.photoUrl).apply()
+            }
+            if (profile.bannerUrl.isNotBlank()) {
+                _userBannerUrl.value = profile.bannerUrl
+                hubPrefs.edit().putString("hub_banner_$accountKey", profile.bannerUrl).apply()
+            }
 
             // 2. App Theme & Display Options
             val parsedTheme = try {

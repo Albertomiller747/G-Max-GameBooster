@@ -13,13 +13,33 @@
           "type": "string",
           "description": "User display name from Google Sign-In or profile customization."
         },
+        "username": {
+          "type": "string",
+          "description": "Unique gamer username handle (3 to 20 alphanumeric/underscore characters)."
+        },
+        "countryCode": {
+          "type": "string",
+          "description": "Selected ISO 3166-1 alpha-2 country code (e.g., US, GB, JP)."
+        },
+        "countryName": {
+          "type": "string",
+          "description": "Selected country display name (e.g., United States)."
+        },
         "email": {
           "type": "string",
           "description": "User email address from Google Sign-In."
         },
         "photoUrl": {
           "type": "string",
-          "description": "User profile picture URL."
+          "description": "User profile picture URL or local cached path."
+        },
+        "bannerUrl": {
+          "type": "string",
+          "description": "User hero background banner URL, preset ID, or local cached path."
+        },
+        "gamerscore": {
+          "type": "integer",
+          "description": "Uncapped Gamerscore points calculated from total playtime and sessions."
         },
         "dateOfBirth": {
           "type": "string",
@@ -211,8 +231,13 @@
       "required": [
         "userId",
         "displayName",
+        "username",
+        "countryCode",
+        "countryName",
         "email",
         "photoUrl",
+        "bannerUrl",
+        "gamerscore",
         "dateOfBirth",
         "bio",
         "selectedTags",
@@ -260,6 +285,81 @@
         "createdAt",
         "updatedAt"
       ]
+    },
+    "LeaderboardEntry": {
+      "title": "LeaderboardEntry",
+      "description": "Public worldwide leaderboard entry displaying only profile image, username, country flag, and Gamerscore without exposing private PII.",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "The authenticated Firebase user UID owning this leaderboard entry."
+        },
+        "username": {
+          "type": "string",
+          "description": "Unique gamer username handle."
+        },
+        "photoUrl": {
+          "type": "string",
+          "description": "User profile picture URL or cached path."
+        },
+        "countryCode": {
+          "type": "string",
+          "description": "Selected ISO 3166-1 alpha-2 country code."
+        },
+        "countryName": {
+          "type": "string",
+          "description": "Selected country display name."
+        },
+        "gamerscore": {
+          "type": "integer",
+          "description": "Worldwide Gamerscore ranking points."
+        },
+        "isVerifiedDeveloper": {
+          "type": "boolean",
+          "description": "True exclusively for the verified developer account Albertomiller747@gmail.com."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the leaderboard entry was last updated."
+        }
+      },
+      "required": [
+        "userId",
+        "username",
+        "photoUrl",
+        "countryCode",
+        "countryName",
+        "gamerscore",
+        "isVerifiedDeveloper",
+        "updatedAt"
+      ]
+    },
+    "UsernameClaim": {
+      "title": "UsernameClaim",
+      "description": "Enforces global username uniqueness across the worldwide leaderboard.",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "The authenticated Firebase user UID claiming this username."
+        },
+        "username": {
+          "type": "string",
+          "description": "Case-preserved username (3 to 20 alphanumeric/underscore characters)."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the username was claimed or updated."
+        }
+      },
+      "required": [
+        "userId",
+        "username",
+        "updatedAt"
+      ]
     }
   },
   "firestore": {
@@ -268,6 +368,18 @@
         "$ref": "#/entities/UserCloudProfile"
       },
       "description": "Stores each authenticated user's personal profile, most played game summary, date of birth, and synchronized app/boost/HUD/controller/recorder settings."
+    },
+    "/leaderboard/{userId}": {
+      "schema": {
+        "$ref": "#/entities/LeaderboardEntry"
+      },
+      "description": "Public worldwide leaderboard entries sorted by gamerscore descending."
+    },
+    "/usernames/{usernameLower}": {
+      "schema": {
+        "$ref": "#/entities/UsernameClaim"
+      },
+      "description": "Global registry of claimed lowercase usernames to enforce unique handles."
     }
   }
 }

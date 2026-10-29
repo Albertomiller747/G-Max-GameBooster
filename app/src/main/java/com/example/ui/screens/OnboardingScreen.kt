@@ -176,21 +176,13 @@ private fun WelcomeStepContent(
         Column(
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Box(
-                modifier = Modifier
-                    .size(76.dp)
-                    .clip(RoundedCornerShape(22.dp))
-                    .background(HubBlue.copy(alpha = 0.14f))
-                    .border(2.dp, HubBlue.copy(alpha = 0.45f), RoundedCornerShape(22.dp)),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = Icons.Default.SportsEsports,
-                    contentDescription = "G Max Gaming Hub",
-                    tint = HubBlue,
-                    modifier = Modifier.size(40.dp)
-                )
-            }
+            com.example.ui.components.GMaxBrandIcon(
+                size = 82.dp,
+                cornerRadius = 22.dp,
+                showGlowBorder = true,
+                glowColor = Color(0xFF00E5FF),
+                contentDescription = "G Max Gaming Hub"
+            )
 
             Spacer(modifier = Modifier.height(20.dp))
 
@@ -233,19 +225,29 @@ private fun WelcomeStepContent(
                             .padding(horizontal = 18.dp, vertical = 16.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Box(
-                            modifier = Modifier
-                                .size(48.dp)
-                                .clip(RoundedCornerShape(14.dp))
-                                .background(item.accentColor.copy(alpha = 0.14f)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = item.icon,
-                                contentDescription = item.badge,
-                                tint = item.accentColor,
-                                modifier = Modifier.size(26.dp)
+                        if (item.badge == "CONTROLLER") {
+                            com.example.ui.components.GMaxBrandIcon(
+                                size = 48.dp,
+                                cornerRadius = 14.dp,
+                                showGlowBorder = true,
+                                glowColor = item.accentColor,
+                                contentDescription = item.badge
                             )
+                        } else {
+                            Box(
+                                modifier = Modifier
+                                    .size(48.dp)
+                                    .clip(RoundedCornerShape(14.dp))
+                                    .background(item.accentColor.copy(alpha = 0.14f)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = item.icon,
+                                    contentDescription = item.badge,
+                                    tint = item.accentColor,
+                                    modifier = Modifier.size(26.dp)
+                                )
+                            }
                         }
 
                         Spacer(modifier = Modifier.width(16.dp))

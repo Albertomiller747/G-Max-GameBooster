@@ -215,6 +215,7 @@ data class OverlayHudConfig(
     val showTimer: Boolean = true,
     val showRamPct: Boolean = true,
     val showClock: Boolean = true,
+    val autoScaleSmallScreens: Boolean = true,
     val fpsMode: String = "BALANCED", // "FAST", "BALANCED", "SMOOTH"
     val targetCapMode: String = "AUTO" // "AUTO", "30", "45", "60", "90", "120", "144", "165"
 )

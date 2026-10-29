@@ -526,15 +526,15 @@ fun SettingsScreen(
                         modifier = Modifier
                             .padding(bottom = 10.dp)
                             .clip(RoundedCornerShape(8.dp))
-                            .background(LaunchGreen.copy(alpha = 0.14f))
-                            .border(1.dp, LaunchGreen.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
+                            .background(HubBlue.copy(alpha = 0.14f))
+                            .border(1.dp, HubBlue.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
                             .padding(horizontal = 10.dp, vertical = 4.dp)
                     ) {
                         Text(
-                            text = "Low-RAM phone detected (≤ 4 GB) • Auto-optimized for smooth UI",
+                            text = "Disabled by default • Optional toggle for ≤ 4 GB RAM devices",
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
-                            color = LaunchGreen
+                            color = HubBlue
                         )
                     }
                 }
@@ -571,7 +571,7 @@ fun SettingsScreen(
                             text = if (reducedAnimations) {
                                 "Active: Instant transitions & 0-lag static tile focus"
                             } else {
-                                "Off: Full console spring physics & startup animation"
+                                "Off by default: Full console spring physics & startup animation"
                             },
                             style = MaterialTheme.typography.bodySmall.copy(
                                 color = if (reducedAnimations) LaunchGreen else MaterialTheme.colorScheme.onSurfaceVariant,

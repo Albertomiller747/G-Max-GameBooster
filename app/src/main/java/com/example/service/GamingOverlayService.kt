@@ -66,6 +66,8 @@ class GamingOverlayService : Service(), Choreographer.FrameCallback {
     private var showTimer = true
     private var showRamPct = true
     private var showClock = true
+    private var autoScaleSmallScreens = true
+    private var closeBtnView: TextView? = null
 
     // Hardware Refresh Rate, Effective Cap, and Live 6-Way EFPS State
     private var displayRefreshRate = 60
@@ -157,6 +159,7 @@ class GamingOverlayService : Service(), Choreographer.FrameCallback {
         const val EXTRA_SHOW_TIMER = "EXTRA_SHOW_TIMER"
         const val EXTRA_SHOW_RAM_PCT = "EXTRA_SHOW_RAM_PCT"
         const val EXTRA_SHOW_CLOCK = "EXTRA_SHOW_CLOCK"
+        const val EXTRA_AUTO_SCALE = "EXTRA_AUTO_SCALE"
 
         var isServiceRunning = false
             private set
@@ -418,6 +421,10 @@ class GamingOverlayService : Service(), Choreographer.FrameCallback {
             EXTRA_SHOW_CLOCK,
             hudPrefs.getBoolean("hud_show_clock", true)
         ) ?: true
+        autoScaleSmallScreens = intent?.getBooleanExtra(
+            EXTRA_AUTO_SCALE,
+            hudPrefs.getBoolean("hud_auto_scale", true)
+        ) ?: true
         currentFpsMode = intent?.getStringExtra("EXTRA_FPS_MODE") ?: hudPrefs.getString("hud_fps_mode", "BALANCED") ?: "BALANCED"
         val targetCapMode = intent?.getStringExtra("EXTRA_TARGET_CAP") ?: hudPrefs.getString("hud_target_cap", "AUTO") ?: "AUTO"
         com.example.util.EfpsEngine.setSamplingProfile(this, currentFpsMode)
@@ -500,13 +507,16 @@ class GamingOverlayService : Service(), Choreographer.FrameCallback {
             elevation = 16f
         }
 
-        // 1. Live Multi-Sensor EFPS Indicator
+        // 1. Live Multi-Sensor EFPS Indicator (strictly single-line so it never wraps into 2 rows)
         fpsTextView = TextView(this).apply {
             text = "60 EFPS"
             setTextColor(Color.parseColor("#00E5FF"))
-            textSize = 12f
+            textSize = 11.5f
             typeface = android.graphics.Typeface.MONOSPACE
-            setPadding(0, 0, (8 * density).toInt(), 0)
+            isSingleLine = true
+            maxLines = 1
+            ellipsize = null
+            setPadding(0, 0, (7 * density).toInt(), 0)
         }
         hudContainer.addView(fpsTextView)
 
@@ -514,9 +524,12 @@ class GamingOverlayService : Service(), Choreographer.FrameCallback {
         timerTextView = TextView(this).apply {
             text = "⏳ --:--"
             setTextColor(Color.parseColor("#00E676"))
-            textSize = 12f
+            textSize = 11.5f
             typeface = android.graphics.Typeface.MONOSPACE
-            setPadding(0, 0, (8 * density).toInt(), 0)
+            isSingleLine = true
+            maxLines = 1
+            ellipsize = null
+            setPadding(0, 0, (7 * density).toInt(), 0)
         }
         hudContainer.addView(timerTextView)
 
@@ -524,9 +537,12 @@ class GamingOverlayService : Service(), Choreographer.FrameCallback {
         ramTextView = TextView(this).apply {
             text = "RAM $currentRamPct%"
             setTextColor(Color.parseColor("#A855F7"))
-            textSize = 12f
+            textSize = 11.5f
             typeface = android.graphics.Typeface.MONOSPACE
-            setPadding(0, 0, (8 * density).toInt(), 0)
+            isSingleLine = true
+            maxLines = 1
+            ellipsize = null
+            setPadding(0, 0, (7 * density).toInt(), 0)
         }
         hudContainer.addView(ramTextView)
 
@@ -534,19 +550,25 @@ class GamingOverlayService : Service(), Choreographer.FrameCallback {
         tempTextView = TextView(this).apply {
             text = "28.0°C"
             setTextColor(Color.parseColor("#F59E0B"))
-            textSize = 12f
+            textSize = 11.5f
             typeface = android.graphics.Typeface.MONOSPACE
-            setPadding(0, 0, (8 * density).toInt(), 0)
+            isSingleLine = true
+            maxLines = 1
+            ellipsize = null
+            setPadding(0, 0, (7 * density).toInt(), 0)
         }
         hudContainer.addView(tempTextView)
 
         // 5. Live Real Battery Level
         batteryTextView = TextView(this).apply {
-            text = "🔋 100%"
+            text = "🔋100%"
             setTextColor(Color.parseColor("#10B981"))
-            textSize = 12f
+            textSize = 11.5f
             typeface = android.graphics.Typeface.MONOSPACE
-            setPadding(0, 0, (8 * density).toInt(), 0)
+            isSingleLine = true
+            maxLines = 1
+            ellipsize = null
+            setPadding(0, 0, (7 * density).toInt(), 0)
         }
         hudContainer.addView(batteryTextView)
 
@@ -554,9 +576,12 @@ class GamingOverlayService : Service(), Choreographer.FrameCallback {
         clockTextView = TextView(this).apply {
             text = currentTimeOfDayStr.ifBlank { "12:00 PM" }
             setTextColor(Color.parseColor("#E2E8F0"))
-            textSize = 12f
+            textSize = 11.5f
             typeface = android.graphics.Typeface.MONOSPACE
-            setPadding(0, 0, (10 * density).toInt(), 0)
+            isSingleLine = true
+            maxLines = 1
+            ellipsize = null
+            setPadding(0, 0, (8 * density).toInt(), 0)
         }
         hudContainer.addView(clockTextView)
 
@@ -564,13 +589,16 @@ class GamingOverlayService : Service(), Choreographer.FrameCallback {
         val closeBtn = TextView(this).apply {
             text = "✕"
             setTextColor(Color.parseColor("#EF4444"))
-            textSize = 13f
+            textSize = 12f
             typeface = android.graphics.Typeface.DEFAULT_BOLD
-            setPadding((4 * density).toInt(), 0, (4 * density).toInt(), 0)
+            isSingleLine = true
+            maxLines = 1
+            setPadding((3 * density).toInt(), 0, (3 * density).toInt(), 0)
             setOnClickListener {
                 stopSelf()
             }
         }
+        closeBtnView = closeBtn
         hudContainer.addView(closeBtn)
 
         overlayLayout = hudContainer
@@ -645,19 +673,62 @@ class GamingOverlayService : Service(), Choreographer.FrameCallback {
         tempTextView?.visibility = if (showTemp) View.VISIBLE else View.GONE
         batteryTextView?.visibility = if (showBattery) View.VISIBLE else View.GONE
         clockTextView?.visibility = if (showClock) View.VISIBLE else View.GONE
+        applyResponsiveOverlayScale()
+    }
+
+    /**
+     * Auto-scales font size, item padding, and container padding based on phone screen width
+     * and the number of enabled HUD metrics so all 6 items stay strictly on 1 single row.
+     */
+    private fun applyResponsiveOverlayScale() {
+        val density = resources.displayMetrics.density
+        val screenWidthDp = resources.configuration.screenWidthDp.coerceAtLeast(320)
+        val isTimerVisible = boosterSessionManager?.isSessionActive() == true && showTimer
+        val activeCount = listOf(showFps, isTimerVisible, showRamPct, showTemp, showBattery, showClock).count { it }.coerceAtLeast(1)
+
+        val widthFactor = if (autoScaleSmallScreens) {
+            (screenWidthDp / 412f).coerceIn(0.76f, 1.04f)
+        } else {
+            0.94f
+        }
+        val densityFactor = when {
+            activeCount >= 6 -> if (autoScaleSmallScreens) 0.78f else 0.85f
+            activeCount == 5 -> if (autoScaleSmallScreens) 0.84f else 0.90f
+            activeCount == 4 -> 0.92f
+            else -> 1.0f
+        }
+
+        val resolvedTextSp = (11.8f * widthFactor * densityFactor).coerceIn(8.5f, 12.0f)
+        val itemGapPx = ((if (activeCount >= 5) 4.5f else 7.0f) * widthFactor * density).toInt().coerceAtLeast(3)
+        val padHPx = ((if (activeCount >= 5) 8.5f else 11.5f) * widthFactor * density).toInt().coerceAtLeast(6)
+        val padVPx = ((if (activeCount >= 5) 4.5f else 6.0f) * widthFactor * density).toInt().coerceAtLeast(4)
+
+        (overlayLayout as? LinearLayout)?.setPadding(padHPx, padVPx, padHPx, padVPx)
+
+        listOf(fpsTextView, timerTextView, ramTextView, tempTextView, batteryTextView, clockTextView).forEach { tv ->
+            tv?.textSize = resolvedTextSp
+            tv?.isSingleLine = true
+            tv?.maxLines = 1
+            tv?.setPadding(0, 0, itemGapPx, 0)
+        }
+        closeBtnView?.textSize = (resolvedTextSp + 0.5f).coerceIn(9.0f, 12.5f)
     }
 
     @SuppressLint("SetTextI18n")
     private fun updateLabels() {
-        // Compact 96%–98% Accuracy 6-Way Multi-Sensor EFPS Readout
-        fpsTextView?.text = "$currentFps EFPS"
+        val isTimerVisible = boosterSessionManager?.isSessionActive() == true && showTimer
+        val activeCount = listOf(showFps, isTimerVisible, showRamPct, showTemp, showBattery, showClock).count { it }
+        val isCompactHud = autoScaleSmallScreens && activeCount >= 5 && resources.configuration.screenWidthDp < 430
 
-        // Dynamic 3-stage color shift relative to the active game's effective FPS ceiling:
-        // Cyber Cyan (Optimal >= 90%) -> Solar Amber (Moderate drop 70%-89%) -> Electric Crimson (Severe lag < 70%)
+        // Compact 96%–98% Accuracy 6-Way Multi-Sensor EFPS Readout
+        fpsTextView?.text = if (isCompactHud) "$currentFps FPS" else "$currentFps EFPS"
+
+        // Dynamic color shift: sub-30 EFPS is always flagged in Electric Crimson (#FF5252 / #EF4444)
         val ceiling = effectiveCapFps.coerceAtLeast(30)
         val stableThreshold = (ceiling * 0.90f).toInt()
-        val moderateThreshold = (ceiling * 0.70f).toInt()
+        val moderateThreshold = (ceiling * 0.70f).toInt().coerceAtLeast(30)
         val fpsColor = when {
+            currentFps < 30 -> Color.parseColor("#FF5252") // Sub-30 FPS critical frame drop alert
             currentFps >= stableThreshold -> Color.parseColor("#00E5FF") // Cyber Cyan (Smooth/Optimal)
             currentFps >= moderateThreshold -> Color.parseColor("#F59E0B") // Solar Amber (Moderate drop)
             else -> Color.parseColor("#EF4444") // Electric Crimson (Severe drop/lag)
@@ -673,13 +744,12 @@ class GamingOverlayService : Service(), Choreographer.FrameCallback {
             val isBeast = mode == com.example.model.BoostMode.BEAST
             val now = System.currentTimeMillis()
 
-            // Subdued HUD status feedback: if a purge just occurred in the last 4s, momentarily show stats
             if (now - lastPurgeTimestamp in 0..4000L && lastPurgedMb > 0) {
-                timerTextView?.text = "⚡ -${lastPurgedMb}MB"
+                timerTextView?.text = "⚡-${lastPurgedMb}M"
                 timerTextView?.setTextColor(Color.parseColor("#00E5FF"))
             } else {
                 val icon = if (isBeast) "🔥" else "⏳"
-                timerTextView?.text = "$icon $formatted"
+                timerTextView?.text = if (isCompactHud) "$icon$formatted" else "$icon $formatted"
                 timerTextView?.setTextColor(if (isBeast) Color.parseColor("#FF5722") else Color.parseColor("#00E676"))
             }
             timerTextView?.visibility = View.VISIBLE
@@ -688,7 +758,7 @@ class GamingOverlayService : Service(), Choreographer.FrameCallback {
         }
 
         // 3. RAM Usage Percentage
-        ramTextView?.text = "RAM $currentRamPct%"
+        ramTextView?.text = if (isCompactHud) "R:$currentRamPct%" else "RAM $currentRamPct%"
         val ramColor = when {
             currentRamPct >= 85 -> Color.parseColor("#EF4444")
             currentRamPct >= 72 -> Color.parseColor("#F59E0B")
@@ -697,11 +767,12 @@ class GamingOverlayService : Service(), Choreographer.FrameCallback {
         ramTextView?.setTextColor(ramColor)
 
         tempTextView?.text = String.format(java.util.Locale.US, "%.1f°C", currentTempC)
-        batteryTextView?.text = "🔋 $currentBatteryLevel%"
+        batteryTextView?.text = if (isCompactHud) "🔋$currentBatteryLevel%" else "🔋 $currentBatteryLevel%"
         if (currentTimeOfDayStr.isBlank()) {
             queryRamAndClock()
         }
         clockTextView?.text = currentTimeOfDayStr
+        applyResponsiveOverlayScale()
     }
 
     private fun startFpsMeter() {
@@ -710,8 +781,8 @@ class GamingOverlayService : Service(), Choreographer.FrameCallback {
             efpsCollectorJob = serviceScope.launch(Dispatchers.Main) {
                 com.example.util.EfpsEngine.telemetry.collect { state ->
                     displayRefreshRate = state.displayHz.coerceIn(30, 240)
-                    effectiveCapFps = state.effectiveCapFps.coerceIn(30, 240)
-                    currentFps = state.currentEfps
+                    effectiveCapFps = state.effectiveCapFps.coerceIn(15, 240)
+                    currentFps = state.currentEfps.coerceAtLeast(1)
                     updateLabels()
                 }
             }

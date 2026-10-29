@@ -24,6 +24,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -290,53 +292,32 @@ fun GamesScreen(
             ),
             verticalArrangement = Arrangement.spacedBy(20.dp)
         ) {
-            // 1. Search Bar + Add Game + Quick Boost Row
+            // 1. Search Bar + Add Game + Quick Boost Row (Compact in Portrait Mode so search bar is never oversized)
             item {
+                val isCompactPortraitBar = !isBigScreenMode
+                val barHeight = if (isCompactPortraitBar) 42.dp else 52.dp
+                val barCorner = if (isCompactPortraitBar) 12.dp else 16.dp
+                val btnPadH = if (isCompactPortraitBar) 10.dp else 14.dp
+                val btnFont = if (isCompactPortraitBar) 11.5.sp else 13.sp
+                val iconSize = if (isCompactPortraitBar) 15.dp else 18.dp
+
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    horizontalArrangement = Arrangement.spacedBy(if (isCompactPortraitBar) 8.dp else 12.dp)
                 ) {
-                    OutlinedTextField(
-                        value = searchQuery,
-                        onValueChange = { searchQuery = it },
-                        placeholder = {
-                            Text(
-                                text = "Search games in console launcher...",
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                fontSize = 14.sp
-                            )
-                        },
-                        leadingIcon = {
-                            Icon(
-                                imageVector = Icons.Default.Search,
-                                contentDescription = "Search Games",
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        },
-                        trailingIcon = {
-                            if (searchQuery.isNotEmpty()) {
-                                IconButton(onClick = { searchQuery = "" }) {
-                                    Icon(
-                                        imageVector = Icons.Default.Close,
-                                        contentDescription = "Clear search",
-                                        tint = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                }
-                            }
-                        },
-                        singleLine = true,
-                        shape = RoundedCornerShape(16.dp),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = HubBlue,
-                            unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.4f),
-                            focusedContainerColor = MaterialTheme.colorScheme.surface,
-                            unfocusedContainerColor = MaterialTheme.colorScheme.surface,
-                            focusedTextColor = MaterialTheme.colorScheme.onSurface,
-                            unfocusedTextColor = MaterialTheme.colorScheme.onSurface
-                        ),
+                    Box(
                         modifier = Modifier
                             .weight(1f)
+                            .height(barHeight)
+                            .clip(RoundedCornerShape(barCorner))
+                            .background(MaterialTheme.colorScheme.surface)
+                            .border(
+                                1.dp,
+                                if (searchQuery.isNotEmpty()) HubBlue else MaterialTheme.colorScheme.outline.copy(alpha = 0.4f),
+                                RoundedCornerShape(barCorner)
+                            )
+                            .padding(horizontal = if (isCompactPortraitBar) 10.dp else 14.dp)
                             .onPreviewKeyEvent { keyEvent ->
                                 if (keyEvent.type == KeyEventType.KeyDown &&
                                     (keyEvent.key == Key.DirectionDown ||
@@ -354,8 +335,64 @@ fun GamesScreen(
                                     false
                                 }
                             }
-                            .testTag("launcher_search_bar")
-                    )
+                            .testTag("launcher_search_bar"),
+                        contentAlignment = Alignment.CenterStart
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Search,
+                                contentDescription = "Search Games",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(if (isCompactPortraitBar) 16.dp else 19.dp)
+                            )
+                            Spacer(modifier = Modifier.width(if (isCompactPortraitBar) 6.dp else 10.dp))
+                            Box(
+                                modifier = Modifier.weight(1f),
+                                contentAlignment = Alignment.CenterStart
+                            ) {
+                                if (searchQuery.isEmpty()) {
+                                    Text(
+                                        text = if (isCompactPortraitBar) "Search games..." else "Search games in console launcher...",
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        fontSize = if (isCompactPortraitBar) 12.sp else 13.5.sp,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                                androidx.compose.foundation.text.BasicTextField(
+                                    value = searchQuery,
+                                    onValueChange = { searchQuery = it },
+                                    singleLine = true,
+                                    textStyle = MaterialTheme.typography.bodyMedium.copy(
+                                        color = MaterialTheme.colorScheme.onSurface,
+                                        fontSize = if (isCompactPortraitBar) 12.5.sp else 14.sp,
+                                        fontWeight = FontWeight.Medium
+                                    ),
+                                    cursorBrush = androidx.compose.ui.graphics.SolidColor(HubBlue),
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                            }
+                            if (searchQuery.isNotEmpty()) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(22.dp)
+                                        .clip(CircleShape)
+                                        .clickable { searchQuery = "" },
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Close,
+                                        contentDescription = "Clear search",
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.size(14.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
 
                     // Quick Boost Button
                     var boostBtnFocused by remember { mutableStateOf(false) }
@@ -365,13 +402,14 @@ fun GamesScreen(
                             val target = filteredGames.firstOrNull { it.packageName == selectedGamePackage }
                             viewModel.quickBoost(targetApp = target, mode = selectedBoostMode)
                         },
-                        shape = RoundedCornerShape(14.dp),
+                        shape = RoundedCornerShape(barCorner),
                         colors = ButtonDefaults.buttonColors(
                             containerColor = HubBlue,
                             contentColor = Color.White
                         ),
-                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 14.dp),
+                        contentPadding = PaddingValues(horizontal = btnPadH, vertical = 0.dp),
                         modifier = Modifier
+                            .height(barHeight)
                             .onFocusChanged {
                                 if (it.isFocused && !boostBtnFocused) {
                                     ConsoleHapticManager.playFocusTick(context)
@@ -381,23 +419,23 @@ fun GamesScreen(
                             .border(
                                 width = if (boostBtnFocused) 2.5.dp else 0.dp,
                                 color = if (boostBtnFocused) Color.White else Color.Transparent,
-                                shape = RoundedCornerShape(14.dp)
+                                shape = RoundedCornerShape(barCorner)
                             )
                             .testTag("launcher_quick_boost_button")
                     ) {
                         Icon(
                             imageVector = Icons.Default.Bolt,
                             contentDescription = "Quick Boost",
-                            modifier = Modifier.size(18.dp)
+                            modifier = Modifier.size(iconSize)
                         )
-                        Spacer(modifier = Modifier.width(6.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
                         Text(
                             text = "Boost",
                             fontWeight = FontWeight.Bold,
-                            fontSize = 13.sp
+                            fontSize = btnFont
                         )
                         if (isControllerConnected) {
-                            Spacer(modifier = Modifier.width(6.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
                             InlineControllerGlyphBadge(
                                 glyph = "X",
                                 badgeColor = Color.White,
@@ -413,13 +451,14 @@ fun GamesScreen(
                             ConsoleHapticManager.playSelectClick(context)
                             showAddGameDialog = true
                         },
-                        shape = RoundedCornerShape(14.dp),
-                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 14.dp),
+                        shape = RoundedCornerShape(barCorner),
+                        contentPadding = PaddingValues(horizontal = btnPadH, vertical = 0.dp),
                         border = BorderStroke(
                             width = if (addBtnFocused) 2.5.dp else 1.dp,
                             color = if (addBtnFocused) Color.White else MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)
                         ),
                         modifier = Modifier
+                            .height(barHeight)
                             .onFocusChanged {
                                 if (it.isFocused && !addBtnFocused) {
                                     ConsoleHapticManager.playFocusTick(context)
@@ -432,14 +471,14 @@ fun GamesScreen(
                             imageVector = Icons.Default.Add,
                             contentDescription = "Add Game",
                             tint = MaterialTheme.colorScheme.onSurface,
-                            modifier = Modifier.size(18.dp)
+                            modifier = Modifier.size(iconSize)
                         )
-                        Spacer(modifier = Modifier.width(4.dp))
+                        Spacer(modifier = Modifier.width(3.dp))
                         Text(
                             text = "Add",
                             color = MaterialTheme.colorScheme.onSurface,
                             fontWeight = FontWeight.Bold,
-                            fontSize = 13.sp
+                            fontSize = btnFont
                         )
                     }
                 }
@@ -779,11 +818,10 @@ fun GamesScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            imageVector = Icons.Default.SportsEsports,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onBackground,
-                            modifier = Modifier.size(18.dp)
+                        com.example.ui.components.GMaxBrandIcon(
+                            size = 20.dp,
+                            cornerRadius = 5.dp,
+                            showGlowBorder = false
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
@@ -838,11 +876,11 @@ fun GamesScreen(
                                 .padding(28.dp),
                             horizontalAlignment = Alignment.CenterHorizontally
                         ) {
-                            Icon(
-                                imageVector = Icons.Default.SportsEsports,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(44.dp)
+                            com.example.ui.components.GMaxBrandIcon(
+                                size = 52.dp,
+                                cornerRadius = 14.dp,
+                                showGlowBorder = true,
+                                glowColor = HubBlue
                             )
                             Spacer(modifier = Modifier.height(10.dp))
                             Text(
@@ -1008,11 +1046,39 @@ fun GamesScreen(
             PreLaunchBoosterPopup(
                 game = targetGame,
                 initialBoostMode = selectedBoostMode,
-                isOverlayEnabled = overlayConfig.isEnabled,
+                overlayConfig = overlayConfig,
                 showControllerGlyphs = isControllerConnected,
                 onToggleOverlay = { enabled ->
                     ConsoleHapticManager.playSelectClick(context)
                     viewModel.toggleOverlayEnabled(context, enabled)
+                },
+                onToggleFps = {
+                    ConsoleHapticManager.playSelectClick(context)
+                    viewModel.toggleOverlayFps(context, !overlayConfig.showFps)
+                },
+                onToggleTimer = {
+                    ConsoleHapticManager.playSelectClick(context)
+                    viewModel.toggleOverlayTimer(context, !overlayConfig.showTimer)
+                },
+                onToggleRamPct = {
+                    ConsoleHapticManager.playSelectClick(context)
+                    viewModel.toggleOverlayRamPct(context, !overlayConfig.showRamPct)
+                },
+                onToggleTemp = {
+                    ConsoleHapticManager.playSelectClick(context)
+                    viewModel.toggleOverlayTemp(context, !overlayConfig.showTemp)
+                },
+                onToggleBattery = {
+                    ConsoleHapticManager.playSelectClick(context)
+                    viewModel.toggleOverlayBattery(context, !overlayConfig.showBattery)
+                },
+                onToggleClock = {
+                    ConsoleHapticManager.playSelectClick(context)
+                    viewModel.toggleOverlayClock(context, !overlayConfig.showClock)
+                },
+                onToggleAutoScale = {
+                    ConsoleHapticManager.playSelectClick(context)
+                    viewModel.toggleOverlayAutoScale(context, !overlayConfig.autoScaleSmallScreens)
                 },
                 onOpenGame = { chosenMode ->
                     viewModel.setBoostMode(chosenMode)
@@ -1592,15 +1658,25 @@ private fun TileLaunchButtonContent(
 private fun PreLaunchBoosterPopup(
     game: InstalledApp,
     initialBoostMode: BoostMode,
-    isOverlayEnabled: Boolean,
+    overlayConfig: com.example.model.OverlayHudConfig,
     showControllerGlyphs: Boolean,
     onToggleOverlay: (Boolean) -> Unit,
+    onToggleFps: () -> Unit,
+    onToggleTimer: () -> Unit,
+    onToggleRamPct: () -> Unit,
+    onToggleTemp: () -> Unit,
+    onToggleBattery: () -> Unit,
+    onToggleClock: () -> Unit,
+    onToggleAutoScale: () -> Unit,
     onOpenGame: (BoostMode) -> Unit,
     onRemoveFromLibrary: () -> Unit,
     onOpenAppInfo: () -> Unit,
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
+    val configuration = LocalConfiguration.current
+    val screenWidthDp = configuration.screenWidthDp.coerceAtLeast(320)
+    val isOverlayEnabled = overlayConfig.isEnabled
     val normalBoostFocusRequester = remember { FocusRequester() }
     var chosenMode by remember(initialBoostMode) {
         mutableStateOf(
@@ -1629,7 +1705,7 @@ private fun PreLaunchBoosterPopup(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(20.dp)
+                    .padding(18.dp)
             ) {
                 // Header: Game Icon + Name + Close button (touch clickable so D-pad starts on Normal Boost)
                 Row(
@@ -1643,7 +1719,7 @@ private fun PreLaunchBoosterPopup(
                     ) {
                         Box(
                             modifier = Modifier
-                                .size(48.dp)
+                                .size(46.dp)
                                 .clip(RoundedCornerShape(12.dp))
                                 .border(2.dp, Color.White, RoundedCornerShape(12.dp))
                         ) {
@@ -1686,7 +1762,7 @@ private fun PreLaunchBoosterPopup(
                     }
                 }
 
-                Spacer(modifier = Modifier.height(18.dp))
+                Spacer(modifier = Modifier.height(14.dp))
 
                 // 1. Booster Mode Selector: Normal vs Beast Booster
                 Text(
@@ -1697,7 +1773,7 @@ private fun PreLaunchBoosterPopup(
                     letterSpacing = 0.8.sp
                 )
 
-                Spacer(modifier = Modifier.height(8.dp))
+                Spacer(modifier = Modifier.height(6.dp))
 
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -1715,7 +1791,7 @@ private fun PreLaunchBoosterPopup(
                             .onFocusChanged {
                                 if (it.isFocused && !normalFocused) {
                                     ConsoleHapticManager.playFocusTick(context)
-                                }
+                                                                }
                                 normalFocused = it.isFocused
                             }
                             .onKeyEvent { ev ->
@@ -1753,25 +1829,25 @@ private fun PreLaunchBoosterPopup(
                         Column(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(12.dp),
+                                .padding(10.dp),
                             horizontalAlignment = Alignment.CenterHorizontally
                         ) {
                             Icon(
                                 imageVector = Icons.Default.Bolt,
                                 contentDescription = null,
                                 tint = if (isNormal) HubBlue else MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(22.dp)
+                                modifier = Modifier.size(20.dp)
                             )
-                            Spacer(modifier = Modifier.height(4.dp))
+                            Spacer(modifier = Modifier.height(3.dp))
                             Text(
                                 text = "Normal Booster",
                                 fontWeight = FontWeight.Bold,
-                                fontSize = 13.sp,
+                                fontSize = 12.5.sp,
                                 color = MaterialTheme.colorScheme.onSurface
                             )
                             Text(
                                 text = "Balanced • 3h",
-                                fontSize = 11.sp,
+                                fontSize = 10.5.sp,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
@@ -1813,94 +1889,258 @@ private fun PreLaunchBoosterPopup(
                         Column(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(12.dp),
+                                .padding(10.dp),
                             horizontalAlignment = Alignment.CenterHorizontally
                         ) {
                             Icon(
                                 imageVector = Icons.Default.RocketLaunch,
                                 contentDescription = null,
                                 tint = if (!isNormal) RecorderCoral else MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(22.dp)
+                                modifier = Modifier.size(20.dp)
                             )
-                            Spacer(modifier = Modifier.height(4.dp))
+                            Spacer(modifier = Modifier.height(3.dp))
                             Text(
                                 text = "Beast Booster",
                                 fontWeight = FontWeight.Bold,
-                                fontSize = 13.sp,
+                                fontSize = 12.5.sp,
                                 color = MaterialTheme.colorScheme.onSurface
                             )
                             Text(
                                 text = "Max FPS • 90m",
-                                fontSize = 11.sp,
+                                fontSize = 10.5.sp,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
                     }
                 }
 
-                Spacer(modifier = Modifier.height(14.dp))
+                Spacer(modifier = Modifier.height(12.dp))
 
-                // 2. Device Display Overlay (HUD) Toggle
+                // 2. Device Display Overlay (HUD) Master Toggle + Inline Editable Metric Chips & 1-Row Auto-Scaled Preview
                 Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable { onToggleOverlay(!isOverlayEnabled) },
+                    modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(14.dp),
                     colors = CardDefaults.cardColors(
                         containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
                     ),
                     border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.25f))
                 ) {
-                    Row(
+                    Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 14.dp, vertical = 12.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
+                            .padding(horizontal = 12.dp, vertical = 10.dp)
                     ) {
                         Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { onToggleOverlay(!isOverlayEnabled) },
                             verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.weight(1f)
+                            horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            Icon(
-                                imageVector = Icons.Default.Layers,
-                                contentDescription = null,
-                                tint = if (isOverlayEnabled) LaunchGreen else HubBlue,
-                                modifier = Modifier.size(22.dp)
-                            )
-                            Spacer(modifier = Modifier.width(12.dp))
-                            Column {
-                                Text(
-                                    text = "Device Display Overlay",
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 14.sp,
-                                    color = MaterialTheme.colorScheme.onSurface
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Layers,
+                                    contentDescription = null,
+                                    tint = if (isOverlayEnabled) LaunchGreen else HubBlue,
+                                    modifier = Modifier.size(20.dp)
                                 )
-                                Text(
-                                    text = if (isOverlayEnabled) {
-                                        "Live FPS, Temp & Battery HUD enabled"
-                                    } else {
-                                        "Show real-time telemetry over game"
-                                    },
-                                    fontSize = 11.sp,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Column {
+                                    Text(
+                                        text = "Device Display Overlay",
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 13.5.sp,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                    Text(
+                                        text = if (isOverlayEnabled) {
+                                            "Tap chips below to edit your live HUD metrics"
+                                        } else {
+                                            "Enable to customize on-screen gaming telemetry"
+                                        },
+                                        fontSize = 10.5.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
                             }
+
+                            Switch(
+                                checked = isOverlayEnabled,
+                                onCheckedChange = { onToggleOverlay(it) },
+                                colors = SwitchDefaults.colors(
+                                    checkedThumbColor = Color.White,
+                                    checkedTrackColor = LaunchGreen
+                                ),
+                                modifier = Modifier.testTag("popup_overlay_switch")
+                            )
                         }
 
-                        Switch(
-                            checked = isOverlayEnabled,
-                            onCheckedChange = { onToggleOverlay(it) },
-                            colors = SwitchDefaults.colors(
-                                checkedThumbColor = Color.White,
-                                checkedTrackColor = LaunchGreen
-                            ),
-                            modifier = Modifier.testTag("popup_overlay_switch")
-                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        // Inline Toggleable Metric Chips (EFPS, Timer, RAM %, Temp, Battery, Clock, Auto-Scale)
+                        val activeMetricsCount = listOf(
+                            overlayConfig.showFps,
+                            overlayConfig.showTimer,
+                            overlayConfig.showRamPct,
+                            overlayConfig.showTemp,
+                            overlayConfig.showBattery,
+                            overlayConfig.showClock
+                        ).count { it }.coerceAtLeast(1)
+
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            PopupOverlayMetricChip(
+                                label = "EFPS",
+                                isSelected = overlayConfig.showFps,
+                                accentColor = Color(0xFF00E5FF),
+                                testTag = "booster_chip_efps",
+                                onClick = onToggleFps
+                            )
+                            PopupOverlayMetricChip(
+                                label = "Timer",
+                                isSelected = overlayConfig.showTimer,
+                                accentColor = LaunchGreen,
+                                testTag = "booster_chip_timer",
+                                onClick = onToggleTimer
+                            )
+                            PopupOverlayMetricChip(
+                                label = "RAM %",
+                                isSelected = overlayConfig.showRamPct,
+                                accentColor = Color(0xFFA855F7),
+                                testTag = "booster_chip_ram",
+                                onClick = onToggleRamPct
+                            )
+                            PopupOverlayMetricChip(
+                                label = "Temp",
+                                isSelected = overlayConfig.showTemp,
+                                accentColor = Color(0xFFF59E0B),
+                                testTag = "booster_chip_temp",
+                                onClick = onToggleTemp
+                            )
+                            PopupOverlayMetricChip(
+                                label = "Battery",
+                                isSelected = overlayConfig.showBattery,
+                                accentColor = Color(0xFF10B981),
+                                testTag = "booster_chip_battery",
+                                onClick = onToggleBattery
+                            )
+                            PopupOverlayMetricChip(
+                                label = "Clock",
+                                isSelected = overlayConfig.showClock,
+                                accentColor = HubBlue,
+                                testTag = "booster_chip_clock",
+                                onClick = onToggleClock
+                            )
+                            PopupOverlayMetricChip(
+                                label = "Auto-Scale",
+                                isSelected = overlayConfig.autoScaleSmallScreens,
+                                accentColor = LaunchGreen,
+                                testTag = "booster_chip_autoscale",
+                                onClick = onToggleAutoScale
+                            )
+                        }
+
+                        // Live 1-Row Auto-Scaled HUD Preview Bar (Guaranteed never to wrap into 2 rows)
+                        if (isOverlayEnabled) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            val widthScale = if (overlayConfig.autoScaleSmallScreens) {
+                                (screenWidthDp / 412f).coerceIn(0.76f, 1.0f)
+                            } else 0.92f
+                            val densityFactor = when {
+                                activeMetricsCount >= 6 -> if (overlayConfig.autoScaleSmallScreens) 0.78f else 0.85f
+                                activeMetricsCount == 5 -> 0.84f
+                                activeMetricsCount == 4 -> 0.92f
+                                else -> 1.0f
+                            }
+                            val previewFontSp = (10.5f * widthScale * densityFactor).coerceIn(7.8f, 11.0f).sp
+                            val isCompactPreview = overlayConfig.autoScaleSmallScreens && activeMetricsCount >= 5
+
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(50))
+                                    .background(Color(0xFF0D111A))
+                                    .border(1.dp, Color(0xFF00E5FF).copy(alpha = 0.55f), RoundedCornerShape(50))
+                                    .horizontalScroll(rememberScrollState())
+                                    .padding(horizontal = 10.dp, vertical = 5.dp)
+                                    .testTag("booster_hud_single_row_preview"),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(if (isCompactPreview) 5.dp else 7.dp)
+                            ) {
+                                if (overlayConfig.showFps) {
+                                    Text(
+                                        text = if (isCompactPreview) "60 FPS" else "60 EFPS",
+                                        color = Color(0xFF00E5FF),
+                                        fontSize = previewFontSp,
+                                        fontWeight = FontWeight.Bold,
+                                        maxLines = 1,
+                                        softWrap = false
+                                    )
+                                }
+                                if (overlayConfig.showTimer) {
+                                    Text(
+                                        text = if (chosenMode == BoostMode.BEAST) "🔥1:30:00" else "⏳3:00:00",
+                                        color = if (chosenMode == BoostMode.BEAST) Color(0xFFFF5722) else LaunchGreen,
+                                        fontSize = previewFontSp,
+                                        fontWeight = FontWeight.Bold,
+                                        maxLines = 1,
+                                        softWrap = false
+                                    )
+                                }
+                                if (overlayConfig.showRamPct) {
+                                    Text(
+                                        text = if (isCompactPreview) "R:48%" else "RAM 48%",
+                                        color = Color(0xFFA855F7),
+                                        fontSize = previewFontSp,
+                                        fontWeight = FontWeight.Bold,
+                                        maxLines = 1,
+                                        softWrap = false
+                                    )
+                                }
+                                if (overlayConfig.showTemp) {
+                                    Text(
+                                        text = "31.5°C",
+                                        color = Color(0xFFF59E0B),
+                                        fontSize = previewFontSp,
+                                        fontWeight = FontWeight.Bold,
+                                        maxLines = 1,
+                                        softWrap = false
+                                    )
+                                }
+                                if (overlayConfig.showBattery) {
+                                    Text(
+                                        text = "🔋92%",
+                                        color = Color(0xFF10B981),
+                                        fontSize = previewFontSp,
+                                        fontWeight = FontWeight.Bold,
+                                        maxLines = 1,
+                                        softWrap = false
+                                    )
+                                }
+                                if (overlayConfig.showClock) {
+                                    Text(
+                                        text = "2:45 PM",
+                                        color = Color(0xFFE2E8F0),
+                                        fontSize = previewFontSp,
+                                        fontWeight = FontWeight.Bold,
+                                        maxLines = 1,
+                                        softWrap = false
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
 
-                Spacer(modifier = Modifier.height(18.dp))
+                Spacer(modifier = Modifier.height(14.dp))
 
                 // 3. Final Button: Open Game
                 var openGameFocused by remember { mutableStateOf(false) }
@@ -2135,6 +2375,41 @@ fun Modifier.dashedBorder(
     )
 }
 
+@Composable
+private fun PopupOverlayMetricChip(
+    label: String,
+    isSelected: Boolean,
+    accentColor: Color,
+    testTag: String,
+    onClick: () -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(50))
+            .background(
+                if (isSelected) accentColor.copy(alpha = 0.18f)
+                else MaterialTheme.colorScheme.surface
+            )
+            .border(
+                width = 1.dp,
+                color = if (isSelected) accentColor else MaterialTheme.colorScheme.outline.copy(alpha = 0.35f),
+                shape = RoundedCornerShape(50)
+            )
+            .clickable { onClick() }
+            .padding(horizontal = 9.dp, vertical = 5.dp)
+            .testTag(testTag),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = if (isSelected) "✓ $label" else label,
+            fontSize = 10.5.sp,
+            fontWeight = if (isSelected) FontWeight.ExtraBold else FontWeight.SemiBold,
+            color = if (isSelected) accentColor else MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1
+        )
+    }
+}
+
 /**
  * Loads and displays an app's icon in crisp high resolution (DENSITY_XXXHIGH / 256x256 ARGB_8888)
  */
@@ -2178,11 +2453,10 @@ fun AppIconImage(packageName: String, modifier: Modifier = Modifier) {
             modifier = modifier.background(MaterialTheme.colorScheme.surfaceVariant),
             contentAlignment = Alignment.Center
         ) {
-            Icon(
-                imageVector = Icons.Default.SportsEsports,
-                contentDescription = null,
-                tint = HubBlue,
-                modifier = Modifier.size(42.dp)
+            com.example.ui.components.GMaxBrandIcon(
+                size = 44.dp,
+                cornerRadius = 10.dp,
+                showGlowBorder = false
             )
         }
     }

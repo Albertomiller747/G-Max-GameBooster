@@ -110,6 +110,9 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.core.content.ContextCompat
+import androidx.compose.material.icons.automirrored.filled.VolumeOff
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
+import com.example.model.AudioSourceMode
 import com.example.model.CapturedScreenshot
 import com.example.model.GameMediaGroup
 import com.example.model.RecordedVideo
@@ -152,6 +155,7 @@ fun ScreenRecordScreen(
     // State from ScreenRecordingService
     val isRecording by ScreenRecordingService.isRecording.collectAsState()
     val recordingSeconds by ScreenRecordingService.recordingSeconds.collectAsState()
+    val activeAudioMode by ScreenRecordingService.activeAudioMode.collectAsState()
     val lastSavedUri by ScreenRecordingService.lastSavedVideoUri.collectAsState()
     val lastScreenshotUri by ScreenRecordingService.lastSavedScreenshotUri.collectAsState()
 
@@ -168,12 +172,31 @@ fun ScreenRecordScreen(
         mutableStateOf(settings.isOverlayEnabled)
     }
 
+    var pendingAudioMode by remember { mutableStateOf<AudioSourceMode?>(null) }
+    var pendingRecordLaunchAfterPerm by remember { mutableStateOf(false) }
+
     val audioPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
     ) { granted ->
         if (granted) {
-            settings = settings.copy(recordMic = true)
-            ScreenRecordingManager.saveSettings(context, settings)
+            val targetMode = pendingAudioMode ?: settings.audioSourceMode.let {
+                if (it == AudioSourceMode.MUTE) AudioSourceMode.INTERNAL_ONLY else it
+            }
+            val updated = settings.copy(
+                audioSourceMode = targetMode,
+                recordMic = targetMode == AudioSourceMode.INTERNAL_AND_MIC || targetMode == AudioSourceMode.MIC_ONLY
+            )
+            settings = updated
+            ScreenRecordingManager.saveSettings(context, updated)
+            viewModel.scheduleCloudSettingsSync()
+            userMessage = "Audio capture enabled: ${targetMode.label}"
+        } else {
+            userMessage = "Audio permission denied — recording will continue without sound"
+        }
+        pendingAudioMode = null
+        if (pendingRecordLaunchAfterPerm) {
+            pendingRecordLaunchAfterPerm = false
+            onRequestMediaProjection()
         }
     }
 
@@ -225,7 +248,7 @@ fun ScreenRecordScreen(
                                 .padding(horizontal = 10.dp, vertical = 4.dp)
                         ) {
                             Text(
-                                text = String.format(Locale.US, "REC %02d:%02d", mins, secs),
+                                text = String.format(Locale.US, "REC %02d:%02d • %s", mins, secs, activeAudioMode.shortLabel),
                                 color = RecorderCoral,
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.ExtraBold
@@ -408,7 +431,9 @@ fun ScreenRecordScreen(
                             ScreenRecordingManager.saveSettings(context, updated)
                             viewModel.scheduleCloudSettingsSync()
                         },
-                        onRequestMicPermission = {
+                        onRequestAudioPermissionForMode = { desiredMode ->
+                            pendingAudioMode = desiredMode
+                            pendingRecordLaunchAfterPerm = false
                             audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
                         },
                         onToggleOverlayBubble = { enable ->
@@ -440,7 +465,7 @@ fun ScreenRecordScreen(
                             settings = optimal
                             ScreenRecordingManager.saveSettings(context, optimal)
                             viewModel.scheduleCloudSettingsSync()
-                            userMessage = "Auto-tuned to ${optimal.resolutionLabel} @ ${optimal.fps} FPS (${optimal.bitrateMbps} Mbps)"
+                            userMessage = "Auto-tuned to ${optimal.resolutionLabel} @ ${optimal.fps} FPS (${optimal.bitrateMbps} Mbps • ${optimal.audioSourceMode.label})"
                         }
                     )
                 }
@@ -456,7 +481,18 @@ fun ScreenRecordScreen(
                             context.startService(stopIntent)
                             userMessage = "Gameplay recording saved to Videos!"
                         } else {
-                            onRequestMediaProjection()
+                            val needsAudioPerm = settings.audioSourceMode != AudioSourceMode.MUTE &&
+                                ContextCompat.checkSelfPermission(
+                                    context,
+                                    Manifest.permission.RECORD_AUDIO
+                                ) != PackageManager.PERMISSION_GRANTED
+                            if (needsAudioPerm) {
+                                pendingAudioMode = settings.audioSourceMode
+                                pendingRecordLaunchAfterPerm = true
+                                audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                            } else {
+                                onRequestMediaProjection()
+                            }
                         }
                     },
                     shape = RoundedCornerShape(50),
@@ -916,20 +952,12 @@ private fun GameMediaGroupHeader(
                     )
                 }
             } else {
-                Box(
-                    modifier = Modifier
-                        .size(28.dp)
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(HubBlue.copy(alpha = 0.16f)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.SportsEsports,
-                        contentDescription = null,
-                        tint = HubBlue,
-                        modifier = Modifier.size(16.dp)
-                    )
-                }
+                com.example.ui.components.GMaxBrandIcon(
+                    size = 28.dp,
+                    cornerRadius = 8.dp,
+                    showGlowBorder = true,
+                    glowColor = HubBlue
+                )
             }
 
             Spacer(modifier = Modifier.width(10.dp))
@@ -1381,7 +1409,7 @@ private fun RecorderSettingsTabContent(
     supportedFps: List<Int>,
     isOverlayBubbleEnabled: Boolean,
     onUpdateSettings: (VideoQualitySettings) -> Unit,
-    onRequestMicPermission: () -> Unit,
+    onRequestAudioPermissionForMode: (AudioSourceMode) -> Unit,
     onToggleOverlayBubble: (Boolean) -> Unit,
     onAutoConfigure: () -> Unit
 ) {
@@ -1544,7 +1572,7 @@ private fun RecorderSettingsTabContent(
             }
         }
 
-        // 4. Audio, Floating Radial Bubble, & Timer HUD Toggles
+        // 4. Audio Source, Floating Radial Bubble, & Timer HUD Toggles
         item {
             Card(
                 modifier = Modifier.fillMaxWidth(),
@@ -1556,43 +1584,93 @@ private fun RecorderSettingsTabContent(
                     modifier = Modifier.padding(16.dp),
                     verticalArrangement = Arrangement.spacedBy(14.dp)
                 ) {
-                    // Microphone Audio
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
-                            Icon(Icons.Default.Mic, contentDescription = null, tint = RecorderCoral)
+                    // Selectable Audio Capture Source (Internal Audio, Internal + Mic, Mic Only, Mute)
+                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = if (settings.audioSourceMode == AudioSourceMode.MUTE) {
+                                    Icons.AutoMirrored.Filled.VolumeOff
+                                } else {
+                                    Icons.AutoMirrored.Filled.VolumeUp
+                                },
+                                contentDescription = null,
+                                tint = RecorderCoral
+                            )
                             Spacer(modifier = Modifier.width(12.dp))
-                            Column {
+                            Column(modifier = Modifier.weight(1f)) {
                                 Text(
-                                    text = "Record Microphone Audio",
+                                    text = "Audio Capture Source",
                                     fontWeight = FontWeight.Bold,
                                     color = MaterialTheme.colorScheme.onSurface
                                 )
                                 Text(
-                                    text = "Include voice commentary with gameplay audio",
+                                    text = settings.audioSourceMode.description,
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
                         }
-                        Switch(
-                            checked = settings.recordMic,
-                            onCheckedChange = { wantMic ->
-                                if (wantMic && ContextCompat.checkSelfPermission(
-                                        context,
-                                        Manifest.permission.RECORD_AUDIO
-                                    ) != PackageManager.PERMISSION_GRANTED
-                                ) {
-                                    onRequestMicPermission()
-                                } else {
-                                    onUpdateSettings(settings.copy(recordMic = wantMic))
+
+                        LazyRow(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            items(AudioSourceMode.entries.toList()) { mode ->
+                                val isSelected = settings.audioSourceMode == mode
+                                val tag = when (mode) {
+                                    AudioSourceMode.INTERNAL_ONLY -> "audio_source_internal_chip"
+                                    AudioSourceMode.INTERNAL_AND_MIC -> "audio_source_both_chip"
+                                    AudioSourceMode.MIC_ONLY -> "audio_source_mic_chip"
+                                    AudioSourceMode.MUTE -> "audio_source_mute_chip"
                                 }
-                            },
-                            colors = SwitchDefaults.colors(checkedTrackColor = RecorderCoral)
-                        )
+                                FilterChip(
+                                    selected = isSelected,
+                                    onClick = {
+                                        if (mode != AudioSourceMode.MUTE &&
+                                            ContextCompat.checkSelfPermission(
+                                                context,
+                                                Manifest.permission.RECORD_AUDIO
+                                            ) != PackageManager.PERMISSION_GRANTED
+                                        ) {
+                                            onRequestAudioPermissionForMode(mode)
+                                        } else {
+                                            onUpdateSettings(
+                                                settings.copy(
+                                                    audioSourceMode = mode,
+                                                    recordMic = mode == AudioSourceMode.INTERNAL_AND_MIC ||
+                                                        mode == AudioSourceMode.MIC_ONLY
+                                                )
+                                            )
+                                        }
+                                    },
+                                    label = {
+                                        Text(
+                                            text = mode.label,
+                                            fontWeight = if (isSelected) FontWeight.ExtraBold else FontWeight.Medium
+                                        )
+                                    },
+                                    leadingIcon = {
+                                        val icon = when (mode) {
+                                            AudioSourceMode.INTERNAL_ONLY -> Icons.AutoMirrored.Filled.VolumeUp
+                                            AudioSourceMode.INTERNAL_AND_MIC -> Icons.Default.Mic
+                                            AudioSourceMode.MIC_ONLY -> Icons.Default.Mic
+                                            AudioSourceMode.MUTE -> Icons.AutoMirrored.Filled.VolumeOff
+                                        }
+                                        Icon(
+                                            imageVector = icon,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                    },
+                                    colors = FilterChipDefaults.filterChipColors(
+                                        selectedContainerColor = RecorderCoral.copy(alpha = 0.18f),
+                                        selectedLabelColor = RecorderCoral,
+                                        selectedLeadingIconColor = RecorderCoral
+                                    ),
+                                    modifier = Modifier.testTag(tag)
+                                )
+                            }
+                        }
                     }
 
                     HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.15f))

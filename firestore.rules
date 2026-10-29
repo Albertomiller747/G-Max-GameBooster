@@ -33,8 +33,13 @@ service cloud.firestore {
       return [
         'userId',
         'displayName',
+        'username',
+        'countryCode',
+        'countryName',
         'email',
         'photoUrl',
+        'bannerUrl',
+        'gamerscore',
         'dateOfBirth',
         'bio',
         'selectedTags',
@@ -85,37 +90,39 @@ service cloud.firestore {
     }
 
     function isValidUserCloudProfile(data) {
-      return data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 &&
-             data.userId == request.auth.uid &&
-             data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 100 &&
+      return data.userId == request.auth.uid &&
+             data.displayName is string && data.displayName.size() <= 100 &&
+             data.username is string && data.username.size() <= 30 &&
+             data.countryCode is string && data.countryCode.size() <= 10 &&
+             data.countryName is string && data.countryName.size() <= 100 &&
              data.email is string && data.email.size() <= 200 &&
              data.photoUrl is string && data.photoUrl.size() <= 1000 &&
-             data.dateOfBirth is string && data.dateOfBirth.size() >= 1 && data.dateOfBirth.size() <= 40 &&
+             data.bannerUrl is string && data.bannerUrl.size() <= 1000 &&
+             data.gamerscore is int && data.gamerscore >= 0 &&
+             data.dateOfBirth is string && data.dateOfBirth.size() <= 40 &&
              data.bio is string && data.bio.size() <= 300 &&
              data.selectedTags is list && data.selectedTags.size() <= 4 &&
-             (data.selectedTags.size() == 0 || (data.selectedTags[0] is string && data.selectedTags[0].size() <= 50 && data.selectedTags[0] != 'developer')) &&
              data.isVerifiedDeveloper is bool &&
              (data.isVerifiedDeveloper == false || isOfficialDeveloperAuth()) &&
-             data.mostPlayedGameName is string && data.mostPlayedGameName.size() >= 1 && data.mostPlayedGameName.size() <= 120 &&
+             data.mostPlayedGameName is string && data.mostPlayedGameName.size() <= 120 &&
              data.mostPlayedGamePkg is string && data.mostPlayedGamePkg.size() <= 150 &&
-             data.mostPlayedMinutes is int && data.mostPlayedMinutes >= 0 && data.mostPlayedMinutes <= 10000000 &&
-             data.totalPlayTimeMinutes is int && data.totalPlayTimeMinutes >= 0 && data.totalPlayTimeMinutes <= 100000000 &&
-             data.totalSessionsCount is int && data.totalSessionsCount >= 0 && data.totalSessionsCount <= 10000000 &&
-             data.themeMode is string && data.themeMode.size() >= 1 && data.themeMode.size() <= 40 &&
+             data.mostPlayedMinutes is int && data.mostPlayedMinutes >= 0 &&
+             data.totalPlayTimeMinutes is int && data.totalPlayTimeMinutes >= 0 &&
+             data.totalSessionsCount is int && data.totalSessionsCount >= 0 &&
+             data.themeMode is string && data.themeMode.size() <= 40 &&
              data.customBgColor is int &&
              data.reducedAnimations is bool &&
              data.autoBigScreenLandscape is bool &&
              data.showControllerLegendBar is bool &&
              data.suppressActivationWarning is bool &&
-             data.selectedBoostMode is string && data.selectedBoostMode.size() >= 1 && data.selectedBoostMode.size() <= 30 &&
+             data.selectedBoostMode is string && data.selectedBoostMode.size() <= 30 &&
              data.appliedOptionIds is list && data.appliedOptionIds.size() <= 50 &&
-             (data.appliedOptionIds.size() == 0 || (data.appliedOptionIds[0] is string && data.appliedOptionIds[0].size() <= 80)) &&
              data.hudEnabled is bool &&
-             data.hudFpsMode is string && data.hudFpsMode.size() >= 1 && data.hudFpsMode.size() <= 30 &&
-             data.hudTargetCap is string && data.hudTargetCap.size() >= 1 && data.hudTargetCap.size() <= 20 &&
-             data.hudPosition is string && data.hudPosition.size() >= 1 && data.hudPosition.size() <= 30 &&
-             data.hudScalePct is int && data.hudScalePct >= 50 && data.hudScalePct <= 200 &&
-             data.hudOpacityPct is int && data.hudOpacityPct >= 10 && data.hudOpacityPct <= 100 &&
+             data.hudFpsMode is string && data.hudFpsMode.size() <= 30 &&
+             data.hudTargetCap is string && data.hudTargetCap.size() <= 20 &&
+             data.hudPosition is string && data.hudPosition.size() <= 30 &&
+             data.hudScalePct is int &&
+             data.hudOpacityPct is int &&
              data.hudShowFps is bool &&
              data.hudShowTemp is bool &&
              data.hudShowBattery is bool &&
@@ -123,21 +130,20 @@ service cloud.firestore {
              data.hudShowRamPct is bool &&
              data.hudShowClock is bool &&
              data.crosshairEnabled is bool &&
-             data.crosshairType is string && data.crosshairType.size() >= 1 && data.crosshairType.size() <= 30 &&
+             data.crosshairType is string && data.crosshairType.size() <= 30 &&
              data.crosshairColorArgb is int &&
-             data.crosshairSizeDp is int && data.crosshairSizeDp >= 8 && data.crosshairSizeDp <= 100 &&
-             data.lightbarColorHex is string && data.lightbarColorHex.size() >= 1 && data.lightbarColorHex.size() <= 20 &&
-             data.recResolutionLabel is string && data.recResolutionLabel.size() >= 1 && data.recResolutionLabel.size() <= 20 &&
-             data.recFps is int && data.recFps >= 15 && data.recFps <= 240 &&
-             data.recBitrateMbps is int && data.recBitrateMbps >= 1 && data.recBitrateMbps <= 100 &&
+             data.crosshairSizeDp is int &&
+             data.lightbarColorHex is string && data.lightbarColorHex.size() <= 20 &&
+             data.recResolutionLabel is string && data.recResolutionLabel.size() <= 20 &&
+             data.recFps is int &&
+             data.recBitrateMbps is int &&
              data.recMicEnabled is bool &&
              data.recShowTimerHud is bool &&
              data.recOverlayEnabled is bool &&
-             data.recBubbleSizeDp is int && data.recBubbleSizeDp >= 24 && data.recBubbleSizeDp <= 80 &&
+             data.recBubbleSizeDp is int &&
              data.targetGamePkg is string && data.targetGamePkg.size() <= 150 &&
              data.targetGameName is string && data.targetGameName.size() <= 120 &&
              data.libraryPackages is list && data.libraryPackages.size() <= 100 &&
-             (data.libraryPackages.size() == 0 || (data.libraryPackages[0] is string && data.libraryPackages[0].size() <= 150)) &&
              data.createdAt is timestamp && data.createdAt <= request.time &&
              data.updatedAt is timestamp && data.updatedAt <= request.time;
     }
@@ -161,8 +167,13 @@ service cloud.firestore {
                        incoming().createdAt == existing().createdAt &&
                        incoming().diff(existing()).affectedKeys().hasOnly([
                          'displayName',
+                         'username',
+                         'countryCode',
+                         'countryName',
                          'email',
                          'photoUrl',
+                         'bannerUrl',
+                         'gamerscore',
                          'dateOfBirth',
                          'bio',
                          'selectedTags',
@@ -211,6 +222,100 @@ service cloud.firestore {
                        ]);
 
       allow delete: if isSignedIn() && isValidId(userId) && request.auth.uid == userId;
+    }
+
+    function allowedLeaderboardKeys() {
+      return [
+        'userId',
+        'username',
+        'photoUrl',
+        'countryCode',
+        'countryName',
+        'gamerscore',
+        'isVerifiedDeveloper',
+        'updatedAt'
+      ];
+    }
+
+    function isValidLeaderboardEntry(data) {
+      return data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 &&
+             data.userId == request.auth.uid &&
+             data.username is string && data.username.size() >= 1 && data.username.size() <= 30 &&
+             data.photoUrl is string && data.photoUrl.size() <= 1000 &&
+             data.countryCode is string && data.countryCode.size() <= 10 &&
+             data.countryName is string && data.countryName.size() <= 100 &&
+             data.gamerscore is int && data.gamerscore >= 0 &&
+             data.isVerifiedDeveloper is bool &&
+             (data.isVerifiedDeveloper == false || isOfficialDeveloperAuth()) &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    match /leaderboard/{userId} {
+      allow get: if isSignedIn() && isValidId(userId);
+      allow list: if isSignedIn() && resource.data.gamerscore >= 0;
+
+      allow create: if isSignedIn() &&
+                       isValidId(userId) &&
+                       request.auth.uid == userId &&
+                       incoming().keys().hasAll(allowedLeaderboardKeys()) &&
+                       incoming().keys().hasOnly(allowedLeaderboardKeys()) &&
+                       isValidLeaderboardEntry(incoming());
+
+      allow update: if isSignedIn() &&
+                       isValidId(userId) &&
+                       request.auth.uid == userId &&
+                       isValidLeaderboardEntry(incoming()) &&
+                       incoming().userId == existing().userId &&
+                       incoming().diff(existing()).affectedKeys().hasOnly([
+                         'username',
+                         'photoUrl',
+                         'countryCode',
+                         'countryName',
+                         'gamerscore',
+                         'isVerifiedDeveloper',
+                         'updatedAt'
+                       ]);
+
+      allow delete: if isSignedIn() && isValidId(userId) && request.auth.uid == userId;
+    }
+
+    function allowedUsernameClaimKeys() {
+      return ['userId', 'username', 'updatedAt'];
+    }
+
+    function isValidUsernameClaim(data) {
+      return data.userId is string &&
+             data.userId.size() >= 1 &&
+             data.userId.size() <= 128 &&
+             data.userId == request.auth.uid &&
+             data.username is string &&
+             data.username.size() >= 3 &&
+             data.username.size() <= 20 &&
+             data.username.matches('^[a-zA-Z0-9_]+$') &&
+             (data.username.lower() != 'albertomiller747' || isOfficialDeveloperAuth()) &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    match /usernames/{usernameLower} {
+      allow get: if isSignedIn() && isValidId(usernameLower);
+      allow list: if false;
+
+      allow create: if isSignedIn() &&
+                       isValidId(usernameLower) &&
+                       incoming().keys().hasAll(allowedUsernameClaimKeys()) &&
+                       incoming().keys().hasOnly(allowedUsernameClaimKeys()) &&
+                       isValidUsernameClaim(incoming()) &&
+                       incoming().username.lower() == usernameLower;
+
+      allow update: if isSignedIn() &&
+                       isValidId(usernameLower) &&
+                       isValidUsernameClaim(incoming()) &&
+                       existing().userId == request.auth.uid &&
+                       incoming().userId == existing().userId &&
+                       incoming().username.lower() == usernameLower &&
+                       incoming().diff(existing()).affectedKeys().hasOnly(['username', 'updatedAt']);
+
+      allow delete: if isSignedIn() && isValidId(usernameLower) && existing().userId == request.auth.uid;
     }
   }
 }

@@ -260,6 +260,28 @@ class ExampleRobolectricTest {
     assertTrue(!strippedName.contains("★"))
     assertTrue(!strippedName.lowercase().contains("verified developer"))
   }
+
+  @Test
+  fun `verify country catalog flags and username validation rules`() {
+    val us = com.example.util.CountryCatalog.getCountryByCode("US")
+    assertNotNull(us)
+    assertEquals("United States", us?.name)
+    assertEquals("🇺🇸", com.example.util.CountryCatalog.codeToFlagEmoji("US"))
+    assertEquals("🇯🇵", com.example.util.CountryCatalog.codeToFlagEmoji("JP"))
+
+    val searchResults = com.example.util.CountryCatalog.searchCountries("Japan")
+    assertTrue(searchResults.any { it.code == "JP" })
+
+    // Valid usernames
+    assertTrue(com.example.util.PremadeTagsCatalog.validateUsername("ProGamer_99", false).isSuccess)
+    assertTrue(com.example.util.PremadeTagsCatalog.validateUsername("Albertomiller747", true).isSuccess)
+
+    // Invalid usernames (too short, invalid symbols, or spoofed developer handle)
+    assertTrue(com.example.util.PremadeTagsCatalog.validateUsername("ab", false).isFailure)
+    assertTrue(com.example.util.PremadeTagsCatalog.validateUsername("bad space", false).isFailure)
+    assertTrue(com.example.util.PremadeTagsCatalog.validateUsername("Albertomiller747", false).isFailure)
+  }
 }
+
 
 

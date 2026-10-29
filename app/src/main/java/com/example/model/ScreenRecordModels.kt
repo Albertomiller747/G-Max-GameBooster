@@ -7,6 +7,29 @@ data class ResolutionPreset(
     val minRamGbRequired: Double = 2.0
 )
 
+enum class AudioSourceMode(val label: String, val shortLabel: String, val description: String) {
+    INTERNAL_ONLY(
+        label = "Internal Audio",
+        shortLabel = "Internal",
+        description = "Records game & device sound directly without background mic noise"
+    ),
+    INTERNAL_AND_MIC(
+        label = "Internal + Mic",
+        shortLabel = "Game + Mic",
+        description = "Records both in-game sound and your microphone voice commentary"
+    ),
+    MIC_ONLY(
+        label = "Microphone Only",
+        shortLabel = "Mic Only",
+        description = "Records microphone audio only"
+    ),
+    MUTE(
+        label = "Mute Audio",
+        shortLabel = "Muted",
+        description = "Records video without any audio track"
+    )
+}
+
 data class VideoQualitySettings(
     val resolutionLabel: String = "1080p",
     val width: Int = 1920,
@@ -14,6 +37,7 @@ data class VideoQualitySettings(
     val fps: Int = 60,
     val bitrateMbps: Int = 8,
     val recordMic: Boolean = false,
+    val audioSourceMode: AudioSourceMode = AudioSourceMode.INTERNAL_ONLY,
     val showTimerHud: Boolean = false,
     val isOverlayEnabled: Boolean = false,
     val bubbleSizeDp: Int = 38

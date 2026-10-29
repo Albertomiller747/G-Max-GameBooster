@@ -409,11 +409,11 @@ fun GamepadItem(gamepad: GamepadDevice) {
         verticalAlignment = Alignment.CenterVertically
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(
-                imageVector = Icons.Default.SportsEsports,
-                contentDescription = null,
-                tint = NeonGreen,
-                modifier = Modifier.size(22.dp)
+            com.example.ui.components.GMaxBrandIcon(
+                size = 26.dp,
+                cornerRadius = 7.dp,
+                showGlowBorder = true,
+                glowColor = NeonGreen
             )
             Spacer(modifier = Modifier.width(10.dp))
             Column {

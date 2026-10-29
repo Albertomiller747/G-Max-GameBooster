@@ -274,8 +274,9 @@ class MainActivity : ComponentActivity() {
                     )
                 } else {
                     var showSplash by rememberSaveable { mutableStateOf(true) }
+                    val isPortrait = LocalConfiguration.current.orientation == Configuration.ORIENTATION_PORTRAIT
 
-                    if (showSplash && !reducedAnimations) {
+                    if (showSplash && !reducedAnimations && !isPortrait) {
                         SplashScreen(onAnimationComplete = { showSplash = false })
                     } else if (!hasCompletedAuthStep && currentFirebaseUser == null) {
                         // Sign In or Create Account page right after app launch (Splash) and before Welcome page (Onboarding)
@@ -285,13 +286,16 @@ class MainActivity : ComponentActivity() {
                                 viewModel.setUserDateOfBirth(dob)
                             },
                             onAuthSuccess = {
-                                viewModel.onUserSignedInSuccess()
+                                viewModel.onUserSignedInSuccess("Google")
                             },
                             onContinueAsGuest = {
                                 viewModel.continueAsGuest()
                             },
                             onSaveCredentials = { fullName, email ->
                                 viewModel.setCustomProfileCredentials(fullName, email)
+                            },
+                            onSocialSignInSuccess = { provider, fullName, email ->
+                                viewModel.onSocialAccountSignedIn(provider, fullName, email)
                             }
                         )
                     } else if (!hasCompletedOnboarding || showPermissionsPage) {
@@ -318,11 +322,24 @@ class MainActivity : ComponentActivity() {
                             contract = ActivityResultContracts.StartActivityForResult()
                         ) { result ->
                             if (result.resultCode == Activity.RESULT_OK && result.data != null) {
+                                val recSettings = com.example.util.ScreenRecordingManager.loadSettings(context)
                                 ScreenRecordingService.startRecording(
-                                    context,
-                                    result.resultCode,
-                                    result.data!!
+                                    context = context,
+                                    resultCode = result.resultCode,
+                                    resultData = result.data!!,
+                                    recordMic = recSettings.recordMic,
+                                    audioSourceMode = recSettings.audioSourceMode
                                 )
+                            }
+                        }
+
+                        val recordAudioPermissionLauncher = rememberLauncherForActivityResult(
+                            contract = ActivityResultContracts.RequestPermission()
+                        ) { _ ->
+                            try {
+                                videoProjectionLauncher.launch(mediaProjectionManager.createScreenCaptureIntent())
+                            } catch (e: Exception) {
+                                e.printStackTrace()
                             }
                         }
 
@@ -341,7 +358,17 @@ class MainActivity : ComponentActivity() {
 
                         val requestVideoCapture = {
                             try {
-                                videoProjectionLauncher.launch(mediaProjectionManager.createScreenCaptureIntent())
+                                val recSettings = com.example.util.ScreenRecordingManager.loadSettings(context)
+                                val needsAudioPerm = recSettings.audioSourceMode != com.example.model.AudioSourceMode.MUTE &&
+                                    androidx.core.content.ContextCompat.checkSelfPermission(
+                                        context,
+                                        android.Manifest.permission.RECORD_AUDIO
+                                    ) != android.content.pm.PackageManager.PERMISSION_GRANTED
+                                if (needsAudioPerm) {
+                                    recordAudioPermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
+                                } else {
+                                    videoProjectionLauncher.launch(mediaProjectionManager.createScreenCaptureIntent())
+                                }
                             } catch (e: Exception) {
                                 e.printStackTrace()
                             }
@@ -534,6 +561,18 @@ private fun RazerInspiredTopHubBar(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
+            // Official G-Max 3D Hexagonal Controller Emblem on Top Hub Bar
+            com.example.ui.components.GMaxBrandIcon(
+                size = 36.dp,
+                cornerRadius = 10.dp,
+                showGlowBorder = true,
+                glowColor = Color(0xFF00E5FF),
+                contentDescription = "G-Max Gaming Hub",
+                modifier = Modifier
+                    .clickable { onSelectTab(0) }
+                    .testTag("top_bar_gmax_brand_icon")
+            )
+
             // Top navigation pills are touch-clickable and switched via L1/R1 on controller;
             // intentionally not D-Pad focusable so controller focus starts directly on game tiles.
             tabs.forEach { tab ->

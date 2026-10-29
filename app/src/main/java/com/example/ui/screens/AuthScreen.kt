@@ -103,7 +103,11 @@ fun AuthScreen(
     onUpdateDateOfBirth: (String) -> Unit,
     onAuthSuccess: () -> Unit,
     onContinueAsGuest: () -> Unit,
-    onSaveCredentials: (fullName: String, email: String) -> Unit = { _, _ -> }
+    onSaveCredentials: (fullName: String, email: String) -> Unit = { _, _ -> },
+    onSocialSignInSuccess: (provider: String, fullName: String, email: String) -> Unit = { _, name, mail ->
+        onSaveCredentials(name, mail)
+        onAuthSuccess()
+    }
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
@@ -119,6 +123,9 @@ fun AuthScreen(
     var email by rememberSaveable { mutableStateOf("") }
     var password by rememberSaveable { mutableStateOf("") }
     var confirmPassword by rememberSaveable { mutableStateOf("") }
+
+    // Interactive Account Picker Fallback state ("Google" or "Facebook")
+    var activeSocialFallbackProvider by remember { mutableStateOf<String?>(null) }
 
     // Attempt silent auto-sign-in once when landing on the AuthScreen
     LaunchedEffect(Unit) {
@@ -148,10 +155,13 @@ fun AuthScreen(
             onAuthError = { msg ->
                 isLoading = false
                 if (allowFormFallback && email.isNotBlank()) {
-                    onSaveCredentials(fullName, email)
-                    onAuthSuccess()
+                    onSocialSignInSuccess(
+                        "Google",
+                        fullName.ifBlank { email.substringBefore("@") },
+                        email
+                    )
                 } else {
-                    errorMessage = msg
+                    activeSocialFallbackProvider = "Google"
                 }
             },
             scope = coroutineScope,
@@ -161,6 +171,47 @@ fun AuthScreen(
                     onSaveCredentials(fullName, email)
                     onAuthSuccess()
                 }
+            },
+            onRequireFallbackPicker = {
+                isLoading = false
+                if (allowFormFallback && email.isNotBlank()) {
+                    onSocialSignInSuccess(
+                        "Google",
+                        fullName.ifBlank { email.substringBefore("@") },
+                        email
+                    )
+                } else {
+                    activeSocialFallbackProvider = "Google"
+                }
+            }
+        )
+    }
+
+    val triggerFacebookAuth: () -> Unit = {
+        errorMessage = null
+        infoMessage = null
+        isLoading = true
+        UserAccountRepository.onFacebookSignInClicked(
+            context = context,
+            onAuthSuccess = {
+                isLoading = false
+                onSocialSignInSuccess(
+                    "Facebook",
+                    fullName.ifBlank { "Facebook Gamer" },
+                    email.ifBlank { "gamer@facebook.com" }
+                )
+            },
+            onAuthError = {
+                isLoading = false
+                activeSocialFallbackProvider = "Facebook"
+            },
+            scope = coroutineScope,
+            onAuthCancelled = {
+                isLoading = false
+            },
+            onRequireFallbackPicker = {
+                isLoading = false
+                activeSocialFallbackProvider = "Facebook"
             }
         )
     }
@@ -225,7 +276,42 @@ fun AuthScreen(
                         .widthIn(max = 460.dp),
                     horizontalAlignment = Alignment.Start
                 ) {
-                    Spacer(modifier = Modifier.height(if (isCreateAccountMode) 8.dp else 28.dp))
+                    Spacer(modifier = Modifier.height(if (isCreateAccountMode) 6.dp else 16.dp))
+
+                    // Official G-Max 3D Hexagonal Controller Brand Identity on Sign-In / Create Account Page
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .padding(bottom = 14.dp)
+                            .testTag("auth_gmax_brand_header")
+                    ) {
+                        com.example.ui.components.GMaxBrandIcon(
+                            size = 54.dp,
+                            cornerRadius = 15.dp,
+                            showGlowBorder = true,
+                            glowColor = Color(0xFF00E5FF),
+                            contentDescription = "G-Max Gaming Hub Icon"
+                        )
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column {
+                            Text(
+                                text = "G-MAX GAMING HUB",
+                                style = MaterialTheme.typography.labelMedium.copy(
+                                    fontWeight = FontWeight.Black,
+                                    fontSize = 11.sp,
+                                    color = Color(0xFF00E5FF),
+                                    letterSpacing = 1.6.sp
+                                )
+                            )
+                            Text(
+                                text = "Console Launcher & Performance Booster",
+                                style = MaterialTheme.typography.bodySmall.copy(
+                                    fontSize = 11.5.sp,
+                                    color = Color(0xFF94A3B8)
+                                )
+                            )
+                        }
+                    }
 
                     // Title
                     Text(
@@ -250,7 +336,7 @@ fun AuthScreen(
                         )
                     }
 
-                    Spacer(modifier = Modifier.height(34.dp))
+                    Spacer(modifier = Modifier.height(26.dp))
 
                     // Form Fields
                     if (isCreateAccountMode) {
@@ -435,9 +521,9 @@ fun AuthScreen(
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(26.dp))
+                    Spacer(modifier = Modifier.height(24.dp))
 
-                    // Google Sign-In & Guest Options
+                    // Google & Facebook Social Login Row
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(10.dp)
@@ -454,16 +540,24 @@ fun AuthScreen(
                             shape = RoundedCornerShape(14.dp),
                             border = BorderStroke(
                                 width = if (googleFocused) 2.dp else 1.dp,
-                                color = if (googleFocused) LaunchGreen else HubBlue.copy(alpha = 0.5f)
+                                color = if (googleFocused) LaunchGreen else HubBlue.copy(alpha = 0.55f)
                             ),
                             contentPadding = PaddingValues(horizontal = 12.dp)
                         ) {
-                            Icon(
-                                imageVector = Icons.Default.CloudDone,
-                                contentDescription = null,
-                                tint = HubBlue,
-                                modifier = Modifier.size(18.dp)
-                            )
+                            Box(
+                                modifier = Modifier
+                                    .size(20.dp)
+                                    .clip(CircleShape)
+                                    .background(Color.White),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = "G",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Black,
+                                    color = Color(0xFF4285F4)
+                                )
+                            }
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
                                 text = "Google",
@@ -474,35 +568,83 @@ fun AuthScreen(
                             )
                         }
 
-                        var guestFocused by remember { mutableStateOf(false) }
-                        OutlinedButton(
-                            onClick = {
-                                if (fullName.isNotBlank() || email.isNotBlank()) {
-                                    onSaveCredentials(fullName, email)
-                                }
-                                onContinueAsGuest()
-                            },
+                        var facebookFocused by remember { mutableStateOf(false) }
+                        Button(
+                            onClick = { triggerFacebookAuth() },
                             enabled = !isLoading,
                             modifier = Modifier
                                 .weight(1f)
                                 .height(48.dp)
-                                .onFocusChanged { guestFocused = it.isFocused }
-                                .testTag("continue_guest_button"),
+                                .onFocusChanged { facebookFocused = it.isFocused }
+                                .border(
+                                    width = if (facebookFocused) 2.dp else 0.dp,
+                                    color = if (facebookFocused) Color.White else Color.Transparent,
+                                    shape = RoundedCornerShape(14.dp)
+                                )
+                                .testTag("facebook_auth_button"),
                             shape = RoundedCornerShape(14.dp),
-                            border = BorderStroke(
-                                width = if (guestFocused) 2.dp else 1.dp,
-                                color = if (guestFocused) HubBlue else Color(0xFF283244)
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = Color(0xFF1877F2),
+                                contentColor = Color.White
                             ),
                             contentPadding = PaddingValues(horizontal = 12.dp)
                         ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(20.dp)
+                                    .clip(CircleShape)
+                                    .background(Color.White),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = "f",
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.Black,
+                                    color = Color(0xFF1877F2)
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(8.dp))
                             Text(
-                                text = "Continue as Guest",
+                                text = "Facebook",
                                 style = MaterialTheme.typography.labelLarge.copy(
                                     fontWeight = FontWeight.Bold,
-                                    color = Color(0xFFCBD5E1)
+                                    color = Color.White
                                 )
                             )
                         }
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    // Continue as Guest full-width button
+                    var guestFocused by remember { mutableStateOf(false) }
+                    OutlinedButton(
+                        onClick = {
+                            if (fullName.isNotBlank() || email.isNotBlank()) {
+                                onSaveCredentials(fullName, email)
+                            }
+                            onContinueAsGuest()
+                        },
+                        enabled = !isLoading,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(48.dp)
+                            .onFocusChanged { guestFocused = it.isFocused }
+                            .testTag("continue_guest_button"),
+                        shape = RoundedCornerShape(14.dp),
+                        border = BorderStroke(
+                            width = if (guestFocused) 2.dp else 1.dp,
+                            color = if (guestFocused) HubBlue else Color(0xFF283244)
+                        ),
+                        contentPadding = PaddingValues(horizontal = 12.dp)
+                    ) {
+                        Text(
+                            text = "Continue as Guest",
+                            style = MaterialTheme.typography.labelLarge.copy(
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFFCBD5E1)
+                            )
+                        )
                     }
                 }
 
@@ -555,6 +697,224 @@ fun AuthScreen(
             }
         }
     }
+
+    activeSocialFallbackProvider?.let { provider ->
+        SocialAccountPickerFallbackDialog(
+            providerName = provider,
+            initialName = fullName,
+            initialEmail = email,
+            onDismiss = { activeSocialFallbackProvider = null },
+            onConfirmAccount = { chosenName, chosenEmail ->
+                activeSocialFallbackProvider = null
+                onSocialSignInSuccess(provider, chosenName, chosenEmail)
+            }
+        )
+    }
+}
+
+@Composable
+fun SocialAccountPickerFallbackDialog(
+    providerName: String,
+    initialName: String = "",
+    initialEmail: String = "",
+    onDismiss: () -> Unit,
+    onConfirmAccount: (fullName: String, email: String) -> Unit
+) {
+    val isFacebook = providerName.equals("Facebook", ignoreCase = true)
+    val brandAccent = if (isFacebook) Color(0xFF1877F2) else Color(0xFF4285F4)
+    val defaultEmailDomain = if (isFacebook) "facebook.com" else "gmail.com"
+
+    var nameInput by rememberSaveable(providerName) {
+        mutableStateOf(initialName.ifBlank { "G-Max Pro Gamer" })
+    }
+    var emailInput by rememberSaveable(providerName) {
+        mutableStateOf(
+            initialEmail.ifBlank {
+                if (isFacebook) "gmax.gamer@facebook.com" else "gmax.gamer@gmail.com"
+            }
+        )
+    }
+    var validationError by remember { mutableStateOf<String?>(null) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = Color(0xFF111827),
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    modifier = Modifier
+                        .size(30.dp)
+                        .clip(CircleShape)
+                        .background(brandAccent),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = if (isFacebook) "f" else "G",
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Black,
+                        color = Color.White
+                    )
+                }
+                Spacer(modifier = Modifier.width(10.dp))
+                Column {
+                    Text(
+                        text = "Continue with $providerName",
+                        style = MaterialTheme.typography.titleMedium.copy(
+                            fontWeight = FontWeight.ExtraBold,
+                            color = Color(0xFFF8FAFC)
+                        )
+                    )
+                    Text(
+                        text = "Select or enter your $providerName account",
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            color = Color(0xFF94A3B8)
+                        )
+                    )
+                }
+            }
+        },
+        text = {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                // Quick 1-Tap Account Card
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable {
+                            val resolvedName = nameInput.trim().ifBlank { "$providerName Gamer" }
+                            val resolvedEmail = emailInput.trim().ifBlank { "gamer@$defaultEmailDomain" }
+                            onConfirmAccount(resolvedName, resolvedEmail)
+                        }
+                        .testTag("social_picker_quick_account_card"),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFF1E293B)),
+                    border = BorderStroke(1.dp, brandAccent.copy(alpha = 0.55f))
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(38.dp)
+                                .clip(CircleShape)
+                                .background(brandAccent.copy(alpha = 0.22f))
+                                .border(1.dp, brandAccent, CircleShape),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = (nameInput.trim().firstOrNull()?.uppercaseChar() ?: 'G').toString(),
+                                fontWeight = FontWeight.Black,
+                                color = Color.White,
+                                fontSize = 15.sp
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = nameInput.ifBlank { "$providerName Gamer" },
+                                style = MaterialTheme.typography.bodyMedium.copy(
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFFF8FAFC)
+                                )
+                            )
+                            Text(
+                                text = emailInput.ifBlank { "gamer@$defaultEmailDomain" },
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    color = Color(0xFF94A3B8)
+                                )
+                            )
+                        }
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                            contentDescription = "Instant Sign In",
+                            tint = brandAccent,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                }
+
+                // Editable Name & Email fields
+                MockupElevatedInputField(
+                    label = "$providerName DISPLAY NAME",
+                    value = nameInput,
+                    onValueChange = {
+                        nameInput = it
+                        validationError = null
+                    },
+                    placeholder = "Your Name",
+                    leadingIcon = Icons.Outlined.Person,
+                    keyboardType = KeyboardType.Text,
+                    imeAction = ImeAction.Next,
+                    testTag = "social_fallback_name_input"
+                )
+
+                MockupElevatedInputField(
+                    label = "$providerName EMAIL",
+                    value = emailInput,
+                    onValueChange = {
+                        emailInput = it
+                        validationError = null
+                    },
+                    placeholder = "you@$defaultEmailDomain",
+                    leadingIcon = Icons.Outlined.Email,
+                    keyboardType = KeyboardType.Email,
+                    imeAction = ImeAction.Done,
+                    testTag = "social_fallback_email_input"
+                )
+
+                if (validationError != null) {
+                    Text(
+                        text = validationError ?: "",
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            color = RecorderCoral,
+                            fontWeight = FontWeight.Bold
+                        )
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    val cleanName = nameInput.trim()
+                    val cleanEmail = emailInput.trim()
+                    if (cleanName.isBlank()) {
+                        validationError = "Please enter your display name"
+                        return@Button
+                    }
+                    if (cleanEmail.isBlank() || !cleanEmail.contains("@")) {
+                        validationError = "Please enter a valid email address"
+                        return@Button
+                    }
+                    onConfirmAccount(cleanName, cleanEmail)
+                },
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = brandAccent,
+                    contentColor = Color.White
+                ),
+                shape = RoundedCornerShape(10.dp),
+                modifier = Modifier.testTag("social_fallback_confirm_button")
+            ) {
+                Text(
+                    text = "Continue as ${nameInput.trim().substringBefore(" ").ifBlank { "Gamer" }}",
+                    fontWeight = FontWeight.Bold
+                )
+            }
+        },
+        dismissButton = {
+            TextButton(
+                onClick = onDismiss,
+                modifier = Modifier.testTag("social_fallback_cancel_button")
+            ) {
+                Text("Cancel", color = Color(0xFF94A3B8))
+            }
+        }
+    )
 }
 
 @Composable

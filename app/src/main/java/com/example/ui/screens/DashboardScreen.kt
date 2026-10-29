@@ -279,22 +279,10 @@ fun DashboardScreen(
                     modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Box(
-                        modifier = Modifier
-                            .size(38.dp)
-                            .background(
-                                if (isBeastMode) Color(0xFFDC2626).copy(alpha = 0.2f) else CyberCyan.copy(alpha = 0.15f),
-                                CircleShape
-                            ),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.SportsEsports,
-                            contentDescription = null,
-                            tint = if (isBeastMode) Color(0xFFEF4444) else CyberCyan,
-                            modifier = Modifier.size(22.dp)
-                        )
-                    }
+                    com.example.ui.components.GMaxControllerBadge(
+                        size = 38.dp,
+                        accentColor = if (isBeastMode) Color(0xFFEF4444) else CyberCyan
+                    )
 
                     Spacer(modifier = Modifier.width(12.dp))
 

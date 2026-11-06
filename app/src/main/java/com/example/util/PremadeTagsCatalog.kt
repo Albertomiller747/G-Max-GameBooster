@@ -27,7 +27,7 @@ object PremadeTagsCatalog {
     const val OFFICIAL_DEVELOPER_DISPLAY_email_DISPLAY = "Albertomiller747@gmail.com"
     const val OFFICIAL_DEVELOPER_NAME = "Alberto Miller"
     const val OFFICIAL_DEVELOPER_USERNAME = "Albertomiller747"
-    const val OFFICIAL_DEVELOPER_BIO = "Official Creator & Lead Developer of G-Max Game Booster ★"
+    const val OFFICIAL_DEVELOPER_BIO = "Official Creator & Lead Developer of G Max Gaming Hub ★"
     const val OFFICIAL_DEVELOPER_DOB = "1999-07-07"
 
     private val USERNAME_REGEX = Regex("^[a-zA-Z0-9_]{3,20}$")
@@ -37,7 +37,7 @@ object PremadeTagsCatalog {
         "albertomiller",
         "gmax_developer",
         "official_developer",
-        "titanbooster_dev"
+        "gmax_gaming_hub"
     )
 
     /**

@@ -1,6 +1,6 @@
 {
-  "summary":  "Implementation plan to fix Google Sign-In with automatic fallback, add Facebook Login on the Auth and Profile screens, and upgrade the Screen Recorder to capture internal device/gameplay audio, microphone audio, or both simultaneously.",
-  "updatedAt":  "2026-10-29T10:11:05.855740760Z",
-  "requestFeedback":  true,
-  "userFacing":  true
+  "summary": "Implementation plan to fix the 2-line Controller LED hex color code, eliminate out-of-app Controller Overlay choppiness and delayed button presses using a 14ms micro-peek pass-through, and synchronize the 24-hour Rewarded Ad unlock state across all Controller Overlay toggles.",
+  "updatedAt": "2026-11-06T09:33:11.500380714Z",
+  "requestFeedback": true,
+  "userFacing": true
 }

@@ -3,6 +3,7 @@ package com.example.ui.components
 import android.content.Context
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
@@ -12,425 +13,613 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.expandHorizontally
 import androidx.compose.animation.fadeIn
-import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Surface
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.SportsEsports
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.scale
-import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.model.ControllerGlyphMap
+import com.example.model.ControllerLayoutResolver
 import com.example.util.ConsoleHapticManager
+import com.example.util.ConsoleStartupSoundEngine
+import com.example.util.ControllerHealthManager
 import com.google.firebase.auth.FirebaseAuth
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlin.math.PI
+import kotlin.math.cos
+import kotlin.math.sin
+
+private val SmoothConsoleEasing = CubicBezierEasing(0.22f, 1.0f, 0.36f, 1.0f)
 
 /**
- * Rebuilt Xbox One-Inspired Landscape Console Startup Sequence fitted for G-Max:
- * - Deep cyber blue and neon cyan radial console backdrop (#050B18 -> #0A192F)
- * - Stage 1 (Power-On Core): Centered glowing G-Max hexagonal controller emblem scales in with
- *   shockwave pulse rings and synchronized console boot haptic pulse.
- * - Stage 2 (Brand Reveal & Light Sweep): Bold futuristic "G-MAX" console wordmark fades in below
- *   the emblem with a crisp diagonal light-sweep shimmer across the emblem and typography.
- * - Stage 3 (Xbox One-Style Gamer Toast): Iconic pill-shaped "Welcome back, [User]" notification
- *   banner slides in and expands horizontally near the bottom of the screen with the G-Max emblem.
+ * Smooth Console Startup Sequence with G Max Gaming Hub Emblem & Cyber-Blue/Neon-Cyan Palette.
+ * Uses hardware-accelerated graphicsLayer transitions and overlapping crossfades for 60/120fps fluidity,
+ * with a compact, sleek "Log Into Console" pill button.
  */
 @Composable
 fun SplashScreen(
     onAnimationComplete: () -> Unit,
+    controllerGlyphs: ControllerGlyphMap = ControllerLayoutResolver.playStationGlyphs,
+    ultraFastTransition: Boolean = true,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val loginButtonFocusRequester = remember { FocusRequester() }
 
     val gamerName = remember {
         try {
             val fbName = FirebaseAuth.getInstance().currentUser?.displayName?.takeIf { it.isNotBlank() }
-            val prefs = context.getSharedPreferences("gmax_hub_prefs", Context.MODE_PRIVATE)
-            val savedUsername = prefs.getString("hub_custom_username", null)?.takeIf { it.isNotBlank() }
-            val savedFullName = prefs.getString("hub_custom_full_name", null)?.takeIf { it.isNotBlank() }
+            val prefs = context.getSharedPreferences("gmax_hub_ui_prefs", Context.MODE_PRIVATE)
+            val savedUsername = prefs.getString("hub_user_username", null)?.takeIf { it.isNotBlank() }
+            val savedFullName = prefs.getString("hub_user_custom_name", null)?.takeIf { it.isNotBlank() }
             savedUsername ?: fbName ?: savedFullName ?: "Player One"
         } catch (_: Exception) {
             "Player One"
         }
     }
 
-    val backdropAlpha = remember { Animatable(0f) }
-    val emblemScale = remember { Animatable(0.45f) }
-    val emblemAlpha = remember { Animatable(0f) }
+    // Phase 1: Centered G Max Emblem on Pure Black
+    val phase1EmblemAlpha = remember { Animatable(if (ultraFastTransition) 0.35f else 0f) }
+    val phase1EmblemScale = remember { Animatable(if (ultraFastTransition) 0.96f else 0.88f) }
 
-    val ring1Expand = remember { Animatable(0.25f) }
-    val ring1Alpha = remember { Animatable(0.9f) }
+    // Phase 2: Flowing Blue/Cyan Wave Backdrop & Interactive Login Screen
+    val waveBackdropAlpha = remember { Animatable(0f) }
+    val loginContentAlpha = remember { Animatable(0f) }
+    val loginContentScale = remember { Animatable(0.94f) }
+    val loginContentOffsetY = remember { Animatable(18f) }
 
-    val ring2Expand = remember { Animatable(0.25f) }
-    val ring2Alpha = remember { Animatable(0f) }
+    var isLoginGateReady by remember { mutableStateOf(ultraFastTransition) }
+    var isLoggingIn by remember { mutableStateOf(false) }
 
-    val titleAlpha = remember { Animatable(0f) }
-    val titleOffsetY = remember { Animatable(18f) }
-    val lightSweep = remember { Animatable(-0.35f) }
-    val bootBarProgress = remember { Animatable(0f) }
+    // Listen to physical Controller Home / Guide / Start / A button signal from ControllerHealthManager
+    val homeSignalTimestamp by ControllerHealthManager.homeLoginSignal.collectAsState()
+    val initialHomeSignal = remember { homeSignalTimestamp }
 
-    var showWelcomeToast by remember { mutableStateOf(false) }
+    val triggerConsoleLogin: () -> Unit = {
+        if (isLoginGateReady && !isLoggingIn) {
+            isLoggingIn = true
+            ConsoleHapticManager.playLaunchPulse(context)
+            ConsoleStartupSoundEngine.playLoginChime()
+            scope.launch {
+                val exitMs = if (ultraFastTransition) 120 else 250
+                launch {
+                    loginContentScale.animateTo(1.03f, tween(exitMs, easing = SmoothConsoleEasing))
+                }
+                launch {
+                    loginContentAlpha.animateTo(0f, tween(exitMs, easing = SmoothConsoleEasing))
+                }
+                launch {
+                    waveBackdropAlpha.animateTo(0f, tween(exitMs, easing = SmoothConsoleEasing))
+                }
+                delay(exitMs.toLong())
+                onAnimationComplete()
+            }
+        }
+    }
 
-    val infiniteTransition = rememberInfiniteTransition(label = "xboxInspiredConsolePulse")
-    val coreBreathingScale by infiniteTransition.animateFloat(
-        initialValue = 0.97f,
-        targetValue = 1.04f,
+    // Trigger login immediately when physical controller Home/Start/Primary button is pressed during Phase 2
+    LaunchedEffect(homeSignalTimestamp, isLoginGateReady) {
+        if (isLoginGateReady && homeSignalTimestamp > initialHomeSignal && !isLoggingIn) {
+            triggerConsoleLogin()
+        }
+    }
+
+    val infiniteTransition = rememberInfiniteTransition(label = "ps4WaveAnimation")
+    val wavePhase by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = (2f * PI).toFloat(),
         animationSpec = infiniteRepeatable(
-            animation = tween(680, easing = FastOutSlowInEasing),
+            animation = tween(6400, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "wavePhase"
+    )
+    val homePulseScale by infiniteTransition.animateFloat(
+        initialValue = 0.98f,
+        targetValue = 1.03f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(950, easing = FastOutSlowInEasing),
             repeatMode = RepeatMode.Reverse
         ),
-        label = "coreBreathingScale"
+        label = "homePulseScale"
     )
-    val haloGlowAlpha by infiniteTransition.animateFloat(
-        initialValue = 0.32f,
-        targetValue = 0.68f,
+    val homeGlowAlpha by infiniteTransition.animateFloat(
+        initialValue = 0.50f,
+        targetValue = 0.92f,
         animationSpec = infiniteRepeatable(
-            animation = tween(720, easing = FastOutSlowInEasing),
+            animation = tween(950, easing = FastOutSlowInEasing),
             repeatMode = RepeatMode.Reverse
         ),
-        label = "haloGlowAlpha"
+        label = "homeGlowAlpha"
     )
 
-    LaunchedEffect(Unit) {
-        // Stage 1 (0ms): Console Core Power-On + Neon Cyan Shockwave + Haptic Ignition
+    LaunchedEffect(ultraFastTransition) {
+        if (ultraFastTransition) {
+            // Instant launch with ultra-fast 250ms transition
+            ConsoleHapticManager.playBootPulse(context, stage = 1)
+            launch {
+                phase1EmblemScale.animateTo(
+                    targetValue = 1.0f,
+                    animationSpec = spring(
+                        dampingRatio = Spring.DampingRatioNoBouncy,
+                        stiffness = Spring.StiffnessHigh
+                    )
+                )
+            }
+            phase1EmblemAlpha.animateTo(1f, tween(140, easing = SmoothConsoleEasing))
+            delay(60)
+            phase1EmblemAlpha.animateTo(0f, tween(50, easing = SmoothConsoleEasing))
+            onAnimationComplete()
+            return@LaunchedEffect
+        }
+
+        // Full console sequence when ultraFastTransition == false
         ConsoleHapticManager.playBootPulse(context, stage = 1)
+        launch {
+            phase1EmblemScale.animateTo(
+                targetValue = 1.0f,
+                animationSpec = spring(
+                    dampingRatio = Spring.DampingRatioNoBouncy,
+                    stiffness = Spring.StiffnessLow
+                )
+            )
+        }
+        phase1EmblemAlpha.animateTo(1f, tween(480, easing = SmoothConsoleEasing))
+        delay(420)
+
+        // Start fading in Phase 2 wave backdrop while Phase 1 emblem smoothly dissolves
+        ConsoleStartupSoundEngine.playStartupAmbientChord()
+        ConsoleHapticManager.playBootPulse(context, stage = 2)
 
         launch {
-            backdropAlpha.animateTo(1f, tween(380, easing = FastOutSlowInEasing))
+            phase1EmblemAlpha.animateTo(0f, tween(450, easing = SmoothConsoleEasing))
         }
         launch {
-            emblemAlpha.animateTo(1f, tween(360, easing = FastOutSlowInEasing))
+            waveBackdropAlpha.animateTo(1f, tween(650, easing = SmoothConsoleEasing))
+        }
+        delay(220)
+        isLoginGateReady = true
+        launch {
+            loginContentAlpha.animateTo(1f, tween(480, easing = SmoothConsoleEasing))
         }
         launch {
-            emblemScale.animateTo(
+            loginContentScale.animateTo(
                 targetValue = 1f,
                 animationSpec = spring(
-                    dampingRatio = Spring.DampingRatioLowBouncy,
+                    dampingRatio = Spring.DampingRatioNoBouncy,
                     stiffness = Spring.StiffnessMediumLow
                 )
             )
         }
         launch {
-            ring1Expand.animateTo(1.95f, tween(980, easing = FastOutSlowInEasing))
+            loginContentOffsetY.animateTo(
+                targetValue = 0f,
+                animationSpec = tween(480, easing = SmoothConsoleEasing)
+            )
         }
-        launch {
-            ring1Alpha.animateTo(0f, tween(980, easing = LinearEasing))
-        }
-        launch {
-            bootBarProgress.animateTo(1f, tween(2100, easing = FastOutSlowInEasing))
-        }
-
-        // Stage 2 (540ms): "G-MAX" Console Typography Reveal + Light Sweep Shimmer
-        delay(540)
-        ConsoleHapticManager.playBootPulse(context, stage = 2)
-
-        launch {
-            titleAlpha.animateTo(1f, tween(450, easing = FastOutSlowInEasing))
-        }
-        launch {
-            titleOffsetY.animateTo(0f, tween(450, easing = FastOutSlowInEasing))
-        }
-        launch {
-            ring2Alpha.snapTo(0.8f)
-            ring2Expand.animateTo(2.15f, tween(950, easing = FastOutSlowInEasing))
-        }
-        launch {
-            ring2Alpha.animateTo(0f, tween(950, easing = LinearEasing))
-        }
-        launch {
-            lightSweep.animateTo(1.35f, tween(880, easing = FastOutSlowInEasing))
-        }
-
-        // Stage 3 (1150ms): Xbox One-Style Bottom Pill Toast ("Welcome back, [Gamer]")
-        delay(610)
-        showWelcomeToast = true
-        ConsoleHapticManager.playSelectClick(context)
-
-        delay(1050)
-        onAnimationComplete()
+        delay(100)
+        try {
+            loginButtonFocusRequester.requestFocus()
+        } catch (_: Exception) {}
     }
 
     Box(
         modifier = modifier
             .fillMaxSize()
-            .background(
-                Brush.radialGradient(
-                    colors = listOf(
-                        Color(0xFF0A192F),
-                        Color(0xFF071122),
-                        Color(0xFF050B18)
-                    )
-                )
-            )
-            .testTag("xbox_console_splash_screen"),
+            .background(Color.Black)
+            .onKeyEvent { keyEvent ->
+                if (keyEvent.type == KeyEventType.KeyDown && isLoginGateReady) {
+                    when (keyEvent.key) {
+                        Key.Home,
+                        Key.ButtonMode,
+                        Key.ButtonStart,
+                        Key.ButtonA,
+                        Key.Enter,
+                        Key.DirectionCenter -> {
+                            triggerConsoleLogin()
+                            true
+                        }
+                        else -> false
+                    }
+                } else {
+                    false
+                }
+            }
+            .testTag("ps4_console_splash_screen"),
         contentAlignment = Alignment.Center
     ) {
-        // Ambient Cyber Blue & Neon Cyan Halo + Dual Expanding Shockwave Rings + Light Sweep
-        Canvas(modifier = Modifier.fillMaxSize()) {
-            val center = this.center
-            val minDim = size.minDimension
-            val baseRadius = minDim * 0.24f
+        // PHASE 2: Flowing Blue & Cyan Ribbon Wave Backdrop
+        if (waveBackdropAlpha.value > 0.005f) {
+            Canvas(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .graphicsLayer { alpha = waveBackdropAlpha.value }
+            ) {
+                val w = size.width
+                val h = size.height
 
-            // 1. Deep Cyber Blue & Neon Cyan Radial Spotlight
-            drawCircle(
-                brush = Brush.radialGradient(
-                    colors = listOf(
-                        Color(0xFF00E5FF).copy(alpha = 0.34f * backdropAlpha.value * haloGlowAlpha),
-                        Color(0xFF2979FF).copy(alpha = 0.20f * backdropAlpha.value),
-                        Color(0xFF0A192F).copy(alpha = 0.08f * backdropAlpha.value),
-                        Color.Transparent
-                    ),
-                    center = center,
-                    radius = baseRadius * 2.6f
-                ),
-                radius = baseRadius * 2.6f,
-                center = center
-            )
-
-            // 2. Primary Neon Cyan Power-On Shockwave Ring
-            if (ring1Alpha.value > 0.01f) {
-                drawCircle(
-                    color = Color(0xFF00E5FF).copy(alpha = ring1Alpha.value),
-                    radius = baseRadius * ring1Expand.value,
-                    center = center,
-                    style = Stroke(width = 3.dp.toPx())
-                )
-            }
-
-            // 3. Secondary Electric Blue Harmonic Ring
-            if (ring2Alpha.value > 0.01f) {
-                drawCircle(
-                    color = Color(0xFF2979FF).copy(alpha = ring2Alpha.value),
-                    radius = baseRadius * ring2Expand.value,
-                    center = center,
-                    style = Stroke(width = 2.dp.toPx())
-                )
-            }
-
-            // 4. Diagonal Console Light-Sweep Shimmer
-            val sweepPos = lightSweep.value
-            if (sweepPos in -0.25f..1.25f) {
-                val sweepX = size.width * sweepPos
+                // 1. Deep G Max Console Blue Atmospheric Gradient
                 drawRect(
                     brush = Brush.linearGradient(
                         colors = listOf(
-                            Color.Transparent,
-                            Color(0xFF00E5FF).copy(alpha = 0.12f),
-                            Color.White.copy(alpha = 0.20f),
-                            Color(0xFF2979FF).copy(alpha = 0.12f),
+                            Color(0xFF030A18),
+                            Color(0xFF071F46),
+                            Color(0xFF0B3B82),
+                            Color(0xFF051836),
+                            Color(0xFF030914)
+                        ),
+                        start = Offset(0f, 0f),
+                        end = Offset(w, h)
+                    )
+                )
+
+                // 2. Soft Radial Cyan/Blue Horizon Glow
+                drawCircle(
+                    brush = Brush.radialGradient(
+                        colors = listOf(
+                            Color(0xFF00E5FF).copy(alpha = 0.22f),
+                            Color(0xFF2979FF).copy(alpha = 0.14f),
                             Color.Transparent
                         ),
-                        start = Offset(sweepX - 180f, 0f),
-                        end = Offset(sweepX + 180f, size.height)
-                    )
+                        center = Offset(w * 0.52f, h * 0.48f),
+                        radius = maxOf(w, h) * 0.62f
+                    ),
+                    radius = maxOf(w, h) * 0.62f,
+                    center = Offset(w * 0.52f, h * 0.48f)
                 )
-            }
-        }
 
-        // Center Console Emblem & Brand Typography (Xbox One Centerpiece Style)
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center,
-            modifier = Modifier.padding(horizontal = 24.dp)
-        ) {
-            Box(
-                contentAlignment = Alignment.Center,
-                modifier = Modifier
-                    .scale(emblemScale.value * coreBreathingScale)
-                    .alpha(emblemAlpha.value)
-            ) {
-                // Outer Neon Cyan Halo Ring around G-Max Emblem
-                Box(
-                    modifier = Modifier
-                        .size(126.dp)
-                        .clip(RoundedCornerShape(32.dp))
-                        .background(
-                            Brush.radialGradient(
-                                colors = listOf(
-                                    Color(0xFF00E5FF).copy(alpha = 0.25f),
-                                    Color(0xFF2979FF).copy(alpha = 0.08f),
-                                    Color.Transparent
-                                )
-                            )
-                        )
-                        .border(
-                            width = 2.dp,
-                            brush = Brush.linearGradient(
-                                colors = listOf(
-                                    Color(0xFF00E5FF),
-                                    Color(0xFF2979FF),
-                                    Color(0xFF00E5FF)
-                                )
+                // 3. High-Resolution Smooth Flowing Ribbon Waves (Seamless Infinite 2π Loop)
+                val ribbonCount = 4
+                for (layer in 0 until ribbonCount) {
+                    val path = Path()
+                    val strokePath = Path()
+                    val baseHeightRatio = 0.44f + layer * 0.06f
+                    val amp1 = h * (0.055f + layer * 0.01f)
+                    val amp2 = h * (0.026f + layer * 0.007f)
+                    val phaseShift1 = wavePhase + layer * 0.65f
+                    val phaseShift2 = (wavePhase * 2f) + layer * 0.85f
+
+                    val steps = 72
+                    for (i in 0..steps) {
+                        val frac = i.toFloat() / steps
+                        val x = frac * w
+                        val y = h * baseHeightRatio +
+                            sin(frac * 3.2f + phaseShift1) * amp1 +
+                            cos(frac * 5.4f - phaseShift2) * amp2
+
+                        if (i == 0) {
+                            path.moveTo(x, y)
+                            strokePath.moveTo(x, y)
+                        } else {
+                            path.lineTo(x, y)
+                            strokePath.lineTo(x, y)
+                        }
+                    }
+
+                    path.lineTo(w, h)
+                    path.lineTo(0f, h)
+                    path.close()
+
+                    val ribbonColor = if (layer % 2 == 0) Color(0xFF00E5FF) else Color(0xFF2979FF)
+                    drawPath(
+                        path = path,
+                        brush = Brush.verticalGradient(
+                            colors = listOf(
+                                ribbonColor.copy(alpha = 0.13f - layer * 0.02f),
+                                Color(0xFF061633).copy(alpha = 0.04f),
+                                Color.Transparent
                             ),
-                            shape = RoundedCornerShape(32.dp)
+                            startY = h * 0.25f,
+                            endY = h
                         )
-                )
+                    )
 
-                // Official G-Max 3D Hexagonal Controller Emblem
+                    drawPath(
+                        path = strokePath,
+                        brush = Brush.horizontalGradient(
+                            colors = listOf(
+                                Color.Transparent,
+                                Color(0xFF00E5FF).copy(alpha = 0.40f - layer * 0.05f),
+                                Color.White.copy(alpha = 0.30f - layer * 0.04f),
+                                Color(0xFF2979FF).copy(alpha = 0.36f - layer * 0.05f),
+                                Color.Transparent
+                            )
+                        ),
+                        style = Stroke(width = (2.0f - layer * 0.2f).dp.toPx())
+                    )
+                }
+            }
+
+            // Top-Left G Max Gaming Hub Console Emblem & Wordmark
+            Row(
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .windowInsetsPadding(WindowInsets.safeDrawing)
+                    .padding(start = 24.dp, top = 20.dp)
+                    .graphicsLayer { alpha = loginContentAlpha.value },
+                verticalAlignment = Alignment.CenterVertically
+            ) {
                 GMaxBrandIcon(
-                    size = 104.dp,
-                    cornerRadius = 26.dp,
+                    size = 30.dp,
+                    cornerRadius = 8.dp,
                     showGlowBorder = true,
                     glowColor = Color(0xFF00E5FF),
-                    contentDescription = "G-Max Console Core Emblem"
+                    contentDescription = "G Max Gaming Hub Header Logo"
+                )
+                Spacer(modifier = Modifier.width(10.dp))
+                Text(
+                    text = "G MAX GAMING HUB",
+                    color = Color.White,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Black,
+                    letterSpacing = 2.5.sp
                 )
             }
 
-            Spacer(modifier = Modifier.height(18.dp))
-
-            // Bold Futuristic "G-MAX" Wordmark
+            // Centered "Welcome Back" & Compact "Log Into Console" Button
             Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
                 modifier = Modifier
-                    .alpha(titleAlpha.value)
-                    .padding(top = titleOffsetY.value.coerceAtLeast(0f).dp)
+                    .align(Alignment.Center)
+                    .padding(horizontal = 24.dp)
+                    .graphicsLayer {
+                        scaleX = loginContentScale.value
+                        scaleY = loginContentScale.value
+                        translationY = loginContentOffsetY.value
+                        alpha = loginContentAlpha.value
+                    },
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center
             ) {
                 Text(
-                    text = "G-MAX",
-                    fontSize = 34.sp,
-                    fontWeight = FontWeight.Black,
-                    letterSpacing = 6.sp,
+                    text = com.example.util.tr(
+                        "Welcome Back to G Max Gaming Hub",
+                        "Bienvenido de Nuevo a G Max Gaming Hub"
+                    ),
                     color = Color.White,
-                    textAlign = TextAlign.Center
-                )
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = "GAMING HUB & CONSOLE BOOSTER",
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold,
-                    letterSpacing = 2.6.sp,
-                    color = Color(0xFF00E5FF),
+                    fontSize = 21.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    letterSpacing = 0.5.sp,
                     textAlign = TextAlign.Center
                 )
 
-                Spacer(modifier = Modifier.height(16.dp))
+                Spacer(modifier = Modifier.height(10.dp))
 
-                // Sleek Xbox One-style subtle horizontal boot progress line
-                Box(
-                    modifier = Modifier
-                        .width(180.dp)
-                        .height(3.dp)
-                        .clip(CircleShape)
-                        .background(Color(0xFF1E293B))
+                // "Press the [Controller Home] button to use the controller."
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center,
+                    modifier = Modifier.padding(horizontal = 12.dp)
                 ) {
+                    Text(
+                        text = com.example.util.tr("Press the ", "Presiona el botón "),
+                        color = Color.White.copy(alpha = 0.85f),
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Normal
+                    )
+
                     Box(
                         modifier = Modifier
-                            .fillMaxWidth(bootBarProgress.value.coerceIn(0f, 1f))
-                            .height(3.dp)
+                            .graphicsLayer {
+                                scaleX = homePulseScale
+                                scaleY = homePulseScale
+                            }
                             .clip(CircleShape)
-                            .background(
-                                Brush.horizontalGradient(
-                                    colors = listOf(
-                                        Color(0xFF2979FF),
-                                        Color(0xFF00E5FF)
-                                    )
-                                )
+                            .background(Color(0xFF0A192F))
+                            .border(
+                                width = 1.2.dp,
+                                color = Color(0xFF00E5FF).copy(alpha = homeGlowAlpha),
+                                shape = CircleShape
                             )
+                            .padding(horizontal = 8.dp, vertical = 2.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Default.SportsEsports,
+                                contentDescription = null,
+                                tint = Color(0xFF00E5FF),
+                                modifier = Modifier.size(12.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = controllerGlyphs.homeGlyph,
+                                color = Color.White,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.ExtraBold
+                            )
+                        }
+                    }
+
+                    Text(
+                        text = com.example.util.tr(
+                            " button to use the controller.",
+                            " para usar el mando."
+                        ),
+                        color = Color.White.copy(alpha = 0.85f),
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Normal
                     )
                 }
+
+                Spacer(modifier = Modifier.height(18.dp))
+
+                // Compact, Sleek "Log Into Console" Button (zero shadowElevation or rectangular focus box)
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(50))
+                        .background(Color(0xFF091B38).copy(alpha = 0.92f), RoundedCornerShape(50))
+                        .border(
+                            BorderStroke(
+                                width = 1.2.dp,
+                                brush = Brush.horizontalGradient(
+                                    colors = listOf(
+                                        Color(0xFF00E5FF).copy(alpha = homeGlowAlpha),
+                                        Color(0xFF2979FF),
+                                        Color(0xFF00E5FF).copy(alpha = homeGlowAlpha)
+                                    )
+                                )
+                            ),
+                            RoundedCornerShape(50)
+                        )
+                        .focusRequester(loginButtonFocusRequester)
+                        .clickable { triggerConsoleLogin() }
+                        .testTag("console_home_login_button")
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(24.dp)
+                                .clip(CircleShape)
+                                .background(
+                                    Brush.radialGradient(
+                                        colors = listOf(
+                                            Color(0xFF00E5FF).copy(alpha = 0.35f),
+                                            Color(0xFF2979FF).copy(alpha = 0.15f)
+                                        )
+                                    )
+                                )
+                                .border(1.dp, Color(0xFF00E5FF), CircleShape),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.SportsEsports,
+                                contentDescription = "Controller Home Button",
+                                tint = Color.White,
+                                modifier = Modifier.size(13.dp)
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.width(9.dp))
+
+                        Column(horizontalAlignment = Alignment.Start) {
+                            Text(
+                                text = if (isLoggingIn) {
+                                    com.example.util.tr(
+                                        "Logging in as $gamerName...",
+                                        "Iniciando sesión como $gamerName..."
+                                    )
+                                } else {
+                                    com.example.util.tr(
+                                        "Log Into Console ($gamerName)",
+                                        "Iniciar Sesión en Consola ($gamerName)"
+                                    )
+                                },
+                                color = Color.White,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = com.example.util.tr(
+                                    "Press ${controllerGlyphs.homePromptName} / ${controllerGlyphs.southGlyph} or Tap",
+                                    "Presiona ${controllerGlyphs.homePromptName} / ${controllerGlyphs.southGlyph} o Toca"
+                                ),
+                                color = Color(0xFF00E5FF),
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+                    }
+                }
+            }
+
+            // Bottom subtle layout indicator badge
+            AnimatedVisibility(
+                visible = isLoginGateReady,
+                enter = fadeIn(tween(400)) + scaleIn(initialScale = 0.95f),
+                exit = fadeOut(tween(180)),
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .windowInsetsPadding(WindowInsets.safeDrawing)
+                    .padding(bottom = 18.dp)
+            ) {
+                Text(
+                    text = com.example.util.tr(
+                        "Active Controller Layout: ${controllerGlyphs.brandTitle} (${controllerGlyphs.southGlyph} ${controllerGlyphs.eastGlyph} ${controllerGlyphs.westGlyph} ${controllerGlyphs.northGlyph})",
+                        "Diseño de Mando Activo: ${controllerGlyphs.brandTitle} (${controllerGlyphs.southGlyph} ${controllerGlyphs.eastGlyph} ${controllerGlyphs.westGlyph} ${controllerGlyphs.northGlyph})"
+                    ),
+                    color = Color.White.copy(alpha = 0.60f),
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Medium
+                )
             }
         }
 
-        // Bottom Xbox One-Inspired Slide-Out Gamer Greeting Pill ("Welcome back, [User]")
-        AnimatedVisibility(
-            visible = showWelcomeToast,
-            enter = slideInVertically(initialOffsetY = { it / 2 }) +
-                    expandHorizontally(expandFrom = Alignment.CenterHorizontally) +
-                    fadeIn(tween(280)),
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .padding(bottom = 28.dp)
-        ) {
-            Surface(
-                shape = RoundedCornerShape(50),
-                color = Color(0xFF0B192E).copy(alpha = 0.96f),
-                border = androidx.compose.foundation.BorderStroke(
-                    width = 1.5.dp,
-                    brush = Brush.horizontalGradient(
-                        colors = listOf(
-                            Color(0xFF00E5FF),
-                            Color(0xFF2979FF),
-                            Color(0xFF00E5FF)
-                        )
-                    )
-                ),
-                shadowElevation = 14.dp,
-                modifier = Modifier.testTag("console_welcome_toast")
-            ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 18.dp, vertical = 9.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    // Glowing G-Max Controller Badge inside the pill left circle
-                    Box(
-                        modifier = Modifier
-                            .size(32.dp)
-                            .shadow(6.dp, CircleShape)
-                            .clip(CircleShape)
-                            .background(Color(0xFF060A14))
-                            .border(1.5.dp, Color(0xFF00E5FF), CircleShape),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        GMaxBrandIcon(
-                            size = 28.dp,
-                            cornerRadius = 14.dp,
-                            showGlowBorder = false
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.width(12.dp))
-
-                    Column {
-                        Text(
-                            text = "Welcome back, $gamerName",
-                            color = Color.White,
-                            fontWeight = FontWeight.ExtraBold,
-                            fontSize = 13.sp
-                        )
-                        Text(
-                            text = "G-MAX CONSOLE MODE READY",
-                            color = Color(0xFF00E5FF),
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 9.5.sp,
-                            letterSpacing = 1.sp
-                        )
-                    }
+        // PHASE 1: Centered G Max Emblem on Pure Black (Smoothly crossfades into Phase 2)
+        if (phase1EmblemAlpha.value > 0.005f) {
+            Box(
+                contentAlignment = Alignment.Center,
+                modifier = Modifier.graphicsLayer {
+                    scaleX = phase1EmblemScale.value
+                    scaleY = phase1EmblemScale.value
+                    alpha = phase1EmblemAlpha.value
                 }
+            ) {
+                GMaxBrandIcon(
+                    size = 76.dp,
+                    cornerRadius = 20.dp,
+                    showGlowBorder = true,
+                    glowColor = Color(0xFF00E5FF),
+                    contentDescription = "G Max Boot Emblem"
+                )
             }
         }
     }

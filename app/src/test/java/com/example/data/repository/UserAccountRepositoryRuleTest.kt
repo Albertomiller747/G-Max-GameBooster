@@ -85,6 +85,37 @@ class UserAccountRepositoryRuleTest : FirestoreEmulatorTestBase() {
         }
     }
 
+    @Test
+    fun searchPlayerByUsername_crossUserLookup_succeeds() = runBlocking {
+        val aliceUid = signInTestUser(ALICE_EMAIL)
+        val aliceRepo = UserAccountRepository(firestore)
+        withTimeout(DEFAULT_TIMEOUT_MS) {
+            aliceRepo.saveOrUpdateUserProfile(
+                UserCloudProfile(
+                    userId = aliceUid,
+                    displayName = "Alice Pro",
+                    username = "alice_pro",
+                    gamerscore = 4200L,
+                    mostPlayedGameName = "PUBG MOBILE",
+                    mostPlayedMinutes = 180L
+                )
+            )
+            aliceRepo.claimAndSaveUsername("alice_pro")
+        }
+
+        signInTestUser(BOB_EMAIL)
+        val bobRepo = UserAccountRepository(firestore)
+        val searchResult = withTimeout(DEFAULT_TIMEOUT_MS) {
+            bobRepo.searchPlayerByUsername("@alice_pro")
+        }
+        assertTrue("Search by @username should succeed: ${searchResult.exceptionOrNull()}", searchResult.isSuccess)
+        val claim = searchResult.getOrNull()
+        assertNotNull(claim)
+        assertEquals(aliceUid, claim?.userId)
+        assertEquals("alice_pro", claim?.username)
+        assertEquals(4200L, claim?.gamerscore)
+    }
+
     private companion object {
         const val ALICE_EMAIL = "alice@test.com"
         const val BOB_EMAIL = "bob@test.com"

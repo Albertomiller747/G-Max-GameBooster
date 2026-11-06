@@ -137,28 +137,26 @@ fun OnboardingScreen(
 private fun WelcomeStepContent(
     onContinueClick: () -> Unit
 ) {
-    val highlights = remember {
-        listOf(
-            WelcomeFeatureHighlight(
-                badge = "BOOST",
-                summary = "Maximize frame rates and cool hardware",
-                icon = Icons.Default.RocketLaunch,
-                accentColor = LaunchGreen
-            ),
-            WelcomeFeatureHighlight(
-                badge = "RECORD",
-                summary = "Capture crisp gameplay videos and screenshots",
-                icon = Icons.Default.Videocam,
-                accentColor = RecorderCoral
-            ),
-            WelcomeFeatureHighlight(
-                badge = "CONTROLLER",
-                summary = "Navigate everything seamlessly with your gamepad",
-                icon = Icons.Default.SportsEsports,
-                accentColor = HubBlue
-            )
+    val highlights = listOf(
+        WelcomeFeatureHighlight(
+            badge = com.example.util.tr("BOOST", "IMPULSO"),
+            summary = com.example.util.tr("Maximize frame rates and cool hardware", "Maximiza los FPS y enfría el hardware"),
+            icon = Icons.Default.RocketLaunch,
+            accentColor = LaunchGreen
+        ),
+        WelcomeFeatureHighlight(
+            badge = com.example.util.tr("RECORD", "GRABAR"),
+            summary = com.example.util.tr("Capture crisp gameplay videos and screenshots", "Captura videos y capturas de pantalla nítidas"),
+            icon = Icons.Default.Videocam,
+            accentColor = RecorderCoral
+        ),
+        WelcomeFeatureHighlight(
+            badge = com.example.util.tr("CONTROLLER", "MANDO"),
+            summary = com.example.util.tr("Navigate everything seamlessly with your gamepad", "Navega todo fluidamente con tu mando"),
+            icon = Icons.Default.SportsEsports,
+            accentColor = HubBlue
         )
-    }
+    )
 
     var continueFocused by remember { mutableStateOf(false) }
 
@@ -187,7 +185,7 @@ private fun WelcomeStepContent(
             Spacer(modifier = Modifier.height(20.dp))
 
             Text(
-                text = "Welcome to G Max Hub",
+                text = com.example.util.tr("Welcome to G Max Hub", "Bienvenido a G Max Hub"),
                 style = MaterialTheme.typography.headlineMedium,
                 fontWeight = FontWeight.ExtraBold,
                 color = MaterialTheme.colorScheme.onBackground,
@@ -197,7 +195,10 @@ private fun WelcomeStepContent(
             Spacer(modifier = Modifier.height(8.dp))
 
             Text(
-                text = "Your unified launcher, recorder, and controller command center",
+                text = com.example.util.tr(
+                    "Your unified launcher, recorder, and controller command center",
+                    "Tu centro unificado de lanzador, grabadora y mando"
+                ),
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center
@@ -225,7 +226,7 @@ private fun WelcomeStepContent(
                             .padding(horizontal = 18.dp, vertical = 16.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        if (item.badge == "CONTROLLER") {
+                        if (item.icon == Icons.Default.SportsEsports) {
                             com.example.ui.components.GMaxBrandIcon(
                                 size = 48.dp,
                                 cornerRadius = 14.dp,
@@ -304,7 +305,7 @@ private fun WelcomeStepContent(
                 )
             ) {
                 Text(
-                    text = "Continue",
+                    text = com.example.util.tr("Continue", "Continuar"),
                     fontSize = 16.sp,
                     fontWeight = FontWeight.Bold
                 )
@@ -319,7 +320,7 @@ private fun WelcomeStepContent(
             Spacer(modifier = Modifier.height(8.dp))
 
             Text(
-                text = "Controller Ready • Press A or Tap Continue",
+                text = com.example.util.tr("Controller Ready • Press A or Tap Continue", "Mando Listo • Pulsa A o Toca Continuar"),
                 fontSize = 11.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -373,10 +374,16 @@ private fun UnifiedPermissionsStepContent(
     val permissionItems = listOf(
         HubPermissionItem(
             id = "overlay",
-            title = "Display Over Other Apps",
-            featureBadge = "HUD & RECORDER BUBBLE",
-            whatItGrants = "Allows floating HUD gauges, tactical crosshairs, and the radial recorder bubble to appear over games.",
-            whyFeatureNeedsIt = "Needed so you can monitor live FPS/temperature and start or stop recording without leaving gameplay.",
+            title = com.example.util.tr("Display Over Other Apps", "Mostrar Sobre Otras Apps"),
+            featureBadge = com.example.util.tr("HUD & RECORDER BUBBLE", "HUD Y BURBUJA GRABADORA"),
+            whatItGrants = com.example.util.tr(
+                "Allows floating HUD gauges, tactical crosshairs, and the radial recorder bubble to appear over games.",
+                "Permite que medidores HUD flotantes, miras tácticas y la burbuja de grabación aparezcan sobre los juegos."
+            ),
+            whyFeatureNeedsIt = com.example.util.tr(
+                "Needed so you can monitor live FPS/temperature and start or stop recording without leaving gameplay.",
+                "Necesario para monitorear FPS/temperatura en vivo e iniciar o detener grabaciones sin salir del juego."
+            ),
             icon = Icons.Default.Layers,
             accentColor = RecorderCoral,
             isGranted = overlayGranted,
@@ -392,10 +399,16 @@ private fun UnifiedPermissionsStepContent(
         ),
         HubPermissionItem(
             id = "notifications",
-            title = "Recorder & Boost Notifications",
-            featureBadge = "QUICK NOTIFICATION BAR",
-            whatItGrants = "Allows the quick-control recorder notification bar and active booster status alerts.",
-            whyFeatureNeedsIt = "Needed for the 1-tap notification bar ('Recorder is ready') to trigger recordings and screenshots anytime.",
+            title = com.example.util.tr("Recorder & Boost Notifications", "Notificaciones de Grabación e Impulso"),
+            featureBadge = com.example.util.tr("QUICK NOTIFICATION BAR", "BARRA DE NOTIFICACIÓN RÁPIDA"),
+            whatItGrants = com.example.util.tr(
+                "Allows the quick-control recorder notification bar and active booster status alerts.",
+                "Permite la barra de notificación de control rápido de grabación y alertas de impulso activo."
+            ),
+            whyFeatureNeedsIt = com.example.util.tr(
+                "Needed for the 1-tap notification bar ('Recorder is ready') to trigger recordings and screenshots anytime.",
+                "Necesario para la barra de 1 toque ('Grabadora lista') para iniciar grabaciones y capturas en cualquier momento."
+            ),
             icon = Icons.Default.Notifications,
             accentColor = HubBlue,
             isGranted = notifGranted,
@@ -409,10 +422,16 @@ private fun UnifiedPermissionsStepContent(
         ),
         HubPermissionItem(
             id = "microphone",
-            title = "Microphone Audio Capture",
-            featureBadge = "VOICE COMMENTARY",
-            whatItGrants = "Grants optional microphone audio input while recording gameplay clips.",
-            whyFeatureNeedsIt = "Needed only when you enable Microphone Audio in Recorder Settings to capture voice chat or commentary.",
+            title = com.example.util.tr("Microphone Audio Capture", "Captura de Audio del Micrófono"),
+            featureBadge = com.example.util.tr("VOICE COMMENTARY", "COMENTARIO DE VOZ"),
+            whatItGrants = com.example.util.tr(
+                "Grants optional microphone audio input while recording gameplay clips.",
+                "Otorga entrada opcional de micrófono al grabar clips de partidas."
+            ),
+            whyFeatureNeedsIt = com.example.util.tr(
+                "Needed only when you enable Microphone Audio in Recorder Settings to capture voice chat or commentary.",
+                "Necesario solo cuando activas Audio del Micrófono en Ajustes de Grabadora para capturar voz."
+            ),
             icon = Icons.Default.Mic,
             accentColor = LaunchGreen,
             isGranted = micGranted,
@@ -422,10 +441,16 @@ private fun UnifiedPermissionsStepContent(
         ),
         HubPermissionItem(
             id = "usage",
-            title = "Usage Access Telemetry",
-            featureBadge = "GAME DETECTION",
-            whatItGrants = "Lets the hub detect which game is actively running in the foreground.",
-            whyFeatureNeedsIt = "Needed to automatically track game session duration, FPS match recaps, and active boost profiles.",
+            title = com.example.util.tr("Usage Access Telemetry", "Telemetría de Acceso de Uso"),
+            featureBadge = com.example.util.tr("GAME DETECTION", "DETECCIÓN DE JUEGO"),
+            whatItGrants = com.example.util.tr(
+                "Lets the hub detect which game is actively running in the foreground.",
+                "Permite detectar qué juego se está ejecutando activamente en primer plano."
+            ),
+            whyFeatureNeedsIt = com.example.util.tr(
+                "Needed to automatically track game session duration, FPS match recaps, and active boost profiles.",
+                "Necesario para registrar automáticamente la duración de sesiones, resúmenes FPS y perfiles de impulso."
+            ),
             icon = Icons.Default.QueryStats,
             accentColor = Color(0xFFF59E0B),
             isGranted = usageGranted,
@@ -437,10 +462,16 @@ private fun UnifiedPermissionsStepContent(
         ),
         HubPermissionItem(
             id = "dnd",
-            title = "Priority Do Not Disturb",
-            featureBadge = "INTERRUPT SHIELD",
-            whatItGrants = "Allows toggling Priority Do Not Disturb filter while gaming and restoring it afterward.",
-            whyFeatureNeedsIt = "Needed to block pop-up call and message interruptions during competitive matches without muting game audio.",
+            title = com.example.util.tr("Priority Do Not Disturb", "No Molestar Prioritario"),
+            featureBadge = com.example.util.tr("INTERRUPT SHIELD", "ESCUDO DE INTERRUPCIONES"),
+            whatItGrants = com.example.util.tr(
+                "Allows toggling Priority Do Not Disturb filter while gaming and restoring it afterward.",
+                "Permite activar el filtro No Molestar Prioritario al jugar y restaurarlo después."
+            ),
+            whyFeatureNeedsIt = com.example.util.tr(
+                "Needed to block pop-up call and message interruptions during competitive matches without muting game audio.",
+                "Necesario para bloquear llamadas y mensajes emergentes en partidas competitivas sin silenciar el audio del juego."
+            ),
             icon = Icons.Default.DoNotDisturbOn,
             accentColor = Color(0xFF8B5CF6),
             isGranted = dndGranted,
@@ -484,13 +515,16 @@ private fun UnifiedPermissionsStepContent(
                 Spacer(modifier = Modifier.width(12.dp))
                 Column {
                     Text(
-                        text = "Permissions Overview",
+                        text = com.example.util.tr("Permissions Overview", "Resumen de Permisos"),
                         style = MaterialTheme.typography.titleLarge,
                         fontWeight = FontWeight.ExtraBold,
                         color = MaterialTheme.colorScheme.onBackground
                     )
                     Text(
-                        text = "$grantedCount of ${permissionItems.size} enabled • Grant only what you need",
+                        text = com.example.util.tr(
+                            "$grantedCount of ${permissionItems.size} enabled • Grant only what you need",
+                            "$grantedCount de ${permissionItems.size} activos • Concede solo lo que necesites"
+                        ),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -505,7 +539,7 @@ private fun UnifiedPermissionsStepContent(
                 modifier = Modifier.testTag("permissions_not_now_top_button")
             ) {
                 Text(
-                    text = "Not Now",
+                    text = com.example.util.tr("Not Now", "Ahora No"),
                     fontSize = 13.sp,
                     fontWeight = FontWeight.Bold
                 )
@@ -550,7 +584,7 @@ private fun UnifiedPermissionsStepContent(
                 shape = RoundedCornerShape(14.dp)
             ) {
                 Text(
-                    text = "Not Now",
+                    text = com.example.util.tr("Not Now", "Ahora No"),
                     fontWeight = FontWeight.Bold,
                     fontSize = 15.sp
                 )
@@ -575,7 +609,11 @@ private fun UnifiedPermissionsStepContent(
                 )
             ) {
                 Text(
-                    text = if (allGranted) "All Set • Enter Hub" else "Continue to Hub",
+                    text = if (allGranted) {
+                        com.example.util.tr("All Set • Enter Hub", "Todo Listo • Entrar al Hub")
+                    } else {
+                        com.example.util.tr("Continue to Hub", "Continuar al Hub")
+                    },
                     fontWeight = FontWeight.Bold,
                     fontSize = 15.sp
                 )
@@ -661,7 +699,7 @@ private fun PermissionExplanationCard(item: HubPermissionItem) {
                         )
                         Spacer(modifier = Modifier.width(4.dp))
                         Text(
-                            text = "Granted",
+                            text = com.example.util.tr("Granted", "Concedido"),
                             color = LaunchGreen,
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Bold
@@ -679,7 +717,7 @@ private fun PermissionExplanationCard(item: HubPermissionItem) {
                         modifier = Modifier.testTag("grant_permission_${item.id}")
                     ) {
                         Text(
-                            text = "Grant",
+                            text = com.example.util.tr("Grant", "Conceder"),
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Bold
                         )
@@ -691,7 +729,7 @@ private fun PermissionExplanationCard(item: HubPermissionItem) {
 
             // What it grants
             Text(
-                text = "What it grants: ${item.whatItGrants}",
+                text = "${com.example.util.tr("What it grants", "Qué otorga")}: ${item.whatItGrants}",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurface,
                 lineHeight = 17.sp
@@ -701,7 +739,7 @@ private fun PermissionExplanationCard(item: HubPermissionItem) {
 
             // Why the feature needs it
             Text(
-                text = "Why it's needed: ${item.whyFeatureNeedsIt}",
+                text = "${com.example.util.tr("Why it's needed", "Por qué se necesita")}: ${item.whyFeatureNeedsIt}",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 lineHeight = 17.sp

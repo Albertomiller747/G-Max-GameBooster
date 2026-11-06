@@ -28,6 +28,7 @@ import androidx.compose.material.icons.filled.Gamepad
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.SportsEsports
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Button
@@ -88,14 +89,29 @@ fun ControllerTab(
     viewModel: GameBoosterViewModel,
     modifier: Modifier = Modifier
 ) {
+    val context = androidx.compose.ui.platform.LocalContext.current
     val healthState by viewModel.controllerHealthState.collectAsState()
     val isTestLocked by viewModel.isControllerTestLocked.collectAsState()
+    val controllerOverlayConfig by viewModel.controllerOverlayConfig.collectAsState()
+    val controllerLayoutMode by viewModel.controllerLayoutMode.collectAsState()
+    val activeControllerGlyphs by viewModel.activeControllerGlyphs.collectAsState()
+    val showWiredPopup by viewModel.showWiredControllerRequiredPopup.collectAsState()
+    val proUnlockUntilMs by com.example.util.AdMobManager.proControllerUnlockUntilMs.collectAsState()
+    val isProUnlocked = proUnlockUntilMs > System.currentTimeMillis() || com.example.util.AdMobManager.isProControllerUnlocked()
     var deadzoneSlider by remember { mutableFloatStateOf(0.05f) }
 
     var selectedLedHex by remember { mutableStateOf("#00E5FF") }
     var customR by remember { mutableIntStateOf(0) }
     var customG by remember { mutableIntStateOf(229) }
     var customB by remember { mutableIntStateOf(255) }
+
+    if (showWiredPopup) {
+        com.example.ui.components.WiredControllerRequiredDialog(
+            isBluetoothControllerConnected = healthState.controllerId >= 0 && !healthState.isWiredConnection,
+            controllerName = healthState.activeControllerName,
+            onDismiss = { viewModel.dismissWiredControllerRequiredPopup() }
+        )
+    }
 
     // Ensure controller input lock is automatically released when leaving ControllerTab
     DisposableEffect(Unit) {
@@ -111,6 +127,55 @@ fun ControllerTab(
         contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
+        // 0. Opt-in 24h Rewarded Ad Unlock Card for Custom RGB & Controller Overlay
+        item {
+            com.example.ui.components.GMaxProControllerRewardedUnlockCard()
+        }
+
+        // 0a. Real-Time Controller Input Screen Overlay (Top of Extras > Controller Tab)
+        item {
+            com.example.ui.components.ControllerScreenOverlayCard(
+                config = controllerOverlayConfig,
+                controllerState = healthState,
+                glyphs = activeControllerGlyphs,
+                selectedLayoutMode = controllerLayoutMode,
+                onSelectLayoutMode = { viewModel.setControllerLayoutMode(it) },
+                onSelectStickTrackingMode = { viewModel.setControllerOverlayStickTrackingMode(it) },
+                onToggleEnabled = { enableRequested ->
+                    if (enableRequested && !com.example.util.ControllerHealthManager.isWiredControllerConnected(context)) {
+                        viewModel.setControllerOverlayEnabled(false)
+                        viewModel.triggerWiredControllerRequiredPopup()
+                    } else if (enableRequested && !isProUnlocked) {
+                        com.example.util.AdMobManager.requestProControllerRewardedUnlock(context) {
+                            viewModel.setControllerOverlayEnabled(true)
+                        }
+                    } else {
+                        viewModel.setControllerOverlayEnabled(enableRequested)
+                    }
+                },
+                onToggleAutoScale = { viewModel.setControllerOverlayAutoScale(it) },
+                onScaleFactorChange = { viewModel.setControllerOverlayScaleFactor(it) },
+                onOpacityChange = { viewModel.setControllerOverlayOpacity(it) },
+                onToggleLockTouch = { viewModel.setControllerOverlayLockTouch(it) },
+                onToggleDisableSpeakerAudio = { viewModel.setControllerOverlayDisableSpeakerAudio(it) },
+                onHighlightColorChange = { viewModel.setControllerOverlayHighlightColor(it) },
+                onTriggerDemoPulse = { viewModel.triggerControllerOverlayDemoPulse() },
+                onSimulateButtonToggle = { btnKey ->
+                    val currentlyPressed = healthState.pressedButtons.contains(btnKey)
+                    viewModel.controllerHealthManager.setSimulatedButtonState(btnKey, !currentlyPressed)
+                }
+            )
+        }
+
+        // 0b. Controller Layout Selector (PlayStation, Xbox, Nintendo Switch, Auto-Detect)
+        item {
+            com.example.ui.components.ControllerLayoutSelectorCard(
+                selectedMode = controllerLayoutMode,
+                resolvedGlyphs = activeControllerGlyphs,
+                onSelectMode = { viewModel.setControllerLayoutMode(it) }
+            )
+        }
+
         // 1. Controller Connection & Polling Rate Monitor Card
         item {
             CyberCard(borderColor = HubBlue.copy(alpha = 0.5f)) {
@@ -121,8 +186,8 @@ fun ControllerTab(
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
                         SectionTitle(
-                            title = "Controller Polling Rate Monitor",
-                            subtitle = "Real kernel HID event frequency (Hz)"
+                            title = com.example.util.tr("Controller Polling Rate Monitor", "Monitor de Tasa de Sondeo del Mando"),
+                            subtitle = com.example.util.tr("Real kernel HID event frequency (Hz)", "Frecuencia real de eventos HID del kernel (Hz)")
                         )
                     }
                     IconButtonCustom(
@@ -157,7 +222,17 @@ fun ControllerTab(
                                 fontSize = 13.sp
                             )
                             Text(
-                                text = if (healthState.controllerId >= 0) "Controller ID #${healthState.controllerId} • Connected" else "Connect via Bluetooth or USB-OTG",
+                                text = if (healthState.controllerId >= 0) {
+                                    com.example.util.tr(
+                                        "Controller ID #${healthState.controllerId} • ${healthState.connectionTypeLabel}",
+                                        "ID del mando #${healthState.controllerId} • ${healthState.connectionTypeLabel}"
+                                    )
+                                } else {
+                                    com.example.util.tr(
+                                        "Connect via USB-C / OTG (Wired Required for Overlay) or Bluetooth",
+                                        "Conecta por USB-C / OTG (Cable Requerido para Superposición) o Bluetooth"
+                                    )
+                                },
                                 color = if (healthState.controllerId >= 0) LaunchGreen else MaterialTheme.colorScheme.onSurfaceVariant,
                                 fontSize = 11.sp
                             )
@@ -173,13 +248,13 @@ fun ControllerTab(
                 ) {
                     ControllerMetricBox(
                         modifier = Modifier.weight(1f),
-                        label = "CURRENT POLLING RATE",
-                        value = if (healthState.pollingRateHz > 0) "${healthState.pollingRateHz} Hz" else "Standby (0 Hz)",
+                        label = com.example.util.tr("CURRENT POLLING RATE", "SONDEO ACTUAL"),
+                        value = if (healthState.pollingRateHz > 0) "${healthState.pollingRateHz} Hz" else com.example.util.tr("Standby (0 Hz)", "En espera (0 Hz)"),
                         accent = if (healthState.pollingRateHz >= 250) LaunchGreen else if (healthState.pollingRateHz >= 125) HubBlue else SolarGold
                     )
                     ControllerMetricBox(
                         modifier = Modifier.weight(1f),
-                        label = "PEAK DETECTED",
+                        label = com.example.util.tr("PEAK DETECTED", "PICO DETECTADO"),
                         value = if (healthState.peakPollingRateHz > 0) "${healthState.peakPollingRateHz} Hz" else "--",
                         accent = LaunchGreen
                     )
@@ -188,7 +263,10 @@ fun ControllerTab(
                 Spacer(modifier = Modifier.height(8.dp))
 
                 Text(
-                    text = "High polling rates (250Hz - 1000Hz) deliver sub-4ms response times. Lower polling rates (under 125Hz) can introduce aim smoothing or perceptible delay in fast-paced competitive games.",
+                    text = com.example.util.tr(
+                        "High polling rates (250Hz - 1000Hz) deliver sub-4ms response times. Lower polling rates (under 125Hz) can introduce aim smoothing or perceptible delay in fast-paced competitive games.",
+                        "Las tasas de sondeo altas (250Hz - 1000Hz) ofrecen respuesta menor a 4ms. Tasas inferiores a 125Hz pueden causar retraso perceptible en juegos competitivos."
+                    ),
                     style = MaterialTheme.typography.bodySmall.copy(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         fontSize = 10.sp
@@ -212,8 +290,8 @@ fun ControllerTab(
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
                         SectionTitle(
-                            title = "Controller Health Check: Stick Drift & Range",
-                            subtitle = "Isolate joysticks so testing never scrolls or moves UI"
+                            title = com.example.util.tr("Controller Health Check: Stick Drift & Range", "Salud del Mando: Drift y Rango de Joysticks"),
+                            subtitle = com.example.util.tr("Isolate joysticks so testing never scrolls or moves UI", "Aísla los joysticks para que la prueba no desplace la interfaz")
                         )
                     }
                 }
@@ -254,13 +332,21 @@ fun ControllerTab(
                             Spacer(modifier = Modifier.width(10.dp))
                             Column {
                                 Text(
-                                    text = if (isTestLocked) "Check Active • UI Navigation Locked" else "Diagnostic Input Isolation",
+                                    text = if (isTestLocked) {
+                                        com.example.util.tr("Check Active • UI Navigation Locked", "Prueba activa • Navegación bloqueada")
+                                    } else {
+                                        com.example.util.tr("Diagnostic Input Isolation", "Aislamiento de Entrada de Diagnóstico")
+                                    },
                                     color = MaterialTheme.colorScheme.onSurface,
                                     fontWeight = FontWeight.Bold,
                                     fontSize = 12.sp
                                 )
                                 Text(
-                                    text = if (isTestLocked) "Sticks & D-Pad now only affect the drift reticles below." else "Tap Start Check so moving joysticks won't scroll the screen.",
+                                    text = if (isTestLocked) {
+                                        com.example.util.tr("Sticks & D-Pad now only affect the drift reticles below.", "Los joysticks y cruceta ahora solo afectan las retículas abajo.")
+                                    } else {
+                                        com.example.util.tr("Tap Start Check so moving joysticks won't scroll the screen.", "Toca Iniciar Prueba para evitar que los joysticks desplacen la pantalla.")
+                                    },
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     fontSize = 10.5.sp
                                 )
@@ -287,7 +373,7 @@ fun ControllerTab(
                             )
                             Spacer(modifier = Modifier.width(4.dp))
                             Text(
-                                text = if (isTestLocked) "Stop Check" else "Start Check",
+                                text = if (isTestLocked) com.example.util.tr("Stop Check", "Detener") else com.example.util.tr("Start Check", "Iniciar Prueba"),
                                 fontSize = 11.5.sp,
                                 fontWeight = FontWeight.ExtraBold
                             )
@@ -310,7 +396,10 @@ fun ControllerTab(
                             Icon(Icons.Default.Warning, contentDescription = null, tint = ElectricCrimson, modifier = Modifier.size(18.dp))
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
-                                text = "Stick Drift Warning: Analog pot resting outside neutral deadzone. Increase deadzone below or clean stick sensor module.",
+                                text = com.example.util.tr(
+                                    "Stick Drift Warning: Analog pot resting outside neutral deadzone. Increase deadzone below or clean stick sensor module.",
+                                    "Advertencia de Drift: El joystick descansa fuera de la zona muerta neutral. Aumenta la zona muerta abajo o limpia el sensor."
+                                ),
                                 color = MaterialTheme.colorScheme.onSurface,
                                 style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.sp)
                             )
@@ -329,7 +418,7 @@ fun ControllerTab(
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
                         Text(
-                            "LEFT THUMBSTICK",
+                            com.example.util.tr("LEFT THUMBSTICK", "JOYSTICK IZQUIERDO"),
                             color = MaterialTheme.colorScheme.onSurface,
                             fontWeight = FontWeight.Bold,
                             fontSize = 11.sp
@@ -345,7 +434,7 @@ fun ControllerTab(
                             fontWeight = FontWeight.Bold
                         )
                         Text(
-                            text = "Circularity: ${healthState.leftStick.circularityScore}%",
+                            text = com.example.util.tr("Circularity: ${healthState.leftStick.circularityScore}%", "Circularidad: ${healthState.leftStick.circularityScore}%"),
                             color = if (healthState.leftStick.circularityScore >= 90) LaunchGreen else SolarGold,
                             fontSize = 10.sp,
                             fontWeight = FontWeight.SemiBold
@@ -357,7 +446,7 @@ fun ControllerTab(
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
                         Text(
-                            "RIGHT THUMBSTICK",
+                            com.example.util.tr("RIGHT THUMBSTICK", "JOYSTICK DERECHO"),
                             color = MaterialTheme.colorScheme.onSurface,
                             fontWeight = FontWeight.Bold,
                             fontSize = 11.sp
@@ -373,7 +462,7 @@ fun ControllerTab(
                             fontWeight = FontWeight.Bold
                         )
                         Text(
-                            text = "Circularity: ${healthState.rightStick.circularityScore}%",
+                            text = com.example.util.tr("Circularity: ${healthState.rightStick.circularityScore}%", "Circularidad: ${healthState.rightStick.circularityScore}%"),
                             color = if (healthState.rightStick.circularityScore >= 90) LaunchGreen else SolarGold,
                             fontSize = 10.sp,
                             fontWeight = FontWeight.SemiBold
@@ -390,7 +479,7 @@ fun ControllerTab(
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                         Text(
-                            "Test Deadzone Radius:",
+                            com.example.util.tr("Test Deadzone Radius:", "Radio de Zona Muerta de Prueba:"),
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold
@@ -422,7 +511,7 @@ fun ControllerTab(
 
                 // Trigger Travel Gauges (L2/LT & R2/RT)
                 Text(
-                    "Analog Trigger Travel (0.00 to 1.00):",
+                    com.example.util.tr("Analog Trigger Travel (0.00 to 1.00):", "Recorrido de Gatillos Analógicos (0.00 a 1.00):"),
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Bold
@@ -435,7 +524,7 @@ fun ControllerTab(
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text("LT / L2 Depth", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 10.sp)
+                            Text(com.example.util.tr("LT / L2 Depth", "Profundidad LT / L2"), color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 10.sp)
                             Text(
                                 String.format(Locale.US, "%.2f", healthState.triggers.leftTrigger),
                                 color = HubBlue,
@@ -458,7 +547,7 @@ fun ControllerTab(
 
                     Column(modifier = Modifier.weight(1f)) {
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text("RT / R2 Depth", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 10.sp)
+                            Text(com.example.util.tr("RT / R2 Depth", "Profundidad RT / R2"), color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 10.sp)
                             Text(
                                 String.format(Locale.US, "%.2f", healthState.triggers.rightTrigger),
                                 color = HubBlue,
@@ -483,7 +572,7 @@ fun ControllerTab(
                 Spacer(modifier = Modifier.height(12.dp))
 
                 Text(
-                    "Mechanical Button Chatter Detection:",
+                    com.example.util.tr("Mechanical Button Chatter Detection:", "Detección de Rebote de Botones Mecánicos:"),
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Bold
@@ -499,7 +588,7 @@ fun ControllerTab(
                             .padding(8.dp)
                     ) {
                         Text(
-                            text = "✓ Zero contact bounce chatter detected. Switches in pristine condition.",
+                            text = com.example.util.tr("✓ Zero contact bounce chatter detected. Switches in pristine condition.", "✓ Cero rebote de contacto detectado. Interruptores en perfecto estado."),
                             color = LaunchGreen,
                             fontSize = 11.sp,
                             fontWeight = FontWeight.SemiBold
@@ -520,8 +609,8 @@ fun ControllerTab(
                                     modifier = Modifier.fillMaxWidth(),
                                     horizontalArrangement = Arrangement.SpaceBetween
                                 ) {
-                                    Text("Switch Chatter: ${chatter.buttonName}", color = ElectricCrimson, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                                    Text("Bounce: ${chatter.bounceIntervalMs}ms", color = MaterialTheme.colorScheme.onSurface, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+                                    Text("${com.example.util.tr("Switch Chatter", "Rebote")}: ${chatter.buttonName}", color = ElectricCrimson, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                    Text("${com.example.util.tr("Bounce", "Intervalo")}: ${chatter.bounceIntervalMs}ms", color = MaterialTheme.colorScheme.onSurface, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
                                 }
                             }
                         }
@@ -530,74 +619,18 @@ fun ControllerTab(
             }
         }
 
-        // 3. Controller Battery Level & Low-Battery Alert Card
-        item {
-            CyberCard(borderColor = if (healthState.batteryInfo.isLowBattery) ElectricCrimson else SolarGold.copy(alpha = 0.55f)) {
-                SectionTitle(
-                    title = "Controller Battery Level",
-                    subtitle = "Real-time gamepad charge & low-battery alert"
-                )
-
-                Spacer(modifier = Modifier.height(10.dp))
-
-                healthState.batteryInfo.lowBatteryAlert?.let { alert ->
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(ElectricCrimson.copy(alpha = 0.16f))
-                            .border(1.dp, ElectricCrimson, RoundedCornerShape(8.dp))
-                            .padding(10.dp)
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.BatteryAlert, contentDescription = null, tint = ElectricCrimson, modifier = Modifier.size(20.dp))
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(alert, color = MaterialTheme.colorScheme.onSurface, fontSize = 11.sp)
-                        }
-                    }
-                    Spacer(modifier = Modifier.height(10.dp))
-                }
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(
-                        imageVector = if (healthState.batteryInfo.isLowBattery) Icons.Default.BatteryAlert else Icons.Default.BatteryChargingFull,
-                        contentDescription = null,
-                        tint = if (healthState.batteryInfo.isLowBattery) ElectricCrimson else LaunchGreen,
-                        modifier = Modifier.size(32.dp)
-                    )
-                    Spacer(modifier = Modifier.width(12.dp))
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = "Battery Status: ${healthState.batteryInfo.batteryStatus}",
-                            color = MaterialTheme.colorScheme.onSurface,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 14.sp
-                        )
-                        Text(
-                            text = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) "Queried directly via Android 12+ InputDevice.batteryState API" else "Direct HID battery query requires Android 12+ (API 31+)",
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            fontSize = 11.sp
-                        )
-                    }
-                }
-            }
-        }
-
-        // 4. Real Rumble Tester Card
+        // 3. Real Rumble Tester Card
         item {
             CyberCard(borderColor = Color(0xFFA855F7).copy(alpha = 0.55f)) {
                 SectionTitle(
-                    title = "Real Rumble Tester",
-                    subtitle = "Actuates gamepad haptic vibration motors"
+                    title = com.example.util.tr("Real Rumble Tester", "Probador de Vibración Real"),
+                    subtitle = com.example.util.tr("Actuates gamepad haptic vibration motors", "Activa los motores de vibración háptica del mando")
                 )
 
                 Spacer(modifier = Modifier.height(10.dp))
 
                 Text(
-                    text = "Status: ${healthState.rumbleStatus}",
+                    text = "${com.example.util.tr("Status", "Estado")}: ${healthState.rumbleStatus}",
                     color = MaterialTheme.colorScheme.onSurface,
                     fontSize = 12.sp,
                     fontFamily = FontFamily.Monospace
@@ -619,7 +652,7 @@ fun ControllerTab(
                         border = androidx.compose.foundation.BorderStroke(1.dp, HubBlue.copy(alpha = 0.45f)),
                         shape = RoundedCornerShape(8.dp)
                     ) {
-                        Text("CLICK (150ms)", fontSize = 10.sp, color = HubBlue, fontWeight = FontWeight.Bold)
+                        Text(com.example.util.tr("CLICK (150ms)", "CLIC (150ms)"), fontSize = 10.sp, color = HubBlue, fontWeight = FontWeight.Bold)
                     }
 
                     Button(
@@ -632,7 +665,7 @@ fun ControllerTab(
                         border = androidx.compose.foundation.BorderStroke(1.dp, LaunchGreen.copy(alpha = 0.45f)),
                         shape = RoundedCornerShape(8.dp)
                     ) {
-                        Text("PULSE (300ms)", fontSize = 10.sp, color = LaunchGreen, fontWeight = FontWeight.Bold)
+                        Text(com.example.util.tr("PULSE (300ms)", "PULSO (300ms)"), fontSize = 10.sp, color = LaunchGreen, fontWeight = FontWeight.Bold)
                     }
 
                     Button(
@@ -645,18 +678,18 @@ fun ControllerTab(
                         border = androidx.compose.foundation.BorderStroke(1.dp, ElectricCrimson.copy(alpha = 0.45f)),
                         shape = RoundedCornerShape(8.dp)
                     ) {
-                        Text("HEAVY (600ms)", fontSize = 10.sp, color = ElectricCrimson, fontWeight = FontWeight.Bold)
+                        Text(com.example.util.tr("HEAVY (600ms)", "FUERTE (600ms)"), fontSize = 10.sp, color = ElectricCrimson, fontWeight = FontWeight.Bold)
                     }
                 }
             }
         }
 
-        // 5. Expanded LED Lightbar Studio (12 Presets + Custom RGB Sliders) & Gyro Tools
+        // 4. Expanded LED Lightbar Studio (12 Presets + Custom RGB Sliders) & Gyro Tools
         item {
             CyberCard(borderColor = HubBlue.copy(alpha = 0.55f)) {
                 SectionTitle(
-                    title = "LED Lightbar & Gyroscope Studio (Android 12+)",
-                    subtitle = "DualSense, DualShock 4, Xbox, and pro gamepad hardware interfaces"
+                    title = com.example.util.tr("LED Lightbar & Gyroscope Studio (Android 12+)", "Estudio de Barra LED y Giroscopio (Android 12+)"),
+                    subtitle = com.example.util.tr("DualSense, DualShock 4, Xbox, and pro gamepad hardware interfaces", "Interfaces de hardware para DualSense, DualShock 4, Xbox y mandos pro")
                 )
 
                 Spacer(modifier = Modifier.height(10.dp))
@@ -668,10 +701,13 @@ fun ControllerTab(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        "Gamepad Lightbar / LED Color (12 Presets + Custom RGB):",
+                        com.example.util.tr("Gamepad Lightbar / LED Color (12 Presets + Custom RGB):", "Barra de Luz / Color LED del Mando (12 Ajustes + RGB):"),
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(end = 8.dp)
                     )
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Box(
@@ -693,7 +729,9 @@ fun ControllerTab(
                             color = MaterialTheme.colorScheme.onSurface,
                             fontSize = 11.sp,
                             fontFamily = FontFamily.Monospace,
-                            fontWeight = FontWeight.Bold
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                            softWrap = false
                         )
                     }
                 }
@@ -730,7 +768,7 @@ fun ControllerTab(
 
                 Spacer(modifier = Modifier.height(12.dp))
 
-                // Custom RGB Sliders Box
+                // Custom RGB Sliders Box (gated by 24h Rewarded Ad unlock if not yet unlocked)
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -740,17 +778,46 @@ fun ControllerTab(
                         .padding(12.dp)
                 ) {
                     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text(
-                            text = "Custom RGB Lightbar Mixer",
-                            color = MaterialTheme.colorScheme.onSurface,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 11.5.sp
-                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = com.example.util.tr("Custom RGB Lightbar Mixer", "Mezclador de Barra de Luz RGB Personalizado"),
+                                color = MaterialTheme.colorScheme.onSurface,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 11.5.sp,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .padding(end = 8.dp)
+                            )
+                            Text(
+                                text = if (isProUnlocked) {
+                                    com.example.util.tr("UNLOCKED (24H)", "DESBLOQUEADO (24H)")
+                                } else {
+                                    com.example.util.tr("REWARDED UNLOCK", "ANUNCIO RECOMPENSA")
+                                },
+                                color = if (isProUnlocked) LaunchGreen else SolarGold,
+                                fontWeight = FontWeight.ExtraBold,
+                                fontSize = 9.5.sp,
+                                maxLines = 1,
+                                softWrap = false
+                            )
+                        }
 
                         val updateCustomHex = { r: Int, g: Int, b: Int ->
-                            val hex = String.format(Locale.US, "#%02X%02X%02X", r, g, b)
-                            selectedLedHex = hex
-                            viewModel.setControllerLedColor(hex)
+                            if (!isProUnlocked) {
+                                com.example.util.AdMobManager.requestProControllerRewardedUnlock(context) {
+                                    val hex = String.format(Locale.US, "#%02X%02X%02X", r, g, b)
+                                    selectedLedHex = hex
+                                    viewModel.setControllerLedColor(hex)
+                                }
+                            } else {
+                                val hex = String.format(Locale.US, "#%02X%02X%02X", r, g, b)
+                                selectedLedHex = hex
+                                viewModel.setControllerLedColor(hex)
+                            }
                         }
 
                         RgbChannelSliderRow(
@@ -787,7 +854,7 @@ fun ControllerTab(
 
                 // Gyro Section
                 Text(
-                    "Controller Gyroscope Telemetry:",
+                    com.example.util.tr("Controller Gyroscope Telemetry:", "Telemetría de Giroscopio del Mando:"),
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Bold
@@ -812,13 +879,119 @@ fun ControllerTab(
                             .padding(10.dp)
                     ) {
                         Text(
-                            text = "Gamepad gyroscope inactive or not exposed over current Bluetooth profile. DualSense and Switch Pro gyro supported on Android 12+.",
+                            text = com.example.util.tr(
+                                "Gamepad gyroscope inactive or not exposed over current Bluetooth profile. DualSense and Switch Pro gyro supported on Android 12+.",
+                                "Giroscopio del mando inactivo o no expuesto en el perfil Bluetooth actual. Giroscopio DualSense y Switch Pro compatible en Android 12+."
+                            ),
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             fontSize = 11.sp
                         )
                     }
                 }
             }
+        }
+
+        // 5. Controller Battery Level & Low-Battery Alert Card (Placed above bottom Native Ad)
+        item {
+            val isControllerConnected = healthState.controllerId >= 0
+            CyberCard(
+                borderColor = when {
+                    !isControllerConnected -> MaterialTheme.colorScheme.outline.copy(alpha = 0.35f)
+                    healthState.batteryInfo.isLowBattery -> ElectricCrimson
+                    else -> SolarGold.copy(alpha = 0.55f)
+                }
+            ) {
+                SectionTitle(
+                    title = com.example.util.tr("Controller Battery Level", "Nivel de Batería del Mando"),
+                    subtitle = com.example.util.tr("Real-time gamepad charge & low-battery alert", "Carga del mando en tiempo real y alerta de batería baja"),
+                    badge = if (isControllerConnected) com.example.util.tr("CONNECTED", "CONECTADO") else com.example.util.tr("DISCONNECTED", "DESCONECTADO"),
+                    badgeColor = if (isControllerConnected) LaunchGreen else MaterialTheme.colorScheme.outline
+                )
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                if (isControllerConnected) {
+                    healthState.batteryInfo.lowBatteryAlert?.let { alert ->
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(ElectricCrimson.copy(alpha = 0.16f))
+                                .border(1.dp, ElectricCrimson, RoundedCornerShape(8.dp))
+                                .padding(10.dp)
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.BatteryAlert, contentDescription = null, tint = ElectricCrimson, modifier = Modifier.size(20.dp))
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(alert, color = MaterialTheme.colorScheme.onSurface, fontSize = 11.sp)
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(10.dp))
+                    }
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = when {
+                            !isControllerConnected -> Icons.Default.SportsEsports
+                            healthState.batteryInfo.isLowBattery -> Icons.Default.BatteryAlert
+                            else -> Icons.Default.BatteryChargingFull
+                        },
+                        contentDescription = null,
+                        tint = when {
+                            !isControllerConnected -> MaterialTheme.colorScheme.onSurfaceVariant
+                            healthState.batteryInfo.isLowBattery -> ElectricCrimson
+                            else -> LaunchGreen
+                        },
+                        modifier = Modifier.size(32.dp)
+                    )
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = if (isControllerConnected) {
+                                "${com.example.util.tr("Battery Status", "Estado de Batería")}: ${healthState.batteryInfo.batteryStatus}"
+                            } else {
+                                "${com.example.util.tr("Battery Status", "Estado de Batería")}: ${com.example.util.tr("Disconnected (Connect a controller to view battery health)", "Desconectado (Conecta un mando para ver la batería)")}"
+                            },
+                            color = if (isControllerConnected) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 14.sp
+                        )
+                        Text(
+                            text = if (!isControllerConnected) {
+                                com.example.util.tr(
+                                    "No active gamepad detected — battery telemetry is paused until a controller is connected",
+                                    "No se detectó ningún mando activo — la telemetría de batería está en pausa hasta conectar un mando"
+                                )
+                            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                                com.example.util.tr(
+                                    "Queried directly via Android 12+ InputDevice.batteryState API",
+                                    "Consultado directamente mediante la API InputDevice.batteryState de Android 12+"
+                                )
+                            } else {
+                                com.example.util.tr(
+                                    "Direct HID battery query requires Android 12+ (API 31+)",
+                                    "La consulta directa de batería HID requiere Android 12+ (API 31+)"
+                                )
+                            },
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            fontSize = 11.sp
+                        )
+                    }
+                }
+            }
+        }
+
+        // 6. Single Safe Bottom Ad Card below Controller Battery Level Card with 32.dp top margin
+        item {
+            com.example.ui.components.GMaxNativeAdCard(
+                placementTag = "controller_bottom_below_battery",
+                topBuffer = 32.dp,
+                bottomBuffer = 24.dp
+            )
         }
     }
 }

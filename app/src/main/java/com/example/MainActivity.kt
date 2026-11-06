@@ -28,6 +28,7 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
@@ -69,6 +70,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
@@ -76,6 +78,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import androidx.compose.material.icons.filled.ShoppingBag
 import com.example.service.ScreenRecordingService
 import com.example.ui.components.SplashScreen
 import com.example.ui.screens.AccountProfileScreen
@@ -85,12 +88,22 @@ import com.example.ui.screens.GamesScreen
 import com.example.ui.screens.OnboardingScreen
 import com.example.ui.screens.ScreenRecordScreen
 import com.example.ui.screens.SettingsScreen
+import com.example.ui.screens.TopGearScreen
 import com.example.ui.theme.HubBlue
 import com.example.ui.theme.LaunchGreen
 import com.example.ui.theme.RecorderCoral
-import com.example.ui.theme.TitanBoosterTheme
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.tween
+import androidx.lifecycle.lifecycleScope
+import com.example.ui.components.ActionFeedbackController
+import com.example.ui.components.InstantFeedbackBannerHost
+import com.example.ui.components.gmaxInteractivePress
+import com.example.ui.theme.GMaxGamingHubTheme
 import com.example.viewmodel.GameBoosterViewModel
 import com.google.firebase.auth.FirebaseUser
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class MainActivity : ComponentActivity() {
 
@@ -99,9 +112,11 @@ class MainActivity : ComponentActivity() {
     private var triggerScreenshotFromIntent by mutableStateOf(false)
     private var requestedTabFromIntent by mutableStateOf<String?>(null)
     private var requestedRecorderSubTab by mutableIntStateOf(0)
+    private var requestedExtrasSubTab by mutableIntStateOf(0)
 
     // Compose-observable tab index so hardware controller L1/R1 bumpers can switch tabs directly
     private var selectedHubTabIndex by mutableIntStateOf(0)
+    private var isShowingSplashScreen by mutableStateOf(false)
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
@@ -123,16 +138,50 @@ class MainActivity : ComponentActivity() {
         if (!openTab.isNullOrEmpty()) {
             requestedTabFromIntent = openTab
             requestedRecorderSubTab = intent.getIntExtra("extra_recorder_subtab", 0)
+            requestedExtrasSubTab = intent.getIntExtra("extra_extras_subtab", 0)
             intent.removeExtra("extra_open_tab")
+        }
+        if (intent.getBooleanExtra("extra_open_review_prompt", false)) {
+            com.example.util.AppReviewManager.onReviewNotificationTapped(this)
+            intent.removeExtra("extra_open_review_prompt")
         }
     }
 
     override fun onResume() {
         super.onResume()
-        viewModel.refreshEfpsEngine()
-        viewModel.refreshControllerState()
+        com.example.util.ControllerHealthManager.setAppInForeground(true)
+        com.example.util.AppReviewManager.onAppResumedCheckVerification(this)
         viewModel.onAppResumed()
+        lifecycleScope.launch(Dispatchers.Default) {
+            try {
+                viewModel.refreshEfpsEngine()
+                viewModel.refreshControllerState()
+                com.example.service.ControllerOverlayService.syncService(this@MainActivity)
+            } catch (_: Exception) {}
+        }
     }
+
+    override fun onPause() {
+        com.example.util.ControllerHealthManager.setAppInForeground(false)
+        super.onPause()
+    }
+
+    override fun onStop() {
+        super.onStop()
+        viewModel.onAppPausedOrStopped()
+    }
+
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        com.example.util.AppMemoryManager.onTrimMemory(this, level)
+    }
+
+    override fun onLowMemory() {
+        super.onLowMemory()
+        com.example.util.AppMemoryManager.onLowMemory(this)
+    }
+
+    private var isStickNavigationActive = false
 
     override fun dispatchGenericMotionEvent(ev: MotionEvent): Boolean {
         viewModel.controllerHealthManager.onGenericMotionEvent(ev)
@@ -140,9 +189,9 @@ class MainActivity : ComponentActivity() {
         if (viewModel.isControllerTestLocked.value) {
             return true
         }
-        // Prevent idle analog stick micro-drift from triggering focus jumps or vibrations
         val isJoystick = (ev.source and android.view.InputDevice.SOURCE_JOYSTICK) == android.view.InputDevice.SOURCE_JOYSTICK ||
-                (ev.source and android.view.InputDevice.SOURCE_GAMEPAD) == android.view.InputDevice.SOURCE_GAMEPAD
+            (ev.source and android.view.InputDevice.SOURCE_GAMEPAD) == android.view.InputDevice.SOURCE_GAMEPAD ||
+            (ev.source and android.view.InputDevice.SOURCE_DPAD) == android.view.InputDevice.SOURCE_DPAD
         if (isJoystick && ev.action == MotionEvent.ACTION_MOVE) {
             val maxAxis = maxOf(
                 kotlin.math.abs(ev.getAxisValue(MotionEvent.AXIS_X)),
@@ -152,16 +201,38 @@ class MainActivity : ComponentActivity() {
                 kotlin.math.abs(ev.getAxisValue(MotionEvent.AXIS_HAT_X)),
                 kotlin.math.abs(ev.getAxisValue(MotionEvent.AXIS_HAT_Y))
             )
-            if (maxAxis < 0.55f) {
-                return true
+            if (maxAxis >= 0.60f && !isStickNavigationActive) {
+                isStickNavigationActive = true
+                com.example.util.ConsoleHapticManager.playFocusTick(this)
+            } else if (maxAxis < 0.35f) {
+                isStickNavigationActive = false
             }
         }
         return super.dispatchGenericMotionEvent(ev)
     }
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
-        // Record telemetry for Controller Health Check tab
+        // Record telemetry for Controller Health Check & Real-Time Controller Input Overlay
         viewModel.controllerHealthManager.onKeyEvent(event)
+
+        // If on PS4-style Console Startup / Login Gate, route Controller Home/Start/A button to log in
+        if (isShowingSplashScreen) {
+            if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
+                when (event.keyCode) {
+                    KeyEvent.KEYCODE_BUTTON_MODE,
+                    KeyEvent.KEYCODE_HOME,
+                    KeyEvent.KEYCODE_BUTTON_START,
+                    KeyEvent.KEYCODE_BUTTON_A,
+                    KeyEvent.KEYCODE_DPAD_CENTER,
+                    KeyEvent.KEYCODE_ENTER -> {
+                        com.example.util.ConsoleHapticManager.playLaunchPulse(this)
+                        com.example.util.ControllerHealthManager.notifyHomeLoginButtonPressed()
+                        return true
+                    }
+                }
+            }
+            return super.dispatchKeyEvent(event)
+        }
 
         // If Stick Drift & Range test lock is active, consume controller inputs so UI doesn't scroll
         if (viewModel.isControllerTestLocked.value) {
@@ -181,48 +252,84 @@ class MainActivity : ComponentActivity() {
             }
         }
 
+        if (event.action == KeyEvent.ACTION_DOWN) {
+            when (event.keyCode) {
+                KeyEvent.KEYCODE_DPAD_UP,
+                KeyEvent.KEYCODE_DPAD_DOWN,
+                KeyEvent.KEYCODE_DPAD_LEFT,
+                KeyEvent.KEYCODE_DPAD_RIGHT -> {
+                    com.example.util.ConsoleHapticManager.playFocusTick(this)
+                }
+                KeyEvent.KEYCODE_BUTTON_A,
+                KeyEvent.KEYCODE_DPAD_CENTER,
+                KeyEvent.KEYCODE_ENTER -> {
+                    if (event.repeatCount == 0) {
+                        com.example.util.ConsoleHapticManager.playSelectClick(this)
+                    }
+                }
+            }
+        }
+
         if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
             when (event.keyCode) {
                 KeyEvent.KEYCODE_BUTTON_MODE,
                 KeyEvent.KEYCODE_HOME -> {
-                    // Controller Home / Guide button forces Big Screen Mode on even if Auto toggle is off
                     com.example.util.ConsoleHapticManager.playLaunchPulse(this)
                     selectedHubTabIndex = 0
-                    viewModel.setBigScreenModeManual(true)
-                    Toast.makeText(this, "Big Screen Console Mode Activated", Toast.LENGTH_SHORT).show()
+                    val nextConsoleState = !viewModel.isBigScreenModeManual.value
+                    viewModel.setBigScreenModeManual(nextConsoleState)
+                    Toast.makeText(
+                        this,
+                        if (nextConsoleState) {
+                            com.example.util.AppStrings.trText(
+                                "Big Screen Console Mode Activated",
+                                "Modo Consola en Pantalla Grande Activado"
+                            )
+                        } else {
+                            com.example.util.AppStrings.trText(
+                                "Exited Big Screen Console Mode",
+                                "Modo Consola Desactivado"
+                            )
+                        },
+                        Toast.LENGTH_SHORT
+                    ).show()
                     return true
                 }
                 KeyEvent.KEYCODE_BUTTON_L1 -> {
-                    com.example.util.ConsoleHapticManager.playSelectClick(this)
-                    selectedHubTabIndex = (selectedHubTabIndex - 1 + 5) % 5
+                    com.example.util.ConsoleHapticManager.playTabSwitch(this)
+                    selectedHubTabIndex = (selectedHubTabIndex - 1 + 6) % 6
                     return true
                 }
                 KeyEvent.KEYCODE_BUTTON_R1 -> {
-                    com.example.util.ConsoleHapticManager.playSelectClick(this)
-                    selectedHubTabIndex = (selectedHubTabIndex + 1) % 5
+                    com.example.util.ConsoleHapticManager.playTabSwitch(this)
+                    selectedHubTabIndex = (selectedHubTabIndex + 1) % 6
                     return true
                 }
                 KeyEvent.KEYCODE_BUTTON_B -> {
                     // Controller B button: exit manual Big Screen mode or return to Launcher tab
+                    com.example.util.ConsoleHapticManager.playBackTone(this)
                     if (viewModel.isBigScreenModeManual.value) {
-                        com.example.util.ConsoleHapticManager.playSelectClick(this)
                         viewModel.setBigScreenModeManual(false)
                         return true
                     }
                     if (selectedHubTabIndex != 0) {
-                        com.example.util.ConsoleHapticManager.playSelectClick(this)
                         selectedHubTabIndex = 0
                         return true
                     }
                 }
                 KeyEvent.KEYCODE_BUTTON_X -> {
-                    // Controller X button: Apply Quick Boost anywhere in the Hub
+                    // Controller Square / X button: Boost and launch the currently focused game tile directly
                     com.example.util.ConsoleHapticManager.playLaunchPulse(this)
-                    viewModel.quickBoost(
-                        targetApp = viewModel.selectedTargetGame.value,
-                        mode = viewModel.selectedBoostMode.value
-                    )
-                    Toast.makeText(this, "Controller Quick Boost Activated!", Toast.LENGTH_SHORT).show()
+                    val target = viewModel.boostAndLaunchFocusedGame()
+                    val gameLabel = target?.appName ?: com.example.util.AppStrings.trText("Selected Game", "Juego Seleccionado")
+                    Toast.makeText(
+                        this,
+                        com.example.util.AppStrings.trText(
+                            "Boosting & Launching $gameLabel",
+                            "Optimizando e Iniciando $gameLabel"
+                        ),
+                        Toast.LENGTH_SHORT
+                    ).show()
                     return true
                 }
                 KeyEvent.KEYCODE_BUTTON_Y -> {
@@ -233,7 +340,19 @@ class MainActivity : ComponentActivity() {
                             action = ScreenRecordingService.ACTION_STOP
                         }
                         startService(stopIntent)
-                        Toast.makeText(this, "Recording saved to Videos!", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(
+                            this,
+                            com.example.util.AppStrings.trText(
+                                "Recording saved to Videos!",
+                                "¡Grabación guardada en Videos!"
+                            ),
+                            Toast.LENGTH_SHORT
+                        ).show()
+                        com.example.util.AdMobManager.maybeTriggerPostActionAd(
+                            this,
+                            "Screen Recording",
+                            "Grabación de Pantalla"
+                        )
                     } else {
                         triggerRecordingFromIntent = true
                     }
@@ -247,7 +366,15 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        com.example.util.AppStrings.init(this)
         handleIncomingIntent(intent)
+
+        // Offload notification channel creation, WorkManager scheduling, and AdMob warmup off the critical launch frame
+        lifecycleScope.launch(kotlinx.coroutines.Dispatchers.Default) {
+            com.example.util.SmartNotificationManager.ensureNotificationChannel(this@MainActivity)
+            com.example.util.SmartNotificationManager.scheduleBackgroundChecks(this@MainActivity)
+            com.example.util.AdMobManager.initializeAndPreload(this@MainActivity)
+        }
 
         setContent {
             val currentTheme by viewModel.appTheme.collectAsState()
@@ -259,13 +386,21 @@ class MainActivity : ComponentActivity() {
             val hasCompletedOnboarding by viewModel.hasCompletedOnboarding.collectAsState()
             val showPermissionsPage by viewModel.showPermissionsPage.collectAsState()
             val reducedAnimations by viewModel.reducedAnimations.collectAsState()
+            val activeControllerGlyphs by viewModel.activeControllerGlyphs.collectAsState()
+            val controllerOverlayConfig by viewModel.controllerOverlayConfig.collectAsState()
 
-            TitanBoosterTheme(
+            GMaxGamingHubTheme(
                 appTheme = currentTheme,
                 customBgArgb = customBgColor
             ) {
-                val securityResult = remember {
-                    com.example.util.AppSecurityManager.checkIntegrity(this@MainActivity)
+                var securityResult by remember {
+                    mutableStateOf(com.example.util.AppSecurityManager.SecurityResult(isPassed = true))
+                }
+                LaunchedEffect(Unit) {
+                    val checked = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+                        com.example.util.AppSecurityManager.checkIntegrity(this@MainActivity)
+                    }
+                    securityResult = checked
                 }
 
                 if (!securityResult.isPassed) {
@@ -273,12 +408,45 @@ class MainActivity : ComponentActivity() {
                         violationReason = securityResult.violationReason
                     )
                 } else {
-                    var showSplash by rememberSaveable { mutableStateOf(true) }
-                    val isPortrait = LocalConfiguration.current.orientation == Configuration.ORIENTATION_PORTRAIT
+                    val configuration = LocalConfiguration.current
+                    val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+                    val autoBigScreenLandscape by viewModel.autoBigScreenLandscape.collectAsState()
+                    val isBigScreenManual by viewModel.isBigScreenModeManual.collectAsState()
+                    val socialProvider by viewModel.socialSignedInProvider.collectAsState()
+                    val customEmail by viewModel.customEmail.collectAsState()
+                    val isUserAlreadySignedIn = currentFirebaseUser != null ||
+                        socialProvider.isNotBlank() ||
+                        customEmail.isNotBlank()
 
-                    if (showSplash && !reducedAnimations && !isPortrait) {
-                        SplashScreen(onAnimationComplete = { showSplash = false })
-                    } else if (!hasCompletedAuthStep && currentFirebaseUser == null) {
+                    // When manual Console Mode is engaged, automatically rotate to sensor landscape; restore unspecified on exit
+                    LaunchedEffect(isBigScreenManual) {
+                        try {
+                            requestedOrientation = if (isBigScreenManual) {
+                                android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+                            } else {
+                                android.content.pm.ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+                            }
+                        } catch (_: Exception) {}
+                    }
+
+                    // PS4-style Console Startup Animation & Controller Login Gate ONLY activates in Landscape mode!
+                    var hasCompletedLandscapeConsoleBoot by rememberSaveable { mutableStateOf(false) }
+                    val shouldShowConsoleStartup = (isLandscape || isBigScreenManual) &&
+                        (autoBigScreenLandscape || isBigScreenManual) &&
+                        !hasCompletedLandscapeConsoleBoot &&
+                        !reducedAnimations
+
+                    LaunchedEffect(shouldShowConsoleStartup) {
+                        isShowingSplashScreen = shouldShowConsoleStartup
+                    }
+
+                    if (shouldShowConsoleStartup) {
+                        SplashScreen(
+                            onAnimationComplete = { hasCompletedLandscapeConsoleBoot = true },
+                            controllerGlyphs = activeControllerGlyphs,
+                            ultraFastTransition = true
+                        )
+                    } else if (!hasCompletedAuthStep && !isUserAlreadySignedIn) {
                         // Sign In or Create Account page right after app launch (Splash) and before Welcome page (Onboarding)
                         AuthScreen(
                             initialDateOfBirth = userDateOfBirth,
@@ -407,79 +575,202 @@ class MainActivity : ComponentActivity() {
                                     selectedHubTabIndex = 0
                                     requestedTabFromIntent = null
                                 }
-                                "EXTRAS" -> {
+                                "TOP_GEAR" -> {
                                     selectedHubTabIndex = 2
                                     requestedTabFromIntent = null
                                 }
-                                "SETTINGS" -> {
+                                "EXTRAS" -> {
                                     selectedHubTabIndex = 3
                                     requestedTabFromIntent = null
                                 }
-                                "PROFILE" -> {
+                                "SETTINGS" -> {
                                     selectedHubTabIndex = 4
+                                    requestedTabFromIntent = null
+                                }
+                                "PROFILE" -> {
+                                    selectedHubTabIndex = 5
                                     requestedTabFromIntent = null
                                 }
                             }
                         }
 
-                        Scaffold(
-                            modifier = Modifier.fillMaxSize(),
-                            containerColor = MaterialTheme.colorScheme.background,
-                            topBar = {
-                                Column(modifier = Modifier.fillMaxWidth()) {
-                                    RazerInspiredTopHubBar(
-                                        selectedTabIndex = selectedHubTabIndex,
-                                        currentFirebaseUser = currentFirebaseUser,
-                                        cloudPhotoUrl = cloudProfile?.photoUrl ?: "",
-                                        onSelectTab = {
-                                            com.example.util.ConsoleHapticManager.playSelectClick(context)
-                                            selectedHubTabIndex = it
-                                        }
-                                    )
-                                    // Animated top in-app controller connection/disconnection notification banner
-                                    com.example.ui.components.ControllerConnectionBanner(
-                                        alert = controllerAlert,
-                                        onDismiss = { viewModel.dismissControllerAlert() }
-                                    )
+                        LaunchedEffect(Unit) {
+                            com.example.util.AdMobManager.maybeShowAppOpenAdOnLaunch()
+                        }
+
+                        var manualNetworkRetryTick by remember { mutableIntStateOf(0) }
+                        val isDeviceOnlineLive by com.example.util.rememberIsDeviceOnline()
+                        val isDeviceOnline = remember(isDeviceOnlineLive, manualNetworkRetryTick) {
+                            isDeviceOnlineLive || com.example.util.NetworkConnectivityMonitor.isCurrentlyOnline(context)
+                        }
+
+                        Box(modifier = Modifier.fillMaxSize()) {
+                            Scaffold(
+                                modifier = Modifier.fillMaxSize(),
+                                contentWindowInsets = WindowInsets.safeDrawing,
+                                containerColor = MaterialTheme.colorScheme.background,
+                                topBar = {
+                                    Column(modifier = Modifier.fillMaxWidth()) {
+                                        RazerInspiredTopHubBar(
+                                            selectedTabIndex = selectedHubTabIndex,
+                                            currentFirebaseUser = currentFirebaseUser,
+                                            cloudPhotoUrl = cloudProfile?.photoUrl ?: "",
+                                            onSelectTab = {
+                                                com.example.util.ConsoleHapticManager.playSelectClick(context)
+                                                selectedHubTabIndex = it
+                                            }
+                                        )
+                                        // Animated top in-app controller connection/disconnection notification banner
+                                        com.example.ui.components.ControllerConnectionBanner(
+                                            alert = controllerAlert,
+                                            onDismiss = { viewModel.dismissControllerAlert() }
+                                        )
+                                    }
                                 }
-                            }
-                        ) { innerPadding ->
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .padding(innerPadding)
-                            ) {
-                                when (selectedHubTabIndex) {
-                                    0 -> GamesScreen(viewModel = viewModel)
-                                    1 -> ScreenRecordScreen(
-                                        viewModel = viewModel,
-                                        onRequestMediaProjection = requestVideoCapture,
-                                        onRequestScreenshotProjection = requestScreenshotCapture,
-                                        initialSubTab = requestedRecorderSubTab
-                                    )
-                                    2 -> ExtrasScreen(viewModel = viewModel)
-                                    3 -> SettingsScreen(
-                                        viewModel = viewModel,
-                                        onOpenAccountProfile = { selectedHubTabIndex = 4 }
-                                    )
-                                    4 -> AccountProfileScreen(
-                                        viewModel = viewModel,
-                                        onBack = { selectedHubTabIndex = 0 }
-                                    )
+                            ) { innerPadding ->
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .padding(innerPadding)
+                                ) {
+                                    // Smooth, zero-jank screen transitions across Hub tabs
+                                    Crossfade(
+                                        targetState = selectedHubTabIndex,
+                                        animationSpec = tween(durationMillis = if (reducedAnimations) 0 else 180),
+                                        label = "hubTabCrossfade"
+                                    ) { tabIndex ->
+                                        // Tab 0 (Game Launcher) and Tab 1 (Screen Recorder) work offline.
+                                        // Top Gear, Extras, Settings, and Profile require internet connectivity.
+                                        when (tabIndex) {
+                                            0 -> GamesScreen(viewModel = viewModel)
+                                            1 -> ScreenRecordScreen(
+                                                viewModel = viewModel,
+                                                onRequestMediaProjection = requestVideoCapture,
+                                                onRequestScreenshotProjection = requestScreenshotCapture,
+                                                initialSubTab = requestedRecorderSubTab
+                                            )
+                                            2 -> if (isDeviceOnline) {
+                                                TopGearScreen(
+                                                    onNavigateToGmaxFeature = { pairsWithText ->
+                                                        when {
+                                                            pairsWithText.contains("Recorder", ignoreCase = true) -> {
+                                                                requestedRecorderSubTab = 0
+                                                                selectedHubTabIndex = 1
+                                                            }
+                                                            pairsWithText.contains("temperature", ignoreCase = true) -> {
+                                                                requestedExtrasSubTab = 5
+                                                                selectedHubTabIndex = 3
+                                                            }
+                                                            pairsWithText.contains("Console", ignoreCase = true) -> {
+                                                                requestedExtrasSubTab = 3
+                                                                selectedHubTabIndex = 3
+                                                            }
+                                                            pairsWithText.contains("Touch", ignoreCase = true) ||
+                                                                pairsWithText.contains("Crosshair", ignoreCase = true) -> {
+                                                                requestedExtrasSubTab = 2
+                                                                selectedHubTabIndex = 3
+                                                            }
+                                                            pairsWithText.contains("Battery", ignoreCase = true) -> {
+                                                                requestedExtrasSubTab = 1
+                                                                selectedHubTabIndex = 3
+                                                            }
+                                                            else -> {
+                                                                requestedExtrasSubTab = 0
+                                                                selectedHubTabIndex = 3
+                                                            }
+                                                        }
+                                                    }
+                                                )
+                                            } else {
+                                                com.example.util.OnlineRequiredGate(
+                                                    featureNameEn = "Top Gear Curated Gaming Gear",
+                                                    featureNameEs = "Equipo Gamer Seleccionado Top Gear",
+                                                    onRetryConnection = { manualNetworkRetryTick++ },
+                                                    onGoToOfflineLauncher = { selectedHubTabIndex = 0 }
+                                                )
+                                            }
+                                            3 -> if (isDeviceOnline) {
+                                                ExtrasScreen(
+                                                    viewModel = viewModel,
+                                                    initialSubTab = requestedExtrasSubTab
+                                                )
+                                            } else {
+                                                com.example.util.OnlineRequiredGate(
+                                                    featureNameEn = "Extras & Hardware Diagnostics",
+                                                    featureNameEs = "Extras y Diagnósticos de Hardware",
+                                                    onRetryConnection = { manualNetworkRetryTick++ },
+                                                    onGoToOfflineLauncher = { selectedHubTabIndex = 0 }
+                                                )
+                                            }
+                                            4 -> if (isDeviceOnline) {
+                                                SettingsScreen(
+                                                    viewModel = viewModel,
+                                                    onOpenAccountProfile = { selectedHubTabIndex = 5 }
+                                                )
+                                            } else {
+                                                com.example.util.OnlineRequiredGate(
+                                                    featureNameEn = "Cloud Settings & Preferences",
+                                                    featureNameEs = "Ajustes y Preferencias en la Nube",
+                                                    onRetryConnection = { manualNetworkRetryTick++ },
+                                                    onGoToOfflineLauncher = { selectedHubTabIndex = 0 }
+                                                )
+                                            }
+                                            5 -> if (isDeviceOnline) {
+                                                AccountProfileScreen(
+                                                    viewModel = viewModel,
+                                                    onBack = { selectedHubTabIndex = 0 }
+                                                )
+                                            } else {
+                                                com.example.util.OnlineRequiredGate(
+                                                    featureNameEn = "Gamer Profile & Cloud Sync",
+                                                    featureNameEs = "Perfil de Jugador y Sincronización",
+                                                    onRetryConnection = { manualNetworkRetryTick++ },
+                                                    onGoToOfflineLauncher = { selectedHubTabIndex = 0 }
+                                                )
+                                            }
+                                        }
+                                    }
                                 }
                             }
 
-                            if (isGamePickerVisible) {
-                                com.example.ui.components.GamePickerDialog(
-                                    installedApps = installedApps,
-                                    currentSelectedPackage = selectedTargetGame?.packageName,
-                                    onGameSelected = { app ->
-                                        viewModel.quickBoost(targetApp = app)
+                            // Real-Time In-App Floating Controller Input Overlay (when enabled and System Overlay isn't already drawing on top)
+                            if (controllerOverlayConfig.isEnabled && !com.example.service.ControllerOverlayService.isRunning) {
+                                InAppControllerOverlayHost(
+                                    viewModel = viewModel,
+                                    glyphs = activeControllerGlyphs,
+                                    config = controllerOverlayConfig
+                                )
+                            }
+
+                            // Global Instant Visual + Haptic Confirmation Pill for buttons, toggles, and processes
+                            InstantFeedbackBannerHost(
+                                modifier = Modifier
+                                    .align(Alignment.BottomCenter)
+                                    .windowInsetsPadding(WindowInsets.safeDrawing)
+                            )
+
+                            // In-App Star Review Popup (directs to Google Play Store review page; permanently suppressed once verified reviewed)
+                            val showReviewPopup by viewModel.showReviewPopup.collectAsState()
+                            val activeReviewSource by viewModel.activeReviewTriggerSource.collectAsState()
+                            val isVerifiedReviewed by viewModel.isVerifiedReviewed.collectAsState()
+                            if (showReviewPopup && !isVerifiedReviewed) {
+                                com.example.ui.components.AppReviewPromptDialog(
+                                    triggerSource = activeReviewSource,
+                                    onRateOnPlayStore = { stars ->
+                                        com.example.util.AppReviewManager.launchPlayStoreReviewPage(
+                                            context = context,
+                                            selectedStars = stars
+                                        )
                                     },
-                                    onDismiss = {
-                                        viewModel.setGamePickerVisible(false)
+                                    onDismissLater = {
+                                        com.example.util.AppReviewManager.dismissReviewPromptForCooldown(context)
                                     }
                                 )
+                            }
+
+                            // Pre-loaded Full-Screen Ad Presentation Host (strictly excluded on Top Gear tab)
+                            if (selectedHubTabIndex != 2) {
+                                com.example.ui.components.AdMobFullScreenPresentationHost()
                             }
                         }
                     }
@@ -487,6 +778,30 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+}
+
+@Composable
+private fun InAppControllerOverlayHost(
+    viewModel: GameBoosterViewModel,
+    glyphs: com.example.model.ControllerGlyphMap,
+    config: com.example.model.ControllerOverlayConfig
+) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val controllerHealthState by viewModel.controllerHealthState.collectAsState()
+    val isWired = controllerHealthState.isWiredConnection ||
+        com.example.util.ControllerHealthManager.isWiredControllerConnected(context)
+    if (!isWired) return
+    com.example.ui.components.FloatingInAppControllerOverlay(
+        state = controllerHealthState,
+        glyphs = glyphs,
+        config = config,
+        onToggleLock = {
+            viewModel.setControllerOverlayLockTouch(!config.lockTouchPassThrough)
+        },
+        onClose = {
+            viewModel.setControllerOverlayEnabled(false)
+        }
+    )
 }
 
 private data class TopHubNavTab(
@@ -499,7 +814,7 @@ private data class TopHubNavTab(
 
 /**
  * Razer Launcher-Inspired Top Hub Pill Navigation Bar:
- * - Active tab rendered inside a rounded pill with rocket/icon + label ("Launcher", "Recorder", "Extras", "Settings").
+ * - Active tab rendered inside a rounded pill with rocket/icon + label ("Launcher", "Recorder", "Top Gear", "Extras", "Settings").
  * - Right beside Settings is the Profile icon / avatar button that opens User Account Info (Profile Picture, Most Played Game, Date of Birth, Account & Cloud Sync).
  */
 @Composable
@@ -509,32 +824,45 @@ private fun RazerInspiredTopHubBar(
     cloudPhotoUrl: String,
     onSelectTab: (Int) -> Unit
 ) {
-    val tabs = remember {
+    val launcherLabel = com.example.util.tr("Launcher", "Lanzador")
+    val recorderLabel = com.example.util.tr("Recorder", "Grabador")
+    val topGearLabel = com.example.util.tr("Top Gear", "Top Gear")
+    val extrasLabel = com.example.util.tr("Extras", "Extras")
+    val settingsLabel = com.example.util.tr("Settings", "Ajustes")
+
+    val tabs = remember(launcherLabel, recorderLabel, topGearLabel, extrasLabel, settingsLabel) {
         listOf(
             TopHubNavTab(
                 index = 0,
-                label = "Launcher",
+                label = launcherLabel,
                 icon = Icons.Default.RocketLaunch,
                 testTag = "nav_games",
                 activeAccent = HubBlue
             ),
             TopHubNavTab(
                 index = 1,
-                label = "Recorder",
+                label = recorderLabel,
                 icon = Icons.Default.Videocam,
                 testTag = "nav_record",
                 activeAccent = RecorderCoral
             ),
             TopHubNavTab(
                 index = 2,
-                label = "Extras",
+                label = topGearLabel,
+                icon = Icons.Default.ShoppingBag,
+                testTag = "nav_top_gear",
+                activeAccent = HubBlue
+            ),
+            TopHubNavTab(
+                index = 3,
+                label = extrasLabel,
                 icon = Icons.Default.Tune,
                 testTag = "nav_extras",
                 activeAccent = HubBlue
             ),
             TopHubNavTab(
-                index = 3,
-                label = "Settings",
+                index = 4,
+                label = settingsLabel,
                 icon = Icons.Default.Settings,
                 testTag = "nav_settings",
                 activeAccent = HubBlue
@@ -542,7 +870,7 @@ private fun RazerInspiredTopHubBar(
         )
     }
 
-    val isProfileSelected = selectedTabIndex == 4
+    val isProfileSelected = selectedTabIndex == 5
     val isSignedIn = currentFirebaseUser != null
     val resolvedPhotoUrl = currentFirebaseUser?.photoUrl?.toString()?.takeIf { it.isNotBlank() }
         ?: cloudPhotoUrl.takeIf { it.isNotBlank() }
@@ -561,15 +889,15 @@ private fun RazerInspiredTopHubBar(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            // Official G-Max 3D Hexagonal Controller Emblem on Top Hub Bar
+            // Official G Max 3D Hexagonal Controller Emblem on Top Hub Bar
             com.example.ui.components.GMaxBrandIcon(
                 size = 36.dp,
                 cornerRadius = 10.dp,
                 showGlowBorder = true,
                 glowColor = Color(0xFF00E5FF),
-                contentDescription = "G-Max Gaming Hub",
+                contentDescription = "G Max Gaming Hub",
                 modifier = Modifier
-                    .clickable { onSelectTab(0) }
+                    .gmaxInteractivePress { onSelectTab(0) }
                     .testTag("top_bar_gmax_brand_icon")
             )
 
@@ -591,8 +919,8 @@ private fun RazerInspiredTopHubBar(
                             else Color.Transparent,
                             shape = RoundedCornerShape(50)
                         )
-                        .clickable { onSelectTab(tab.index) }
-                        .padding(horizontal = 16.dp, vertical = 9.dp)
+                        .gmaxInteractivePress { onSelectTab(tab.index) }
+                        .padding(horizontal = 13.dp, vertical = 8.dp)
                         .testTag(tab.testTag),
                     contentAlignment = Alignment.Center
                 ) {
@@ -605,9 +933,9 @@ private fun RazerInspiredTopHubBar(
                             } else {
                                 MaterialTheme.colorScheme.onSurfaceVariant
                             },
-                            modifier = Modifier.size(18.dp)
+                            modifier = Modifier.size(17.dp)
                         )
-                        Spacer(modifier = Modifier.width(7.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
                         Text(
                             text = tab.label,
                             style = MaterialTheme.typography.labelLarge.copy(
@@ -617,8 +945,11 @@ private fun RazerInspiredTopHubBar(
                                 } else {
                                     MaterialTheme.colorScheme.onSurfaceVariant
                                 },
-                                fontSize = 13.sp
-                            )
+                                fontSize = 12.sp
+                            ),
+                            maxLines = 1,
+                            softWrap = false,
+                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                         )
                     }
                 }
@@ -645,7 +976,7 @@ private fun RazerInspiredTopHubBar(
                         },
                         shape = CircleShape
                     )
-                    .clickable { onSelectTab(4) }
+                    .gmaxInteractivePress { onSelectTab(5) }
                     .testTag("nav_profile"),
                 contentAlignment = Alignment.Center
             ) {
@@ -686,3 +1017,4 @@ private fun RazerInspiredTopHubBar(
         }
     }
 }
+

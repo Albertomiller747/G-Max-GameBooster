@@ -37,6 +37,10 @@ object ScreenRecordingManager {
     private const val KEY_ACTIVE_GAME_PKG = "rec_active_game_pkg"
     private const val KEY_ACTIVE_GAME_NAME = "rec_active_game_name"
     private const val KEY_MEDIA_GAME_TAGS_JSON = "rec_media_game_tags_json"
+    private const val KEY_BUBBLE_POS_X = "rec_bubble_pos_x"
+    private const val KEY_BUBBLE_POS_Y = "rec_bubble_pos_y"
+    private const val KEY_IN_APP_RECORDER_ENABLED = "rec_in_app_recorder_enabled"
+    private const val KEY_RESTORED_MEDIA_JSON = "rec_restored_media_uris_json"
 
     // Master list of standard presets
     val ALL_PRESETS = listOf(
@@ -392,9 +396,34 @@ object ScreenRecordingManager {
         return settings
     }
 
+    /**
+     * Returns the effective video quality settings for active recording.
+     * When the device is offline, recording is locked to 720p (1280x720), 60 FPS, and 8 Mbps.
+     */
+    fun getEffectiveRecordingSettings(context: Context): VideoQualitySettings {
+        val saved = loadSettings(context)
+        return if (!NetworkConnectivityMonitor.isCurrentlyOnline(context)) {
+            saved.copy(
+                resolutionLabel = "720p",
+                width = 1280,
+                height = 720,
+                fps = 60,
+                bitrateMbps = 8
+            )
+        } else {
+            saved
+        }
+    }
+
     fun saveSettings(context: Context, settings: VideoQualitySettings) {
-        val micIncluded = settings.audioSourceMode == AudioSourceMode.INTERNAL_AND_MIC ||
-            settings.audioSourceMode == AudioSourceMode.MIC_ONLY
+        val effectiveAudioMode = if (settings.recordMic && settings.audioSourceMode == AudioSourceMode.INTERNAL_ONLY) {
+            AudioSourceMode.INTERNAL_AND_MIC
+        } else {
+            settings.audioSourceMode
+        }
+        val micIncluded = settings.recordMic ||
+            effectiveAudioMode == AudioSourceMode.INTERNAL_AND_MIC ||
+            effectiveAudioMode == AudioSourceMode.MIC_ONLY
         getPrefs(context).edit()
             .putString(KEY_RESOLUTION_LABEL, settings.resolutionLabel)
             .putInt(KEY_RES_WIDTH, settings.width)
@@ -402,7 +431,7 @@ object ScreenRecordingManager {
             .putInt(KEY_FPS, settings.fps)
             .putInt(KEY_BITRATE_MBPS, settings.bitrateMbps)
             .putBoolean(KEY_RECORD_MIC, micIncluded)
-            .putString(KEY_AUDIO_SOURCE_MODE, settings.audioSourceMode.name)
+            .putString(KEY_AUDIO_SOURCE_MODE, effectiveAudioMode.name)
             .putBoolean(KEY_SHOW_TIMER_HUD, settings.showTimerHud)
             .putBoolean(KEY_OVERLAY_ENABLED, settings.isOverlayEnabled)
             .putInt(KEY_BUBBLE_SIZE_DP, settings.bubbleSizeDp.coerceIn(28, 64))
@@ -413,21 +442,182 @@ object ScreenRecordingManager {
         getPrefs(context).edit().putBoolean(KEY_OVERLAY_ENABLED, enabled).apply()
     }
 
+    fun isInAppRecorderEnabled(context: Context): Boolean {
+        return getPrefs(context).getBoolean(KEY_IN_APP_RECORDER_ENABLED, true)
+    }
+
+    fun setInAppRecorderEnabled(context: Context, enabled: Boolean) {
+        getPrefs(context).edit().putBoolean(KEY_IN_APP_RECORDER_ENABLED, enabled).apply()
+    }
+
+    fun resetBubblePosition(context: Context) {
+        getPrefs(context).edit()
+            .remove(KEY_BUBBLE_POS_X)
+            .remove(KEY_BUBBLE_POS_Y)
+            .apply()
+    }
+
+    fun saveBubblePosition(context: Context, x: Int, y: Int) {
+        getPrefs(context).edit()
+            .putInt(KEY_BUBBLE_POS_X, x)
+            .putInt(KEY_BUBBLE_POS_Y, y)
+            .apply()
+    }
+
+    fun loadBubblePosition(context: Context): Pair<Int, Int>? {
+        val prefs = getPrefs(context)
+        if (!prefs.contains(KEY_BUBBLE_POS_X) || !prefs.contains(KEY_BUBBLE_POS_Y)) {
+            return null
+        }
+        return Pair(
+            prefs.getInt(KEY_BUBBLE_POS_X, 0),
+            prefs.getInt(KEY_BUBBLE_POS_Y, 0)
+        )
+    }
+
+    /**
+     * Triggers Android MediaScanner on public GMax folders so files from prior installations
+     * are indexed in MediaStore.
+     */
+    fun triggerPublicMediaRescan(context: Context) {
+        try {
+            val dirs = listOfNotNull(
+                File(android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_MOVIES), "GMaxRecordings"),
+                File(android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_PICTURES), "GMaxScreenshots"),
+                File(android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DCIM), "GMaxRecordings")
+            )
+            val pathsToScan = mutableListOf<String>()
+            for (dir in dirs) {
+                if (dir.exists() && dir.isDirectory) {
+                    dir.listFiles()?.forEach { f ->
+                        if (f.isFile && f.length() > 0L) {
+                            pathsToScan.add(f.absolutePath)
+                        }
+                    }
+                }
+            }
+            if (pathsToScan.isNotEmpty()) {
+                android.media.MediaScannerConnection.scanFile(
+                    context.applicationContext,
+                    pathsToScan.toTypedArray(),
+                    null,
+                    null
+                )
+            }
+        } catch (_: Exception) {}
+    }
+
+    /**
+     * Imports user-selected video or screenshot URIs (via zero-permission OpenMultipleDocuments)
+     * after an app reinstall, copying them into the app's library so they persist and play immediately.
+     */
+    fun importPreviousCaptures(context: Context, uris: List<Uri>): Pair<Int, Int> {
+        var importedVideos = 0
+        var importedShots = 0
+        val moviesDir = File(context.getExternalFilesDir(android.os.Environment.DIRECTORY_MOVIES), "GMaxRecordings").apply {
+            if (!exists()) mkdirs()
+        }
+        val picsDir = File(context.getExternalFilesDir(android.os.Environment.DIRECTORY_PICTURES), "GMaxScreenshots").apply {
+            if (!exists()) mkdirs()
+        }
+
+        for (uri in uris) {
+            try {
+                try {
+                    context.contentResolver.takePersistableUriPermission(
+                        uri,
+                        Intent.FLAG_GRANT_READ_URI_PERMISSION
+                    )
+                } catch (_: Exception) {}
+
+                val mime = context.contentResolver.getType(uri).orEmpty().lowercase(Locale.US)
+                var displayName = "GMax_Restored_${System.currentTimeMillis()}"
+                context.contentResolver.query(uri, arrayOf(MediaStore.MediaColumns.DISPLAY_NAME), null, null, null)?.use { c ->
+                    if (c.moveToFirst()) {
+                        val idx = c.getColumnIndex(MediaStore.MediaColumns.DISPLAY_NAME)
+                        if (idx >= 0) {
+                            val n = c.getString(idx)
+                            if (!n.isNullOrBlank()) displayName = n
+                        }
+                    }
+                }
+
+                val isVideo = mime.startsWith("video/") ||
+                    displayName.endsWith(".mp4", ignoreCase = true) ||
+                    displayName.endsWith(".mkv", ignoreCase = true) ||
+                    displayName.endsWith(".webm", ignoreCase = true)
+                val isImage = mime.startsWith("image/") ||
+                    displayName.endsWith(".png", ignoreCase = true) ||
+                    displayName.endsWith(".jpg", ignoreCase = true) ||
+                    displayName.endsWith(".jpeg", ignoreCase = true) ||
+                    displayName.endsWith(".webp", ignoreCase = true)
+
+                if (isVideo) {
+                    val safeName = if (displayName.startsWith("GMax_", ignoreCase = true)) {
+                        displayName
+                    } else {
+                        "GMax_General_${displayName.replace(Regex("[^A-Za-z0-9._-]"), "_")}"
+                    }.let { if (it.contains(".")) it else "$it.mp4" }
+                    val targetFile = File(moviesDir, safeName)
+                    context.contentResolver.openInputStream(uri)?.use { input ->
+                        targetFile.outputStream().use { output ->
+                            input.copyTo(output)
+                        }
+                    }
+                    if (targetFile.exists() && targetFile.length() > 0L) {
+                        importedVideos++
+                    }
+                } else if (isImage) {
+                    val safeName = if (displayName.startsWith("GMax_Shot_", ignoreCase = true)) {
+                        displayName
+                    } else {
+                        "GMax_Shot_General_${displayName.replace(Regex("[^A-Za-z0-9._-]"), "_")}"
+                    }.let { if (it.contains(".")) it else "$it.png" }
+                    val targetFile = File(picsDir, safeName)
+                    context.contentResolver.openInputStream(uri)?.use { input ->
+                        targetFile.outputStream().use { output ->
+                            input.copyTo(output)
+                        }
+                    }
+                    if (targetFile.exists() && targetFile.length() > 0L) {
+                        importedShots++
+                    }
+                }
+            } catch (_: Exception) {}
+        }
+        return importedVideos to importedShots
+    }
+
     /**
      * Queries past GMax screen recordings from device MediaStore Video table and public folders,
      * automatically resolving the associated game for each video.
      */
     fun queryRecordedVideos(context: Context): List<RecordedVideo> {
+        triggerPublicMediaRescan(context)
         val list = mutableListOf<RecordedVideo>()
-        val projection = arrayOf(
-            MediaStore.Video.Media._ID,
-            MediaStore.Video.Media.DISPLAY_NAME,
-            MediaStore.Video.Media.DURATION,
-            MediaStore.Video.Media.SIZE,
-            MediaStore.Video.Media.DATE_ADDED,
-            MediaStore.Video.Media.RESOLUTION,
-            MediaStore.Video.Media.DATA
-        )
+        val projection = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            arrayOf(
+                MediaStore.Video.Media._ID,
+                MediaStore.Video.Media.DISPLAY_NAME,
+                MediaStore.Video.Media.DURATION,
+                MediaStore.Video.Media.SIZE,
+                MediaStore.Video.Media.DATE_ADDED,
+                MediaStore.Video.Media.RESOLUTION,
+                MediaStore.Video.Media.RELATIVE_PATH,
+                MediaStore.Video.Media.BUCKET_DISPLAY_NAME
+            )
+        } else {
+            @Suppress("DEPRECATION")
+            arrayOf(
+                MediaStore.Video.Media._ID,
+                MediaStore.Video.Media.DISPLAY_NAME,
+                MediaStore.Video.Media.DURATION,
+                MediaStore.Video.Media.SIZE,
+                MediaStore.Video.Media.DATE_ADDED,
+                MediaStore.Video.Media.RESOLUTION,
+                MediaStore.Video.Media.DATA
+            )
+        }
 
         val sortOrder = "${MediaStore.Video.Media.DATE_ADDED} DESC"
 
@@ -441,57 +631,91 @@ object ScreenRecordingManager {
             )
 
             cursor?.use { c ->
-                val idCol = c.getColumnIndexOrThrow(MediaStore.Video.Media._ID)
-                val nameCol = c.getColumnIndexOrThrow(MediaStore.Video.Media.DISPLAY_NAME)
-                val durCol = c.getColumnIndexOrThrow(MediaStore.Video.Media.DURATION)
-                val sizeCol = c.getColumnIndexOrThrow(MediaStore.Video.Media.SIZE)
-                val dateCol = c.getColumnIndexOrThrow(MediaStore.Video.Media.DATE_ADDED)
-                val resCol = c.getColumnIndexOrThrow(MediaStore.Video.Media.RESOLUTION)
-                val dataCol = c.getColumnIndexOrThrow(MediaStore.Video.Media.DATA)
+                val idCol = c.getColumnIndex(MediaStore.Video.Media._ID)
+                val nameCol = c.getColumnIndex(MediaStore.Video.Media.DISPLAY_NAME)
+                val durCol = c.getColumnIndex(MediaStore.Video.Media.DURATION)
+                val sizeCol = c.getColumnIndex(MediaStore.Video.Media.SIZE)
+                val dateCol = c.getColumnIndex(MediaStore.Video.Media.DATE_ADDED)
+                val resCol = c.getColumnIndex(MediaStore.Video.Media.RESOLUTION)
+                val relPathCol = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    c.getColumnIndex(MediaStore.Video.Media.RELATIVE_PATH)
+                } else -1
+                val bucketCol = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    c.getColumnIndex(MediaStore.Video.Media.BUCKET_DISPLAY_NAME)
+                } else -1
+                @Suppress("DEPRECATION")
+                val dataCol = c.getColumnIndex(MediaStore.Video.Media.DATA)
 
                 while (c.moveToNext()) {
+                    if (idCol < 0) continue
                     val id = c.getLong(idCol)
-                    val name = c.getString(nameCol) ?: "Recording"
-                    val path = c.getString(dataCol) ?: ""
+                    val name = (if (nameCol >= 0) c.getString(nameCol) else null) ?: "Recording"
+                    val relPath = (if (relPathCol >= 0) c.getString(relPathCol) else null).orEmpty()
+                    val bucket = (if (bucketCol >= 0) c.getString(bucketCol) else null).orEmpty()
+                    val legacyPath = (if (dataCol >= 0) c.getString(dataCol) else null).orEmpty()
 
-                    if (name.startsWith("GMax_") || path.contains("GMaxRecordings") || path.contains("ScreenRecording")) {
-                        val duration = c.getLong(durCol)
-                        val size = c.getLong(sizeCol)
-                        val date = c.getLong(dateCol)
-                        val resolution = c.getString(resCol) ?: "HD"
+                    val isGMaxVideo = name.startsWith("GMax_", ignoreCase = true) ||
+                        relPath.contains("GMaxRecordings", ignoreCase = true) ||
+                        bucket.equals("GMaxRecordings", ignoreCase = true) ||
+                        legacyPath.contains("GMaxRecordings", ignoreCase = true) ||
+                        legacyPath.contains("ScreenRecording", ignoreCase = true)
+
+                    if (isGMaxVideo) {
+                        val duration = if (durCol >= 0) c.getLong(durCol) else 0L
+                        val size = if (sizeCol >= 0) c.getLong(sizeCol) else 0L
+                        val date = if (dateCol >= 0) c.getLong(dateCol) else (System.currentTimeMillis() / 1000)
+                        val resolution = (if (resCol >= 0) c.getString(resCol) else null) ?: "HD"
                         val contentUri = ContentUris.withAppendedId(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, id)
                         val (gameTitle, gamePkg) = resolveGameForMediaFile(context, name)
 
-                        list.add(
-                            RecordedVideo(
-                                id = id,
-                                uriString = contentUri.toString(),
-                                title = name,
-                                durationMs = if (duration > 0) duration else 0L,
-                                sizeBytes = size,
-                                dateAddedSec = date,
-                                resolution = resolution,
-                                filePath = path,
-                                gameName = gameTitle,
-                                gamePackage = gamePkg
+                        val resolvedPath = if (legacyPath.isNotBlank()) {
+                            legacyPath
+                        } else {
+                            File(
+                                File(android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_MOVIES), "GMaxRecordings"),
+                                name
+                            ).absolutePath
+                        }
+
+                        if (list.none { it.title.equals(name, ignoreCase = true) && kotlin.math.abs(it.sizeBytes - size) < 1024 }) {
+                            list.add(
+                                RecordedVideo(
+                                    id = id,
+                                    uriString = contentUri.toString(),
+                                    title = name,
+                                    durationMs = if (duration > 0) duration else 0L,
+                                    sizeBytes = size,
+                                    dateAddedSec = date,
+                                    resolution = resolution,
+                                    filePath = resolvedPath,
+                                    gameName = gameTitle,
+                                    gamePackage = gamePkg
+                                )
                             )
-                        )
+                        }
                     }
                 }
             }
         } catch (_: Exception) {}
 
-        // Also check public Movies/GMaxRecordings and app-specific Movies/GMaxRecordings files
+        // Also check public Movies/GMaxRecordings, DCIM/GMaxRecordings, and app-specific Movies/GMaxRecordings files
         val candidateMovieDirs = listOfNotNull(
             File(android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_MOVIES), "GMaxRecordings"),
+            File(android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DCIM), "GMaxRecordings"),
+            android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_MOVIES),
             context.getExternalFilesDir(android.os.Environment.DIRECTORY_MOVIES)?.let { File(it, "GMaxRecordings") }
         )
         for (moviesDir in candidateMovieDirs) {
             try {
-                if (moviesDir.exists()) {
-                    val files = moviesDir.listFiles { f -> f.extension.equals("mp4", ignoreCase = true) }
+                if (moviesDir.exists() && moviesDir.isDirectory) {
+                    val isRootMovies = moviesDir.name.equals(android.os.Environment.DIRECTORY_MOVIES, ignoreCase = true)
+                    val files = moviesDir.listFiles { f ->
+                        f.isFile &&
+                            f.extension.equals("mp4", ignoreCase = true) &&
+                            (!isRootMovies || f.name.startsWith("GMax_", ignoreCase = true))
+                    }
                     files?.forEach { file ->
-                        if (list.none { it.filePath == file.absolutePath || it.title == file.name }) {
+                        if (list.none { it.filePath == file.absolutePath || it.title.equals(file.name, ignoreCase = true) }) {
                             val (gameTitle, gamePkg) = resolveGameForMediaFile(context, file.name)
                             list.add(
                                 RecordedVideo(
@@ -608,16 +832,31 @@ object ScreenRecordingManager {
      * automatically resolving the associated game for each screenshot.
      */
     fun queryCapturedScreenshots(context: Context): List<CapturedScreenshot> {
+        triggerPublicMediaRescan(context)
         val list = mutableListOf<CapturedScreenshot>()
-        val projection = arrayOf(
-            MediaStore.Images.Media._ID,
-            MediaStore.Images.Media.DISPLAY_NAME,
-            MediaStore.Images.Media.SIZE,
-            MediaStore.Images.Media.DATE_ADDED,
-            MediaStore.Images.Media.WIDTH,
-            MediaStore.Images.Media.HEIGHT,
-            MediaStore.Images.Media.DATA
-        )
+        val projection = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            arrayOf(
+                MediaStore.Images.Media._ID,
+                MediaStore.Images.Media.DISPLAY_NAME,
+                MediaStore.Images.Media.SIZE,
+                MediaStore.Images.Media.DATE_ADDED,
+                MediaStore.Images.Media.WIDTH,
+                MediaStore.Images.Media.HEIGHT,
+                MediaStore.Images.Media.RELATIVE_PATH,
+                MediaStore.Images.Media.BUCKET_DISPLAY_NAME
+            )
+        } else {
+            @Suppress("DEPRECATION")
+            arrayOf(
+                MediaStore.Images.Media._ID,
+                MediaStore.Images.Media.DISPLAY_NAME,
+                MediaStore.Images.Media.SIZE,
+                MediaStore.Images.Media.DATE_ADDED,
+                MediaStore.Images.Media.WIDTH,
+                MediaStore.Images.Media.HEIGHT,
+                MediaStore.Images.Media.DATA
+            )
+        }
         val sortOrder = "${MediaStore.Images.Media.DATE_ADDED} DESC"
 
         try {
@@ -629,59 +868,89 @@ object ScreenRecordingManager {
                 sortOrder
             )
             cursor?.use { c ->
-                val idCol = c.getColumnIndexOrThrow(MediaStore.Images.Media._ID)
-                val nameCol = c.getColumnIndexOrThrow(MediaStore.Images.Media.DISPLAY_NAME)
-                val sizeCol = c.getColumnIndexOrThrow(MediaStore.Images.Media.SIZE)
-                val dateCol = c.getColumnIndexOrThrow(MediaStore.Images.Media.DATE_ADDED)
-                val widthCol = c.getColumnIndexOrThrow(MediaStore.Images.Media.WIDTH)
-                val heightCol = c.getColumnIndexOrThrow(MediaStore.Images.Media.HEIGHT)
-                val dataCol = c.getColumnIndexOrThrow(MediaStore.Images.Media.DATA)
+                val idCol = c.getColumnIndex(MediaStore.Images.Media._ID)
+                val nameCol = c.getColumnIndex(MediaStore.Images.Media.DISPLAY_NAME)
+                val sizeCol = c.getColumnIndex(MediaStore.Images.Media.SIZE)
+                val dateCol = c.getColumnIndex(MediaStore.Images.Media.DATE_ADDED)
+                val widthCol = c.getColumnIndex(MediaStore.Images.Media.WIDTH)
+                val heightCol = c.getColumnIndex(MediaStore.Images.Media.HEIGHT)
+                val relPathCol = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    c.getColumnIndex(MediaStore.Images.Media.RELATIVE_PATH)
+                } else -1
+                val bucketCol = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    c.getColumnIndex(MediaStore.Images.Media.BUCKET_DISPLAY_NAME)
+                } else -1
+                @Suppress("DEPRECATION")
+                val dataCol = c.getColumnIndex(MediaStore.Images.Media.DATA)
 
                 while (c.moveToNext()) {
+                    if (idCol < 0) continue
                     val id = c.getLong(idCol)
-                    val name = c.getString(nameCol) ?: "Screenshot"
-                    val path = c.getString(dataCol) ?: ""
+                    val name = (if (nameCol >= 0) c.getString(nameCol) else null) ?: "Screenshot"
+                    val relPath = (if (relPathCol >= 0) c.getString(relPathCol) else null).orEmpty()
+                    val bucket = (if (bucketCol >= 0) c.getString(bucketCol) else null).orEmpty()
+                    val legacyPath = (if (dataCol >= 0) c.getString(dataCol) else null).orEmpty()
 
-                    if (name.startsWith("GMax_Shot_") || path.contains("GMaxScreenshots")) {
-                        val size = c.getLong(sizeCol)
-                        val date = c.getLong(dateCol)
-                        val w = c.getInt(widthCol)
-                        val h = c.getInt(heightCol)
+                    val isGMaxShot = name.startsWith("GMax_Shot_", ignoreCase = true) ||
+                        relPath.contains("GMaxScreenshots", ignoreCase = true) ||
+                        bucket.equals("GMaxScreenshots", ignoreCase = true) ||
+                        legacyPath.contains("GMaxScreenshots", ignoreCase = true)
+
+                    if (isGMaxShot) {
+                        val size = if (sizeCol >= 0) c.getLong(sizeCol) else 0L
+                        val date = if (dateCol >= 0) c.getLong(dateCol) else (System.currentTimeMillis() / 1000)
+                        val w = if (widthCol >= 0) c.getInt(widthCol) else 1920
+                        val h = if (heightCol >= 0) c.getInt(heightCol) else 1080
                         val contentUri = ContentUris.withAppendedId(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, id)
                         val (gameTitle, gamePkg) = resolveGameForMediaFile(context, name)
 
-                        list.add(
-                            CapturedScreenshot(
-                                id = id,
-                                uriString = contentUri.toString(),
-                                title = name,
-                                sizeBytes = size,
-                                dateAddedSec = date,
-                                width = if (w > 0) w else 1920,
-                                height = if (h > 0) h else 1080,
-                                filePath = path,
-                                gameName = gameTitle,
-                                gamePackage = gamePkg
+                        val resolvedPath = if (legacyPath.isNotBlank()) {
+                            legacyPath
+                        } else {
+                            File(
+                                File(android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_PICTURES), "GMaxScreenshots"),
+                                name
+                            ).absolutePath
+                        }
+
+                        if (list.none { it.title.equals(name, ignoreCase = true) && kotlin.math.abs(it.sizeBytes - size) < 512 }) {
+                            list.add(
+                                CapturedScreenshot(
+                                    id = id,
+                                    uriString = contentUri.toString(),
+                                    title = name,
+                                    sizeBytes = size,
+                                    dateAddedSec = date,
+                                    width = if (w > 0) w else 1920,
+                                    height = if (h > 0) h else 1080,
+                                    filePath = resolvedPath,
+                                    gameName = gameTitle,
+                                    gamePackage = gamePkg
+                                )
                             )
-                        )
+                        }
                     }
                 }
             }
         } catch (_: Exception) {}
 
-        // Also check public Pictures/GMaxScreenshots and app-specific Pictures/GMaxScreenshots
+        // Also check public Pictures/GMaxScreenshots, Pictures root, and app-specific Pictures/GMaxScreenshots
         val candidatePicDirs = listOfNotNull(
             File(android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_PICTURES), "GMaxScreenshots"),
+            android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_PICTURES),
             context.getExternalFilesDir(android.os.Environment.DIRECTORY_PICTURES)?.let { File(it, "GMaxScreenshots") }
         )
         for (picsDir in candidatePicDirs) {
             try {
-                if (picsDir.exists()) {
+                if (picsDir.exists() && picsDir.isDirectory) {
+                    val isRootPics = picsDir.name.equals(android.os.Environment.DIRECTORY_PICTURES, ignoreCase = true)
                     val files = picsDir.listFiles { f ->
-                        f.extension.equals("png", ignoreCase = true) || f.extension.equals("jpg", ignoreCase = true)
+                        f.isFile &&
+                            (f.extension.equals("png", ignoreCase = true) || f.extension.equals("jpg", ignoreCase = true)) &&
+                            (!isRootPics || f.name.startsWith("GMax_Shot_", ignoreCase = true))
                     }
                     files?.forEach { file ->
-                        if (list.none { it.filePath == file.absolutePath || it.title == file.name }) {
+                        if (list.none { it.filePath == file.absolutePath || it.title.equals(file.name, ignoreCase = true) }) {
                             val (gameTitle, gamePkg) = resolveGameForMediaFile(context, file.name)
                             list.add(
                                 CapturedScreenshot(
@@ -822,7 +1091,7 @@ object ScreenRecordingManager {
                 ((totalBytes - freeBytes).toFloat() / totalBytes.toFloat()).coerceIn(0.05f, 0.98f)
             } else 0.5f
 
-            val settings = loadSettings(context)
+            val settings = getEffectiveRecordingSettings(context)
             val bytesPerSecond = (settings.bitrateMbps.coerceAtLeast(1) * 1_000_000L) / 8L
             val recordableSeconds = (freeBytes / bytesPerSecond).coerceAtLeast(0L)
             val hours = recordableSeconds / 3600

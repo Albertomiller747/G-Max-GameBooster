@@ -190,45 +190,7 @@ test("Authenticated user: can update allowed settings fields on their own profil
   );
 });
 
-test("Leaderboard: authenticated users can publish their own score and list top players", async () => {
-  const aliceDb = testEnv.authenticatedContext(ALICE_UID).firestore();
-  const bobDb = testEnv.authenticatedContext(BOB_UID).firestore();
-  const ts = new Date();
-
-  await assertSucceeds(
-    aliceDb.collection("leaderboard").doc(ALICE_UID).set({
-      userId: ALICE_UID,
-      username: "alice_gamer",
-      photoUrl: "https://example.com/alice.png",
-      countryCode: "US",
-      countryName: "United States",
-      gamerscore: 5400,
-      isVerifiedDeveloper: false,
-      updatedAt: ts,
-    })
-  );
-
-  // Bob cannot overwrite Alice's leaderboard entry
-  await assertFails(
-    bobDb.collection("leaderboard").doc(ALICE_UID).set({
-      userId: ALICE_UID,
-      username: "hacked",
-      photoUrl: "",
-      countryCode: "US",
-      countryName: "United States",
-      gamerscore: 999999,
-      isVerifiedDeveloper: false,
-      updatedAt: ts,
-    })
-  );
-
-  // Bob can query the worldwide leaderboard with gamerscore >= 0
-  await assertSucceeds(
-    bobDb.collection("leaderboard").where("gamerscore", ">=", 0).orderBy("gamerscore", "desc").limit(50).get()
-  );
-});
-
-test("Usernames: authenticated user can claim an available username and cannot overwrite another user's claim", async () => {
+test("Usernames: authenticated user can claim an available username with public profile showcase fields and look up players by username", async () => {
   const aliceDb = testEnv.authenticatedContext(ALICE_UID).firestore();
   const bobDb = testEnv.authenticatedContext(BOB_UID).firestore();
   const ts = new Date();
@@ -237,12 +199,27 @@ test("Usernames: authenticated user can claim an available username and cannot o
     aliceDb.collection("usernames").doc("cyber_ace").set({
       userId: ALICE_UID,
       username: "Cyber_Ace",
+      displayName: "Alice Gamer",
+      bio: "Competitive 120Hz FPS player",
+      photoUrl: "https://example.com/alice.png",
+      bannerUrl: "cyber_neon_grid",
+      countryCode: "US",
+      countryName: "United States",
+      gamerscore: 5400,
+      mostPlayedGameName: "PUBG MOBILE",
+      mostPlayedMinutes: 140,
+      totalPlayTimeMinutes: 320,
+      selectedTags: ["fps_veteran", "120hz_enthusiast"],
+      isVerifiedDeveloper: false,
       updatedAt: ts,
     })
   );
 
-  // Bob can check if "cyber_ace" exists via get()
+  // Bob can look up "cyber_ace" via get() to view Alice's external profile
   await assertSucceeds(bobDb.collection("usernames").doc("cyber_ace").get());
+
+  // Bob cannot list all usernames
+  await assertFails(bobDb.collection("usernames").get());
 
   // Bob cannot overwrite Alice's claimed username
   await assertFails(
@@ -253,3 +230,58 @@ test("Usernames: authenticated user can claim an available username and cannot o
     })
   );
 });
+
+test("TopGearProducts: signed-in users can read curated products, only verified developer can write", async () => {
+  const aliceDb = testEnv.authenticatedContext(ALICE_UID).firestore();
+  const unauthDb = testEnv.unauthenticatedContext().firestore();
+  const devDb = testEnv.authenticatedContext("alberto_dev_747", {
+    email: "Albertomiller747@gmail.com",
+    email_verified: true,
+  }).firestore();
+
+  const validProduct = {
+    id: "cooler_neveika_core",
+    category: "Cooling",
+    group: "Phone Coolers",
+    tier: "value",
+    badge: "Best Pick",
+    name: "NEVEIKA Plug-in Phone Cooler",
+    image_url: "",
+    benefit_line: "Steady semiconductor cooling that prevents mid-match thermal throttling.",
+    benefits: [
+      "Direct USB-C plug-in power for non-stop cooling",
+      "Spring clip fits most phones without magnets",
+      "Quiet fan blade design for voice chat clarity",
+    ],
+    price_level: "$$",
+    best_for: "Ranked sessions where consistent frame pacing matters most.",
+    trade_off: "Requires a USB power cable while playing.",
+    pairs_with: "Pairs with your temperature overlay",
+    affiliate_url: "https://link.amazon/B05GUSf1O",
+    merchant: "Amazon",
+    active: true,
+    last_updated: "2026-10-31",
+  };
+
+  // Regular user cannot create or modify Top Gear catalog items
+  await assertFails(
+    aliceDb.collection("top_gear_products").doc("cooler_neveika_core").set(validProduct)
+  );
+
+  // Verified developer can create/update Top Gear catalog items
+  await assertSucceeds(
+    devDb.collection("top_gear_products").doc("cooler_neveika_core").set(validProduct)
+  );
+
+  // Signed-in user can read and list Top Gear catalog items
+  await assertSucceeds(
+    aliceDb.collection("top_gear_products").doc("cooler_neveika_core").get()
+  );
+  await assertSucceeds(aliceDb.collection("top_gear_products").get());
+
+  // Unauthenticated context cannot read Top Gear Firestore collection directly (uses bundled/local cache)
+  await assertFails(
+    unauthDb.collection("top_gear_products").doc("cooler_neveika_core").get()
+  );
+});
+

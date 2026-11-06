@@ -1,0 +1,67 @@
+<resources>
+    <string name="app_name">G Max Gaming Hub</string>
+    <string name="tagline">Bộ Tăng Tốc Hiệu Năng Game</string>
+    <string name="version_label">Phiên bản 1.0</string>
+
+    <!-- Navigation -->
+    <string name="nav_launcher">Trình khởi chạy</string>
+    <string name="nav_recorder">Trình ghi hình</string>
+    <string name="nav_leaderboard">Bảng xếp hạng</string>
+    <string name="nav_extras">Tiện ích</string>
+    <string name="nav_settings">Cài đặt</string>
+    <string name="nav_profile">Hồ sơ</string>
+
+    <!-- Extras Sub-Tabs -->
+    <string name="tab_tweaks">Tinh chỉnh</string>
+    <string name="tab_performance">Hiệu năng</string>
+    <string name="tab_touch">Cảm ứng</string>
+    <string name="tab_controller">Tay cầm</string>
+    <string name="tab_specs">Cấu hình</string>
+
+    <!-- Splash & Console Startup -->
+    <string name="splash_press_home">Nhấn nút Home trên tay cầm hoặc chạm bên dưới để vào</string>
+    <string name="splash_log_in_console">Đăng nhập Console</string>
+    <string name="splash_entering_hub">Đang vào G Max Gaming Hub...</string>
+    <string name="splash_welcome_back">Chào mừng trở lại</string>
+    <string name="splash_ready_launch">Sẵn sàng khởi chạy</string>
+
+    <!-- Offline / Online Gate -->
+    <string name="offline_gate_title">Yêu cầu kết nối Internet</string>
+    <string name="offline_gate_subtitle">Trình khởi chạy và Tăng tốc Thường hoạt động ngoại tuyến. Kết nối Wi-Fi hoặc dữ liệu di động để dùng Ghi hình, Bảng xếp hạng, Tiện ích, Tăng tốc Quái thú và Tài khoản.</string>
+    <string name="offline_gate_retry">Thử lại kết nối</string>
+    <string name="offline_gate_back_launcher">Về Trình khởi chạy Ngoại tuyến</string>
+    <string name="offline_mode_badge">Ngoại tuyến: Trình khởi chạy &amp; Tăng tốc Thường</string>
+
+    <!-- Launcher & Boost -->
+    <string name="launcher_normal_boost">Tăng tốc Thường</string>
+    <string name="launcher_beast_boost">Tăng tốc Quái thú</string>
+    <string name="launcher_boost_memory">Giải phóng RAM</string>
+    <string name="launcher_launch_game">Chơi ngay</string>
+    <string name="launcher_add_games">Thêm trò chơi</string>
+    <string name="launcher_search_games">Tìm trò chơi...</string>
+
+    <!-- Recorder -->
+    <string name="recorder_tab_videos">Video &amp; Thư viện</string>
+    <string name="recorder_tab_settings">Cài đặt</string>
+    <string name="recorder_no_videos">Chưa có video nào được ghi</string>
+    <string name="recorder_start">Ghi hình</string>
+    <string name="recorder_stop">Dừng</string>
+
+    <!-- Leaderboard -->
+    <string name="leaderboard_title">Bảng xếp hạng mùa</string>
+    <string name="leaderboard_tab_rankings">Top 100 Xếp hạng</string>
+    <string name="leaderboard_tab_rules">Luật giải đấu</string>
+    <string name="leaderboard_empty_title">Chưa có người chơi xác thực</string>
+    <string name="leaderboard_empty_subtitle">Đăng nhập bằng Google hoặc Facebook để ghi danh trên Bảng xếp hạng Top 100.</string>
+
+    <!-- AdMob Labels -->
+    <string name="ad_badge_label">Quảng cáo</string>
+    <string name="ad_sponsored_label">Được tài trợ</string>
+    <string name="ad_reward_unlock_title">Mở khóa RGB &amp; Lớp phủ (24h)</string>
+    <string name="ad_reward_unlock_cta">Xem quảng cáo ngắn để mở khóa RGB &amp; Lớp phủ trong 24 giờ</string>
+    <string name="ad_reward_unlocked_active">Đã mở khóa RGB &amp; Lớp phủ Tay cầm Pro</string>
+
+    <!-- Real-Time Controller Input Pass-Through Service -->
+    <string name="controller_passthrough_service_label">Lớp phủ Tay cầm G Max</string>
+    <string name="controller_passthrough_service_desc">Cho phép lớp phủ tay cầm nổi của G Max Gaming Hub hiển thị nút bấm và cò tay cầm theo thời gian thực khi đang chơi game mà không chặn thao tác trong game.</string>
+</resources>

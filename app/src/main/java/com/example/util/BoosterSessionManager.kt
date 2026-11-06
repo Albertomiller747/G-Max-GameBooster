@@ -177,19 +177,36 @@ class BoosterSessionManager(context: Context) {
         return String.format(java.util.Locale.US, "%02d:%02d:%02d", hours, minutes, seconds)
     }
 
+    private val appPackageName: String = context.applicationContext.packageName
+
+    private fun isOwnPackage(pkg: String?): Boolean {
+        val p = pkg?.trim().orEmpty()
+        return p.isEmpty() ||
+            p.equals(appPackageName, ignoreCase = true) ||
+            p.equals("com.example", ignoreCase = true) ||
+            p.startsWith("com.aistudio.gamebooster", ignoreCase = true)
+    }
+
     private val KEY_LIBRARY_PACKAGES = "key_library_game_packages"
 
     /**
-     * Returns the set of user-added game package names from persistent storage.
+     * Returns the set of user-added game package names from persistent storage,
+     * strictly excluding G Max Gaming Hub itself.
      */
     fun getLibraryGamePackages(): Set<String> {
-        return prefs.getStringSet(KEY_LIBRARY_PACKAGES, emptySet()) ?: emptySet()
+        val raw = prefs.getStringSet(KEY_LIBRARY_PACKAGES, emptySet()) ?: emptySet()
+        val filtered = raw.filterNot { isOwnPackage(it) }.toSet()
+        if (filtered.size != raw.size) {
+            prefs.edit().putStringSet(KEY_LIBRARY_PACKAGES, filtered).apply()
+        }
+        return filtered
     }
 
     /**
-     * Adds a game package to the user's persistent library.
+     * Adds a game package to the user's persistent library (ignoring G Max Gaming Hub itself).
      */
     fun addLibraryGamePackage(packageName: String) {
+        if (isOwnPackage(packageName)) return
         val current = getLibraryGamePackages().toMutableSet()
         current.add(packageName)
         prefs.edit().putStringSet(KEY_LIBRARY_PACKAGES, current).apply()

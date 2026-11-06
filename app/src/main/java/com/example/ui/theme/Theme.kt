@@ -6,11 +6,19 @@ import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Density
 import com.example.model.AppBackgroundTheme
 import com.example.model.CustomBackgroundPreset
+import com.example.util.AppLanguage
+import com.example.util.AppStrings
+import com.example.util.LocalAppLanguage
 
 data class HubColorTokens(
     val isLight: Boolean,
@@ -166,13 +174,27 @@ fun deriveHubTokens(
 }
 
 @Composable
-fun TitanBoosterTheme(
+fun GMaxGamingHubTheme(
     appTheme: AppBackgroundTheme = AppBackgroundTheme.AUTO_SYSTEM,
     customBgArgb: Long = 0xFF121417L,
     content: @Composable () -> Unit
 ) {
     val systemIsDark = isSystemInDarkTheme()
     val tokens = deriveHubTokens(appTheme, systemIsDark, customBgArgb)
+    val configuration = LocalConfiguration.current
+    val selectedLangMode by AppStrings.selectedLanguageMode.collectAsState()
+    val resolvedLanguage = if (selectedLangMode == AppLanguage.AUTO) {
+        AppStrings.detectDeviceLanguage(configuration)
+    } else {
+        selectedLangMode
+    }
+
+    val baseDensity = LocalDensity.current
+    val normalizedFontScale = AdaptiveScaling.getEffectiveFontScale(resolvedLanguage)
+    val normalizedDensity = Density(
+        density = baseDensity.density,
+        fontScale = normalizedFontScale
+    )
 
     val colorScheme = if (tokens.isLight) {
         lightColorScheme(
@@ -220,7 +242,11 @@ fun TitanBoosterTheme(
         )
     }
 
-    CompositionLocalProvider(LocalHubColors provides tokens) {
+    CompositionLocalProvider(
+        LocalHubColors provides tokens,
+        LocalAppLanguage provides resolvedLanguage,
+        LocalDensity provides normalizedDensity
+    ) {
         MaterialTheme(
             colorScheme = colorScheme,
             typography = Typography,

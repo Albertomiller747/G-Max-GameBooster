@@ -551,20 +551,6 @@ fun TacticalCrosshairCard(
                                     fontSize = 16.sp
                                 )
                             )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Box(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(4.dp))
-                                    .background(CyberCyan.copy(alpha = 0.16f))
-                                    .padding(horizontal = 6.dp, vertical = 2.dp)
-                            ) {
-                                Text(
-                                    text = "TWEAK",
-                                    fontSize = 9.sp,
-                                    fontWeight = FontWeight.Black,
-                                    color = CyberCyan
-                                )
-                            }
                         }
                         Text(
                             text = if (overlaySettings.isEnabled) "ACTIVE • Touch-Through Pass Active" else "Off • 8 Reticle Designs & 8 Colors",

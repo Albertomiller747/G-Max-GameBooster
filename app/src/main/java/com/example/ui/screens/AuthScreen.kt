@@ -124,10 +124,10 @@ fun AuthScreen(
     var password by rememberSaveable { mutableStateOf("") }
     var confirmPassword by rememberSaveable { mutableStateOf("") }
 
-    // Interactive Account Picker Fallback state ("Google" or "Facebook")
+    // Interactive Account Picker Fallback state ("Google")
     var activeSocialFallbackProvider by remember { mutableStateOf<String?>(null) }
 
-    // Attempt silent auto-sign-in once when landing on the AuthScreen
+    // Complete immediately if already authenticated without launching a Credential Manager popup
     LaunchedEffect(Unit) {
         UserAccountRepository.attemptAutoSignIn(
             context = context,
@@ -152,7 +152,7 @@ fun AuthScreen(
                 isLoading = false
                 onAuthSuccess()
             },
-            onAuthError = { msg ->
+            onAuthError = { _ ->
                 isLoading = false
                 if (allowFormFallback && email.isNotBlank()) {
                     onSocialSignInSuccess(
@@ -170,6 +170,8 @@ fun AuthScreen(
                 if (allowFormFallback && com.example.util.PremadeTagsCatalog.isOfficialDeveloperEmail(email)) {
                     onSaveCredentials(fullName, email)
                     onAuthSuccess()
+                } else {
+                    infoMessage = "Google Sign-In was dismissed. Tap Google again to retry."
                 }
             },
             onRequireFallbackPicker = {
@@ -183,35 +185,6 @@ fun AuthScreen(
                 } else {
                     activeSocialFallbackProvider = "Google"
                 }
-            }
-        )
-    }
-
-    val triggerFacebookAuth: () -> Unit = {
-        errorMessage = null
-        infoMessage = null
-        isLoading = true
-        UserAccountRepository.onFacebookSignInClicked(
-            context = context,
-            onAuthSuccess = {
-                isLoading = false
-                onSocialSignInSuccess(
-                    "Facebook",
-                    fullName.ifBlank { "Facebook Gamer" },
-                    email.ifBlank { "gamer@facebook.com" }
-                )
-            },
-            onAuthError = {
-                isLoading = false
-                activeSocialFallbackProvider = "Facebook"
-            },
-            scope = coroutineScope,
-            onAuthCancelled = {
-                isLoading = false
-            },
-            onRequireFallbackPicker = {
-                isLoading = false
-                activeSocialFallbackProvider = "Facebook"
             }
         )
     }
@@ -304,7 +277,7 @@ fun AuthScreen(
                                 )
                             )
                             Text(
-                                text = "Console Launcher & Performance Booster",
+                                text = com.example.util.tr("Console Launcher & Performance Booster", "Lanzador de Consola e Impulsor de Rendimiento"),
                                 style = MaterialTheme.typography.bodySmall.copy(
                                     fontSize = 11.5.sp,
                                     color = Color(0xFF94A3B8)
@@ -315,7 +288,7 @@ fun AuthScreen(
 
                     // Title
                     Text(
-                        text = if (isCreateAccountMode) "Create Account" else "Login",
+                        text = if (isCreateAccountMode) com.example.util.tr("Create Account", "Crear Cuenta") else com.example.util.tr("Login", "Iniciar Sesión"),
                         style = MaterialTheme.typography.headlineLarge.copy(
                             fontWeight = FontWeight.ExtraBold,
                             fontSize = 34.sp,
@@ -327,7 +300,7 @@ fun AuthScreen(
                     if (!isCreateAccountMode) {
                         Spacer(modifier = Modifier.height(6.dp))
                         Text(
-                            text = "Please sign in to continue.",
+                            text = com.example.util.tr("Please sign in to continue.", "Por favor, inicia sesión para continuar."),
                             style = MaterialTheme.typography.bodyMedium.copy(
                                 fontWeight = FontWeight.Medium,
                                 fontSize = 15.sp,
@@ -341,7 +314,7 @@ fun AuthScreen(
                     // Form Fields
                     if (isCreateAccountMode) {
                         MockupElevatedInputField(
-                            label = "FULL NAME",
+                            label = com.example.util.tr("FULL NAME", "NOMBRE COMPLETO"),
                             value = fullName,
                             onValueChange = {
                                 fullName = it
@@ -357,7 +330,7 @@ fun AuthScreen(
                     }
 
                     MockupElevatedInputField(
-                        label = "EMAIL",
+                        label = com.example.util.tr("EMAIL", "CORREO ELECTRÓNICO"),
                         value = email,
                         onValueChange = {
                             email = it
@@ -373,7 +346,7 @@ fun AuthScreen(
                     Spacer(modifier = Modifier.height(18.dp))
 
                     MockupElevatedInputField(
-                        label = "PASSWORD",
+                        label = com.example.util.tr("PASSWORD", "CONTRASEÑA"),
                         value = password,
                         onValueChange = {
                             password = it
@@ -384,9 +357,12 @@ fun AuthScreen(
                         isPassword = true,
                         keyboardType = KeyboardType.Password,
                         imeAction = if (isCreateAccountMode) ImeAction.Next else ImeAction.Done,
-                        trailingText = if (!isCreateAccountMode) "FORGOT" else null,
+                        trailingText = if (!isCreateAccountMode) com.example.util.tr("FORGOT", "OLVIDÉ") else null,
                         onTrailingClick = {
-                            infoMessage = "Use Google Sign-In below to recover or access your account."
+                            infoMessage = com.example.util.AppStrings.trText(
+                                "Use Google Sign-In below to recover or access your account.",
+                                "Usa Iniciar Sesión con Google abajo para recuperar o acceder a tu cuenta."
+                            )
                         },
                         testTag = "auth_password_input"
                     )
@@ -394,7 +370,7 @@ fun AuthScreen(
                     if (isCreateAccountMode) {
                         Spacer(modifier = Modifier.height(18.dp))
                         MockupElevatedInputField(
-                            label = "CONFIRM PASSWORD",
+                            label = com.example.util.tr("CONFIRM PASSWORD", "CONFIRMAR CONTRASEÑA"),
                             value = confirmPassword,
                             onValueChange = {
                                 confirmPassword = it
@@ -469,19 +445,19 @@ fun AuthScreen(
                                     errorMessage = null
                                     infoMessage = null
                                     if (isCreateAccountMode && fullName.isBlank()) {
-                                        errorMessage = "Please enter your full name."
+                                        errorMessage = com.example.util.AppStrings.trText("Please enter your full name.", "Por favor, ingresa tu nombre completo.")
                                         return@clickable
                                     }
                                     if (email.isBlank()) {
-                                        errorMessage = "Please enter your email address."
+                                        errorMessage = com.example.util.AppStrings.trText("Please enter your email address.", "Por favor, ingresa tu correo electrónico.")
                                         return@clickable
                                     }
                                     if (password.isBlank()) {
-                                        errorMessage = "Please enter your password."
+                                        errorMessage = com.example.util.AppStrings.trText("Please enter your password.", "Por favor, ingresa tu contraseña.")
                                         return@clickable
                                     }
                                     if (isCreateAccountMode && password != confirmPassword) {
-                                        errorMessage = "Passwords do not match."
+                                        errorMessage = com.example.util.AppStrings.trText("Passwords do not match.", "Las contraseñas no coinciden.")
                                         return@clickable
                                     }
                                     onSaveCredentials(fullName, email)
@@ -503,7 +479,7 @@ fun AuthScreen(
                                     )
                                 } else {
                                     Text(
-                                        text = if (isCreateAccountMode) "SIGN UP" else "LOGIN",
+                                        text = if (isCreateAccountMode) com.example.util.tr("SIGN UP", "REGISTRARSE") else com.example.util.tr("LOGIN", "ENTRAR"),
                                         style = MaterialTheme.typography.titleSmall.copy(
                                             fontWeight = FontWeight.ExtraBold,
                                             color = Color(0xFF071018),
@@ -523,95 +499,45 @@ fun AuthScreen(
 
                     Spacer(modifier = Modifier.height(24.dp))
 
-                    // Google & Facebook Social Login Row
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    // Google Social Login Button (Full Width)
+                    var googleFocused by remember { mutableStateOf(false) }
+                    OutlinedButton(
+                        onClick = { triggerGoogleCredentialAuth(false) },
+                        enabled = !isLoading,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(48.dp)
+                            .onFocusChanged { googleFocused = it.isFocused }
+                            .testTag("google_auth_button"),
+                        shape = RoundedCornerShape(14.dp),
+                        border = BorderStroke(
+                            width = if (googleFocused) 2.dp else 1.dp,
+                            color = if (googleFocused) LaunchGreen else HubBlue.copy(alpha = 0.55f)
+                        ),
+                        contentPadding = PaddingValues(horizontal = 12.dp)
                     ) {
-                        var googleFocused by remember { mutableStateOf(false) }
-                        OutlinedButton(
-                            onClick = { triggerGoogleCredentialAuth(false) },
-                            enabled = !isLoading,
+                        Box(
                             modifier = Modifier
-                                .weight(1f)
-                                .height(48.dp)
-                                .onFocusChanged { googleFocused = it.isFocused }
-                                .testTag("google_auth_button"),
-                            shape = RoundedCornerShape(14.dp),
-                            border = BorderStroke(
-                                width = if (googleFocused) 2.dp else 1.dp,
-                                color = if (googleFocused) LaunchGreen else HubBlue.copy(alpha = 0.55f)
-                            ),
-                            contentPadding = PaddingValues(horizontal = 12.dp)
+                                .size(20.dp)
+                                .clip(CircleShape)
+                                .background(Color.White),
+                            contentAlignment = Alignment.Center
                         ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(20.dp)
-                                    .clip(CircleShape)
-                                    .background(Color.White),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text(
-                                    text = "G",
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Black,
-                                    color = Color(0xFF4285F4)
-                                )
-                            }
-                            Spacer(modifier = Modifier.width(8.dp))
                             Text(
-                                text = "Google",
-                                style = MaterialTheme.typography.labelLarge.copy(
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color(0xFFF8FAFC)
-                                )
+                                text = "G",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Black,
+                                color = Color(0xFF4285F4)
                             )
                         }
-
-                        var facebookFocused by remember { mutableStateOf(false) }
-                        Button(
-                            onClick = { triggerFacebookAuth() },
-                            enabled = !isLoading,
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(48.dp)
-                                .onFocusChanged { facebookFocused = it.isFocused }
-                                .border(
-                                    width = if (facebookFocused) 2.dp else 0.dp,
-                                    color = if (facebookFocused) Color.White else Color.Transparent,
-                                    shape = RoundedCornerShape(14.dp)
-                                )
-                                .testTag("facebook_auth_button"),
-                            shape = RoundedCornerShape(14.dp),
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = Color(0xFF1877F2),
-                                contentColor = Color.White
-                            ),
-                            contentPadding = PaddingValues(horizontal = 12.dp)
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(20.dp)
-                                    .clip(CircleShape)
-                                    .background(Color.White),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text(
-                                    text = "f",
-                                    fontSize = 14.sp,
-                                    fontWeight = FontWeight.Black,
-                                    color = Color(0xFF1877F2)
-                                )
-                            }
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                text = "Facebook",
-                                style = MaterialTheme.typography.labelLarge.copy(
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color.White
-                                )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = com.example.util.tr("Continue with Google", "Continuar con Google"),
+                            style = MaterialTheme.typography.labelLarge.copy(
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFFF8FAFC)
                             )
-                        }
+                        )
                     }
 
                     Spacer(modifier = Modifier.height(10.dp))
@@ -639,7 +565,7 @@ fun AuthScreen(
                         contentPadding = PaddingValues(horizontal = 12.dp)
                     ) {
                         Text(
-                            text = "Continue as Guest",
+                            text = com.example.util.tr("Continue as Guest", "Continuar como Invitado"),
                             style = MaterialTheme.typography.labelLarge.copy(
                                 fontWeight = FontWeight.Bold,
                                 color = Color(0xFFCBD5E1)
@@ -656,11 +582,11 @@ fun AuthScreen(
                     contentAlignment = Alignment.Center
                 ) {
                     val promptText = if (isCreateAccountMode) {
-                        "Already have an account? "
+                        com.example.util.tr("Already have an account? ", "¿Ya tienes una cuenta? ")
                     } else {
-                        "Don't have an account? "
+                        com.example.util.tr("Don't have an account? ", "¿No tienes una cuenta? ")
                     }
-                    val actionText = if (isCreateAccountMode) "Sign in" else "Sign up"
+                    val actionText = if (isCreateAccountMode) com.example.util.tr("Sign in", "Iniciar sesión") else com.example.util.tr("Sign up", "Registrarse")
                     val switchTag = if (isCreateAccountMode) "auth_mode_signin" else "auth_mode_signup"
 
                     Text(
@@ -875,6 +801,42 @@ fun SocialAccountPickerFallbackDialog(
                             fontWeight = FontWeight.Bold
                         )
                     )
+                }
+
+                if (!isFacebook) {
+                    val dialogContext = LocalContext.current
+                    OutlinedButton(
+                        onClick = {
+                            try {
+                                val addAccountIntent = android.content.Intent(android.provider.Settings.ACTION_ADD_ACCOUNT).apply {
+                                    putExtra(android.provider.Settings.EXTRA_ACCOUNT_TYPES, arrayOf("com.google"))
+                                    addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                                }
+                                dialogContext.startActivity(addAccountIntent)
+                            } catch (_: Exception) {
+                                try {
+                                    val syncSettingsIntent = android.content.Intent(android.provider.Settings.ACTION_SYNC_SETTINGS).apply {
+                                        addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                                    }
+                                    dialogContext.startActivity(syncSettingsIntent)
+                                } catch (_: Exception) {
+                                }
+                            }
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("add_device_google_account_button"),
+                        shape = RoundedCornerShape(10.dp),
+                        border = BorderStroke(1.dp, HubBlue.copy(alpha = 0.5f))
+                    ) {
+                        Text(
+                            text = "Add Google Account in Device Settings",
+                            style = MaterialTheme.typography.labelMedium.copy(
+                                color = HubBlue,
+                                fontWeight = FontWeight.Bold
+                            )
+                        )
+                    }
                 }
             }
         },

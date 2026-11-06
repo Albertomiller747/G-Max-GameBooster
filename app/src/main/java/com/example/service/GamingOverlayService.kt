@@ -75,10 +75,13 @@ class GamingOverlayService : Service(), Choreographer.FrameCallback {
     private var currentFps = 60
     private var efpsCollectorJob: Job? = null
 
-    // Live RAM Usage Percentage & Time of Day
+    // Live RAM Usage Percentage & Time of Day (pre-allocated objects for zero-GC telemetry ticks)
     private var currentRamPct = 48
     private var currentTimeOfDayStr = ""
     private val clockFormatter = java.text.SimpleDateFormat("h:mm a", java.util.Locale.US)
+    private val reusableMemInfo = android.app.ActivityManager.MemoryInfo()
+    private val reusableClockDate = java.util.Date()
+    private var cachedHudPrefs: android.content.SharedPreferences? = null
 
     // Real Battery & Temp Receiver (100% genuine Android hardware broadcast)
     private var currentTempC = 28.0f
@@ -106,17 +109,17 @@ class GamingOverlayService : Service(), Choreographer.FrameCallback {
         try {
             val am = getSystemService(Context.ACTIVITY_SERVICE) as? android.app.ActivityManager
             if (am != null) {
-                val memInfo = android.app.ActivityManager.MemoryInfo()
-                am.getMemoryInfo(memInfo)
-                if (memInfo.totalMem > 0L) {
-                    val used = (memInfo.totalMem - memInfo.availMem).coerceAtLeast(0L)
-                    currentRamPct = ((used * 100L) / memInfo.totalMem).toInt().coerceIn(1, 99)
+                am.getMemoryInfo(reusableMemInfo)
+                if (reusableMemInfo.totalMem > 0L) {
+                    val used = (reusableMemInfo.totalMem - reusableMemInfo.availMem).coerceAtLeast(0L)
+                    currentRamPct = ((used * 100L) / reusableMemInfo.totalMem).toInt().coerceIn(1, 99)
                 }
             }
         } catch (_: Exception) {}
 
         try {
-            currentTimeOfDayStr = clockFormatter.format(java.util.Date())
+            reusableClockDate.time = System.currentTimeMillis()
+            currentTimeOfDayStr = clockFormatter.format(reusableClockDate)
         } catch (_: Exception) {}
     }
 
@@ -259,12 +262,9 @@ class GamingOverlayService : Service(), Choreographer.FrameCallback {
 
     private fun applySessionThreadPriority(isBeast: Boolean) {
         try {
-            val priority = if (isBeast) {
-                Process.THREAD_PRIORITY_URGENT_DISPLAY // -8: High interactive & frame priority
-            } else {
-                Process.THREAD_PRIORITY_DISPLAY // -4: Standard smooth display priority
-            }
-            Process.setThreadPriority(priority)
+            // Keep the background telemetry/overlay worker strictly at BACKGROUND priority
+            // so it stays on efficiency cores and NEVER steals CPU cycles from the active game.
+            Process.setThreadPriority(Process.THREAD_PRIORITY_BACKGROUND)
         } catch (_: Exception) {}
     }
 
@@ -274,28 +274,62 @@ class GamingOverlayService : Service(), Choreographer.FrameCallback {
         } catch (_: Exception) {}
     }
 
-    private fun executeMultiActionOptimization(isBeast: Boolean) {
-        serviceScope.launch {
+    private fun applyLowLatencyAudioAndNetworkHints(enable: Boolean, isBeast: Boolean) {
+        try {
+            val audioManager = applicationContext.getSystemService(Context.AUDIO_SERVICE) as? android.media.AudioManager
+            if (audioManager != null) {
+                if (enable) {
+                    audioManager.setParameters(
+                        if (isBeast) "game_mode=1;low_latency=1;fast_track=1"
+                        else "game_mode=1;low_latency=1"
+                    )
+                } else {
+                    audioManager.setParameters("game_mode=0;low_latency=0")
+                }
+            }
+        } catch (_: Exception) {}
+    }
+
+    private fun executeMultiActionOptimization(isBeast: Boolean, isInitialStart: Boolean = false) {
+        serviceScope.launch(Dispatchers.IO) {
             try {
-                // 1. Safe cached memory purge without game hooking
-                val memHelper = com.example.util.MemoryHelper(this@GamingOverlayService)
-                val (killedCount, freedMb) = memHelper.cleanCachedRam()
-                System.runFinalization()
-                System.gc()
-                lastPurgedMb = freedMb.toInt().coerceAtLeast(16)
-                lastPurgeTimestamp = System.currentTimeMillis()
-
-                // 2. Enforce low-latency Wi-Fi radio lock
-                acquireLowLatencyWifiLock()
-
-                // 3. Enforce Linux thread scheduler priority
                 applySessionThreadPriority(isBeast)
 
-                // 4. Enforce Screen WakeLock
-                acquireScreenWakeLock()
+                if (isInitialStart) {
+                    // 1. Acquire low-latency Wi-Fi radio lock (WIFI_MODE_FULL_LOW_LATENCY) for minimum ping jitter
+                    acquireLowLatencyWifiLock()
 
-                // 5. Enforce Priority Do Not Disturb (game & media audio preserved, notifications silenced)
-                com.example.util.PriorityDndHelper.enablePriorityDnd(this@GamingOverlayService, markAutoEngaged = true)
+                    // 2. Configure low-latency hardware audio mixer hints
+                    applyLowLatencyAudioAndNetworkHints(enable = true, isBeast = isBeast)
+
+                    // 3. Enforce Screen WakeLock
+                    acquireScreenWakeLock()
+
+                    // 4. Enforce Priority Do Not Disturb once on session start
+                    com.example.util.PriorityDndHelper.enablePriorityDnd(this@GamingOverlayService, markAutoEngaged = true)
+
+                    // Read exact RAM freed from the pre-launch trim
+                    val lastTrim = com.example.util.AppMemoryManager.lastTrimResult.value
+                    lastPurgedMb = (lastTrim?.ramFreedMb ?: 0L).toInt().coerceAtLeast(0)
+                    lastPurgeTimestamp = System.currentTimeMillis()
+                } else {
+                    // During active gameplay: DO NOT run killBackgroundProcesses loops or System.gc()
+                    // because killing background apps mid-match triggers Zygote service respawns and frame drops.
+                    // Only trim GMAX's own lightweight app cache if the OS signals critical low-memory.
+                    val am = getSystemService(Context.ACTIVITY_SERVICE) as? android.app.ActivityManager
+                    val memInfo = android.app.ActivityManager.MemoryInfo()
+                    am?.getMemoryInfo(memInfo)
+                    if (memInfo.lowMemory) {
+                        val trimRes = com.example.util.AppMemoryManager.performAutoTrim(
+                            context = this@GamingOverlayService,
+                            reason = "Critical Low-Memory Guard",
+                            cleanBackgroundProcesses = false,
+                            force = false
+                        )
+                        lastPurgedMb = trimRes.ramFreedMb.toInt()
+                        lastPurgeTimestamp = System.currentTimeMillis()
+                    }
+                }
             } catch (_: Exception) {}
         }
     }
@@ -313,10 +347,11 @@ class GamingOverlayService : Service(), Choreographer.FrameCallback {
             )
 
             val modeTitle = if (isBeast) "⚡ BEAST ACTIVE" else "🛡️ GAMING BOOST"
+            val purgedLabel = if (purgedMb > 0) "Freed ${purgedMb}MB • " else ""
             val summaryText = if (isBeast) {
-                "Purged ${purgedMb}MB • 0-Lag Wi-Fi • Screen Awake • Max Priority (-8)"
+                "${purgedLabel}Low-Latency Wi-Fi • Zero-Lag Audio • $gameTitle"
             } else {
-                "Purged ${purgedMb}MB • Wi-Fi Lock • Screen Awake • $gameTitle"
+                "${purgedLabel}Wi-Fi Lock • Priority DND • $gameTitle"
             }
 
             val builder = androidx.core.app.NotificationCompat.Builder(this, CHANNEL_ID)
@@ -333,32 +368,74 @@ class GamingOverlayService : Service(), Choreographer.FrameCallback {
         } catch (_: Exception) {}
     }
 
+    private var connectivityMonitorJob: Job? = null
+    private var wasOnlinePreviously: Boolean = true
+
     private fun startOptimizationEngine() {
+        if (connectivityMonitorJob?.isActive != true) {
+            wasOnlinePreviously = com.example.util.NetworkConnectivityMonitor.isCurrentlyOnline(this)
+            connectivityMonitorJob = serviceScope.launch {
+                com.example.util.NetworkConnectivityMonitor.observeConnectivity(this@GamingOverlayService).collect { isOnline ->
+                    if (wasOnlinePreviously && !isOnline) {
+                        val session = boosterSessionManager
+                        val isNormalBoostActive = session != null &&
+                            session.isSessionActive() &&
+                            session.getActiveMode() == com.example.model.BoostMode.GAMING
+
+                        // Always stop Crosshair & Controller overlays on internet loss
+                        try {
+                            com.example.service.CrosshairOverlayService.saveConfig(
+                                this@GamingOverlayService,
+                                false,
+                                0,
+                                0xFF00E676L,
+                                24,
+                                0.9f
+                            )
+                            stopService(Intent(this@GamingOverlayService, CrosshairOverlayService::class.java))
+                        } catch (_: Exception) {}
+
+                        try {
+                            val ctrlCfg = ControllerOverlayService.loadConfig(this@GamingOverlayService)
+                            if (ctrlCfg.isEnabled) {
+                                ControllerOverlayService.saveConfig(this@GamingOverlayService, ctrlCfg.copy(isEnabled = false))
+                                stopService(Intent(this@GamingOverlayService, ControllerOverlayService::class.java))
+                            }
+                        } catch (_: Exception) {}
+
+                        // Remove HUD overlay when internet drops UNLESS it is a Normal Boost (BoostMode.GAMING) session
+                        if (!isNormalBoostActive) {
+                            stopSelf()
+                        }
+                    }
+                    wasOnlinePreviously = isOnline
+                }
+            }
+        }
+
         if (optimizationJob?.isActive == true) return
         optimizationJob = serviceScope.launch {
+            applySessionThreadPriority(false)
+            var tickCount = 0
             while (isActive) {
                 delay(1000L)
+                tickCount++
                 val session = boosterSessionManager
                 if (session != null && session.isSessionActive()) {
                     val mode = session.getActiveMode()
                     val isBeast = mode == com.example.model.BoostMode.BEAST
-                    val intervalMs = session.getPurgeIntervalMs(mode)
                     val now = System.currentTimeMillis()
 
-                    // Ensure Wi-Fi lock, Screen WakeLock, and Linux thread priority are maintained
-                    acquireLowLatencyWifiLock()
-                    acquireScreenWakeLock()
-                    applySessionThreadPriority(isBeast)
-                    com.example.util.PriorityDndHelper.enablePriorityDnd(this@GamingOverlayService, markAutoEngaged = true)
-
-                    // Execute scheduled multi-action purge
-                    if (lastPeriodicRamCleanTimestamp == 0L || (now - lastPeriodicRamCleanTimestamp >= intervalMs)) {
+                    if (lastPeriodicRamCleanTimestamp == 0L) {
                         lastPeriodicRamCleanTimestamp = now
-                        executeMultiActionOptimization(isBeast)
+                        executeMultiActionOptimization(isBeast, isInitialStart = true)
+                    } else if (now - lastPeriodicRamCleanTimestamp >= 30_000L) {
+                        lastPeriodicRamCleanTimestamp = now
+                        executeMultiActionOptimization(isBeast, isInitialStart = false)
                     }
 
-                    // Subdued notification update every 5 seconds
-                    if (now - lastNotificationUpdateTimestamp >= 5000L) {
+                    // Subdued notification update every 10 seconds to minimize NotificationManager binder overhead
+                    if (now - lastNotificationUpdateTimestamp >= 10_000L) {
                         lastNotificationUpdateTimestamp = now
                         val remainingFormatted = session.formatCountdown(session.getRemainingMillis())
                         val gameTitle = session.getLastTargetGame().second ?: "Active Game"
@@ -368,6 +445,7 @@ class GamingOverlayService : Service(), Choreographer.FrameCallback {
                     // Session expired or ended: release all locks and restore scheduler & DND
                     releaseLowLatencyWifiLock()
                     releaseScreenWakeLock()
+                    applyLowLatencyAudioAndNetworkHints(enable = false, isBeast = false)
                     restoreDefaultThreadPriority()
                     com.example.util.PriorityDndHelper.restorePreviousDnd(this@GamingOverlayService)
                     if (overlayLayout == null && !showFps && !showTemp && !showBattery && !showRamPct && !showClock) {
@@ -378,17 +456,30 @@ class GamingOverlayService : Service(), Choreographer.FrameCallback {
                         break
                     }
                 }
-                // Refresh RAM usage % and Time of Day every second
-                queryRamAndClock()
+                // Refresh RAM usage % and Time of Day every 3 seconds instead of every 1 second to reduce IPC overhead
+                if (tickCount % 3 == 0) {
+                    queryRamAndClock()
+                }
+                // Passively accrue G-Tokens (10 G-Tokens per 5 minutes = 300s) while the live performance HUD is active
+                if (tickCount % 15 == 0 && overlayLayout != null) {
+                    try {
+                        com.example.util.DailyStreakManager.accrueHudActiveSeconds(
+                            context = this@GamingOverlayService,
+                            secondsElapsed = 15
+                        )
+                    } catch (_: Exception) {}
+                }
                 kotlinx.coroutines.withContext(Dispatchers.Main) {
                     updateLabels()
                 }
-                // Record telemetry sample every second during active overlay
-                com.example.util.MatchRecapManager.getInstance(this@GamingOverlayService).recordSample(
-                    fps = currentFps,
-                    tempC = currentTempC,
-                    batteryPct = currentBatteryLevel
-                )
+                // Record telemetry sample every 2 seconds during active overlay
+                if (tickCount % 2 == 0) {
+                    com.example.util.MatchRecapManager.getInstance(this@GamingOverlayService).recordSample(
+                        fps = currentFps,
+                        tempC = currentTempC,
+                        batteryPct = currentBatteryLevel
+                    )
+                }
             }
         }
     }
@@ -444,9 +535,47 @@ class GamingOverlayService : Service(), Choreographer.FrameCallback {
         // Refresh battery, temperature, RAM %, and clock immediately on each start/update
         queryHardwareBatteryAndTemp()
 
+        // Promote to foreground service so Android never kills the overlay when leaving the app
+        try {
+            val openIntent = Intent(this, com.example.MainActivity::class.java).apply {
+                this.flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            }
+            val pendingIntent = android.app.PendingIntent.getActivity(
+                this,
+                0,
+                openIntent,
+                android.app.PendingIntent.FLAG_UPDATE_CURRENT or
+                    (if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) android.app.PendingIntent.FLAG_IMMUTABLE else 0)
+            )
+            val notification = androidx.core.app.NotificationCompat.Builder(this, CHANNEL_ID)
+                .setSmallIcon(android.R.drawable.ic_dialog_info)
+                .setContentTitle("G MAX Live Telemetry Active")
+                .setContentText("$targetGameName • $currentFps EFPS • ${currentTempC}°C")
+                .setContentIntent(pendingIntent)
+                .setOngoing(true)
+                .setSilent(true)
+                .setPriority(androidx.core.app.NotificationCompat.PRIORITY_LOW)
+                .build()
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                startForeground(
+                    NOTIFICATION_ID,
+                    notification,
+                    android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+                )
+            } else {
+                startForeground(NOTIFICATION_ID, notification)
+            }
+        } catch (_: Exception) {}
+
         // Setup floating HUD if overlay permission is granted
         val canDraw = Build.VERSION.SDK_INT < Build.VERSION_CODES.M || Settings.canDrawOverlays(this)
         if (canDraw) {
+            try {
+                com.example.util.DailyStreakManager.recordDailyRequirementCompleted(
+                    context = this,
+                    sourceLabel = "Live Performance HUD"
+                )
+            } catch (_: Exception) {}
             if (windowManager == null || overlayLayout == null) {
                 setupOverlay()
             } else {
@@ -497,6 +626,8 @@ class GamingOverlayService : Service(), Choreographer.FrameCallback {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             setPadding((12 * density).toInt(), (6 * density).toInt(), (10 * density).toInt(), (6 * density).toInt())
+            @Suppress("DEPRECATION")
+            setWillNotCacheDrawing(true)
 
             val shape = GradientDrawable().apply {
                 setColor(Color.argb(225, 13, 17, 26))
@@ -504,7 +635,7 @@ class GamingOverlayService : Service(), Choreographer.FrameCallback {
                 setStroke((1.5f * density).toInt(), Color.argb(160, 0, 229, 255))
             }
             background = shape
-            elevation = 16f
+            elevation = 0f
         }
 
         // 1. Live Multi-Sensor EFPS Indicator (strictly single-line so it never wraps into 2 rows)
@@ -667,24 +798,41 @@ class GamingOverlayService : Service(), Choreographer.FrameCallback {
         } catch (_: Exception) {}
     }
 
+    private var lastAppliedScaleSignature: Int = 0
+    private var lastFpsText: String = ""
+    private var lastFpsColor: Int = 0
+    private var lastTimerText: String = ""
+    private var lastTimerColor: Int = 0
+    private var lastTimerVisible: Boolean? = null
+    private var lastRamText: String = ""
+    private var lastRamColor: Int = 0
+    private var lastTempText: String = ""
+    private var lastBatText: String = ""
+    private var lastClockText: String = ""
+
     private fun updateVisibility() {
         fpsTextView?.visibility = if (showFps) View.VISIBLE else View.GONE
         ramTextView?.visibility = if (showRamPct) View.VISIBLE else View.GONE
         tempTextView?.visibility = if (showTemp) View.VISIBLE else View.GONE
         batteryTextView?.visibility = if (showBattery) View.VISIBLE else View.GONE
         clockTextView?.visibility = if (showClock) View.VISIBLE else View.GONE
-        applyResponsiveOverlayScale()
+        applyResponsiveOverlayScale(force = true)
     }
 
     /**
      * Auto-scales font size, item padding, and container padding based on phone screen width
      * and the number of enabled HUD metrics so all 6 items stay strictly on 1 single row.
+     * Uses signature dirty-checking so layout padding/textSize is not recalculated on every frame.
      */
-    private fun applyResponsiveOverlayScale() {
+    private fun applyResponsiveOverlayScale(force: Boolean = false) {
         val density = resources.displayMetrics.density
         val screenWidthDp = resources.configuration.screenWidthDp.coerceAtLeast(320)
         val isTimerVisible = boosterSessionManager?.isSessionActive() == true && showTimer
         val activeCount = listOf(showFps, isTimerVisible, showRamPct, showTemp, showBattery, showClock).count { it }.coerceAtLeast(1)
+
+        val signature = (screenWidthDp shl 8) or (activeCount shl 2) or (if (autoScaleSmallScreens) 1 else 0)
+        if (!force && signature == lastAppliedScaleSignature) return
+        lastAppliedScaleSignature = signature
 
         val widthFactor = if (autoScaleSmallScreens) {
             (screenWidthDp / 412f).coerceIn(0.76f, 1.04f)
@@ -720,20 +868,52 @@ class GamingOverlayService : Service(), Choreographer.FrameCallback {
         val activeCount = listOf(showFps, isTimerVisible, showRamPct, showTemp, showBattery, showClock).count { it }
         val isCompactHud = autoScaleSmallScreens && activeCount >= 5 && resources.configuration.screenWidthDp < 430
 
-        // Compact 96%–98% Accuracy 6-Way Multi-Sensor EFPS Readout
-        fpsTextView?.text = if (isCompactHud) "$currentFps FPS" else "$currentFps EFPS"
+        // 1. Compact 96% to 98% Accuracy 6-Way Multi-Sensor EFPS Readout
+        val newFpsText = if (isCompactHud) "$currentFps FPS" else "$currentFps EFPS"
+        if (newFpsText != lastFpsText) {
+            lastFpsText = newFpsText
+            fpsTextView?.text = newFpsText
+        }
 
-        // Dynamic color shift: sub-30 EFPS is always flagged in Electric Crimson (#FF5252 / #EF4444)
+        val hudPrefs = cachedHudPrefs ?: getSharedPreferences("gmax_hud_prefs", Context.MODE_PRIVATE).also {
+            cachedHudPrefs = it
+        }
+        val isNeonHudUnlocked = hudPrefs.getBoolean("hud_streak_neon_unlocked", false)
+        val customNeonHex = if (isNeonHudUnlocked) {
+            hudPrefs.getString("hud_streak_neon_hex", "#00E5FF").orEmpty().ifBlank { "#00E5FF" }
+        } else {
+            "#00E5FF"
+        }
+        val primaryNeonColor = try {
+            Color.parseColor(customNeonHex)
+        } catch (_: Exception) {
+            Color.parseColor("#00E5FF")
+        }
+
+        // Apply 7-Day Streak Custom Neon HUD border accent if unlocked (or revert to default if streak broke)
+        if (primaryNeonColor != lastFpsColor) {
+            (overlayLayout?.background as? GradientDrawable)?.let { bgShape ->
+                val density = resources.displayMetrics.density
+                val r = Color.red(primaryNeonColor)
+                val g = Color.green(primaryNeonColor)
+                val b = Color.blue(primaryNeonColor)
+                bgShape.setStroke((1.5f * density).toInt(), Color.argb(185, r, g, b))
+            }
+        }
+
         val ceiling = effectiveCapFps.coerceAtLeast(30)
         val stableThreshold = (ceiling * 0.90f).toInt()
         val moderateThreshold = (ceiling * 0.70f).toInt().coerceAtLeast(30)
         val fpsColor = when {
-            currentFps < 30 -> Color.parseColor("#FF5252") // Sub-30 FPS critical frame drop alert
-            currentFps >= stableThreshold -> Color.parseColor("#00E5FF") // Cyber Cyan (Smooth/Optimal)
-            currentFps >= moderateThreshold -> Color.parseColor("#F59E0B") // Solar Amber (Moderate drop)
-            else -> Color.parseColor("#EF4444") // Electric Crimson (Severe drop/lag)
+            currentFps < 30 -> Color.parseColor("#FF5252")
+            currentFps >= stableThreshold -> primaryNeonColor
+            currentFps >= moderateThreshold -> Color.parseColor("#F59E0B")
+            else -> Color.parseColor("#EF4444")
         }
-        fpsTextView?.setTextColor(fpsColor)
+        if (fpsColor != lastFpsColor) {
+            lastFpsColor = fpsColor
+            fpsTextView?.setTextColor(fpsColor)
+        }
 
         // 2. Booster Session Live Countdown & Subdued HUD Status (Respects showTimer toggle)
         val session = boosterSessionManager
@@ -744,35 +924,69 @@ class GamingOverlayService : Service(), Choreographer.FrameCallback {
             val isBeast = mode == com.example.model.BoostMode.BEAST
             val now = System.currentTimeMillis()
 
-            if (now - lastPurgeTimestamp in 0..4000L && lastPurgedMb > 0) {
-                timerTextView?.text = "⚡-${lastPurgedMb}M"
-                timerTextView?.setTextColor(Color.parseColor("#00E5FF"))
+            val (newTimerStr, newTimerClr) = if (now - lastPurgeTimestamp in 0..4000L && lastPurgedMb > 0) {
+                "⚡-${lastPurgedMb}M" to Color.parseColor("#00E5FF")
             } else {
                 val icon = if (isBeast) "🔥" else "⏳"
-                timerTextView?.text = if (isCompactHud) "$icon$formatted" else "$icon $formatted"
-                timerTextView?.setTextColor(if (isBeast) Color.parseColor("#FF5722") else Color.parseColor("#00E676"))
+                val str = if (isCompactHud) "$icon$formatted" else "$icon $formatted"
+                val clr = if (isBeast) Color.parseColor("#FF5722") else Color.parseColor("#00E676")
+                str to clr
             }
-            timerTextView?.visibility = View.VISIBLE
+            if (newTimerStr != lastTimerText) {
+                lastTimerText = newTimerStr
+                timerTextView?.text = newTimerStr
+            }
+            if (newTimerClr != lastTimerColor) {
+                lastTimerColor = newTimerClr
+                timerTextView?.setTextColor(newTimerClr)
+            }
+            if (lastTimerVisible != true) {
+                lastTimerVisible = true
+                timerTextView?.visibility = View.VISIBLE
+            }
         } else {
-            timerTextView?.visibility = View.GONE
+            if (lastTimerVisible != false) {
+                lastTimerVisible = false
+                timerTextView?.visibility = View.GONE
+            }
         }
 
         // 3. RAM Usage Percentage
-        ramTextView?.text = if (isCompactHud) "R:$currentRamPct%" else "RAM $currentRamPct%"
+        val newRamText = if (isCompactHud) "R:$currentRamPct%" else "RAM $currentRamPct%"
+        if (newRamText != lastRamText) {
+            lastRamText = newRamText
+            ramTextView?.text = newRamText
+        }
         val ramColor = when {
             currentRamPct >= 85 -> Color.parseColor("#EF4444")
             currentRamPct >= 72 -> Color.parseColor("#F59E0B")
             else -> Color.parseColor("#A855F7")
         }
-        ramTextView?.setTextColor(ramColor)
+        if (ramColor != lastRamColor) {
+            lastRamColor = ramColor
+            ramTextView?.setTextColor(ramColor)
+        }
 
-        tempTextView?.text = String.format(java.util.Locale.US, "%.1f°C", currentTempC)
-        batteryTextView?.text = if (isCompactHud) "🔋$currentBatteryLevel%" else "🔋 $currentBatteryLevel%"
+        val newTempText = String.format(java.util.Locale.US, "%.1f°C", currentTempC)
+        if (newTempText != lastTempText) {
+            lastTempText = newTempText
+            tempTextView?.text = newTempText
+        }
+
+        val newBatText = if (isCompactHud) "🔋$currentBatteryLevel%" else "🔋 $currentBatteryLevel%"
+        if (newBatText != lastBatText) {
+            lastBatText = newBatText
+            batteryTextView?.text = newBatText
+        }
+
         if (currentTimeOfDayStr.isBlank()) {
             queryRamAndClock()
         }
-        clockTextView?.text = currentTimeOfDayStr
-        applyResponsiveOverlayScale()
+        if (currentTimeOfDayStr != lastClockText) {
+            lastClockText = currentTimeOfDayStr
+            clockTextView?.text = currentTimeOfDayStr
+        }
+        applyResponsiveOverlayScale(force = false)
     }
 
     private fun startFpsMeter() {
@@ -791,6 +1005,18 @@ class GamingOverlayService : Service(), Choreographer.FrameCallback {
 
     override fun doFrame(frameTimeNanos: Long) {
         // Handled by EfpsEngine multi-sensor fusion pipeline
+    }
+
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        @Suppress("DEPRECATION")
+        overlayLayout?.destroyDrawingCache()
+    }
+
+    override fun onLowMemory() {
+        super.onLowMemory()
+        @Suppress("DEPRECATION")
+        overlayLayout?.destroyDrawingCache()
     }
 
     override fun onDestroy() {

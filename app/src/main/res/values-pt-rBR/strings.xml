@@ -1,0 +1,67 @@
+<resources>
+    <string name="app_name">G Max Gaming Hub</string>
+    <string name="tagline">Motor de Desempenho para Jogos</string>
+    <string name="version_label">Versão 1.0</string>
+
+    <!-- Navigation -->
+    <string name="nav_launcher">Iniciador</string>
+    <string name="nav_recorder">Gravador</string>
+    <string name="nav_leaderboard">Classificação</string>
+    <string name="nav_extras">Extras</string>
+    <string name="nav_settings">Configurações</string>
+    <string name="nav_profile">Perfil</string>
+
+    <!-- Extras Sub-Tabs -->
+    <string name="tab_tweaks">Ajustes Pro</string>
+    <string name="tab_performance">Desempenho</string>
+    <string name="tab_touch">Toque</string>
+    <string name="tab_controller">Controle</string>
+    <string name="tab_specs">Hardware</string>
+
+    <!-- Splash & Console Startup -->
+    <string name="splash_press_home">Pressione o botão Início no controle ou toque abaixo para entrar</string>
+    <string name="splash_log_in_console">Entrar no Console</string>
+    <string name="splash_entering_hub">Entrando no G Max Gaming Hub...</string>
+    <string name="splash_welcome_back">Bem-vindo de Volta</string>
+    <string name="splash_ready_launch">Pronto para jogar</string>
+
+    <!-- Offline / Online Gate -->
+    <string name="offline_gate_title">Conexão com a Internet Necessária</string>
+    <string name="offline_gate_subtitle">O Iniciador de Jogos e o Impulso Normal funcionam offline. Conecte-se ao Wi-Fi ou dados móveis para acessar Gravador, Classificação, Extras, Impulso Fera e Conta.</string>
+    <string name="offline_gate_retry">Tentar Novamente</string>
+    <string name="offline_gate_back_launcher">Ir para o Iniciador Offline</string>
+    <string name="offline_mode_badge">Modo Offline: Iniciador e Impulso Normal Ativos</string>
+
+    <!-- Launcher & Boost -->
+    <string name="launcher_normal_boost">Impulso Normal</string>
+    <string name="launcher_beast_boost">Impulso Fera</string>
+    <string name="launcher_boost_memory">Otimizar RAM</string>
+    <string name="launcher_launch_game">Jogar</string>
+    <string name="launcher_add_games">Adicionar Jogos</string>
+    <string name="launcher_search_games">Buscar jogos...</string>
+
+    <!-- Recorder -->
+    <string name="recorder_tab_videos">Vídeos e Galeria</string>
+    <string name="recorder_tab_settings">Configurações</string>
+    <string name="recorder_no_videos">Nenhum vídeo foi gravado</string>
+    <string name="recorder_start">Gravar</string>
+    <string name="recorder_stop">Parar</string>
+
+    <!-- Leaderboard -->
+    <string name="leaderboard_title">Classificação da Temporada</string>
+    <string name="leaderboard_tab_rankings">Top 100 Classificação</string>
+    <string name="leaderboard_tab_rules">Regras do Torneio</string>
+    <string name="leaderboard_empty_title">Nenhum Jogador Verificado Ainda</string>
+    <string name="leaderboard_empty_subtitle">Entre com Google ou Facebook para garantir sua posição no Top 100.</string>
+
+    <!-- AdMob Labels -->
+    <string name="ad_badge_label">Anúncio</string>
+    <string name="ad_sponsored_label">Patrocinado</string>
+    <string name="ad_reward_unlock_title">Desbloquear RGB e Sobreposição (24h)</string>
+    <string name="ad_reward_unlock_cta">Assista a um anúncio curto para liberar RGB e Sobreposição por 24 horas</string>
+    <string name="ad_reward_unlocked_active">RGB e Sobreposição Pro Desbloqueados</string>
+
+    <!-- Real-Time Controller Input Pass-Through Service -->
+    <string name="controller_passthrough_service_label">Sobreposição de Controle G Max</string>
+    <string name="controller_passthrough_service_desc">Permite que a sobreposição flutuante do G Max Gaming Hub destaque os botões e gatilhos do seu controle em tempo real durante o jogo, sem bloquear os comandos.</string>
+</resources>

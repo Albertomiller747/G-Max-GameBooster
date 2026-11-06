@@ -90,6 +90,10 @@ fun SettingsScreen(
     val reducedAnimations by viewModel.reducedAnimations.collectAsState()
     val autoBigScreenLandscape by viewModel.autoBigScreenLandscape.collectAsState()
     val showControllerLegendBar by viewModel.showControllerLegendBar.collectAsState()
+    val controllerLayoutMode by viewModel.controllerLayoutMode.collectAsState()
+    val activeControllerGlyphs by viewModel.activeControllerGlyphs.collectAsState()
+    val controllerOverlayConfig by viewModel.controllerOverlayConfig.collectAsState()
+    val controllerHealthState by viewModel.controllerHealthState.collectAsState()
     val currentFirebaseUser by viewModel.currentFirebaseUser.collectAsState()
     val cloudSyncStatus by viewModel.cloudSyncStatus.collectAsState()
     val isSignedIn = currentFirebaseUser != null
@@ -123,7 +127,7 @@ fun SettingsScreen(
                     )
                     Spacer(modifier = Modifier.width(10.dp))
                     Text(
-                        text = "Hub Appearance & Settings",
+                        text = com.example.util.tr("Hub Appearance & Settings", "Apariencia y Ajustes del Hub"),
                         style = MaterialTheme.typography.headlineSmall.copy(
                             fontWeight = FontWeight.ExtraBold,
                             color = MaterialTheme.colorScheme.onBackground
@@ -132,7 +136,10 @@ fun SettingsScreen(
                 }
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
-                    text = "Automatic Light/Dark display sync, custom backgrounds, and cloud account backup",
+                    text = com.example.util.tr(
+                        "Automatic Light/Dark display sync, custom backgrounds, and cloud account backup",
+                        "Sincronización automática Claro/Oscuro, fondos personalizados y respaldo en la nube"
+                    ),
                     style = MaterialTheme.typography.bodySmall.copy(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -180,9 +187,9 @@ fun SettingsScreen(
                                 text = if (isSignedIn) {
                                     currentFirebaseUser?.displayName?.takeIf { it.isNotBlank() }
                                         ?: currentFirebaseUser?.email
-                                        ?: "Signed-In Account"
+                                        ?: com.example.util.tr("Signed-In Account", "Cuenta Conectada")
                                 } else {
-                                    "Guest Profile (Local Settings Only)"
+                                    com.example.util.tr("Guest Profile (Local Settings Only)", "Perfil de Invitado (Solo Ajustes Locales)")
                                 },
                                 style = MaterialTheme.typography.titleSmall.copy(
                                     fontWeight = FontWeight.ExtraBold,
@@ -215,10 +222,128 @@ fun SettingsScreen(
                         )
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
-                            text = if (isSignedIn) "Account" else "Sign In",
+                            text = if (isSignedIn) com.example.util.tr("Account", "Cuenta") else com.example.util.tr("Sign In", "Iniciar Sesión"),
                             fontWeight = FontWeight.Bold,
-                            fontSize = 12.sp
+                            fontSize = 12.sp,
+                            maxLines = 1,
+                            softWrap = false
                         )
+                    }
+                }
+            }
+        }
+
+        // 1c. App Language & Region Selector Card (Auto-Detect + EN, ES-MX, PT-BR, ID, VI, TL)
+        item {
+            val selectedLanguageMode by viewModel.appLanguageMode.collectAsState()
+            val resolvedActiveLanguage = com.example.util.currentAppLanguage()
+
+            CyberCard {
+                SectionTitle(
+                    title = com.example.util.tr("App Language & Region", "Idioma y Región de la App"),
+                    subtitle = com.example.util.tr(
+                        "Auto-detects device language or choose English, Español (es-MX), Português (pt-BR), Indonesian, Vietnamese, or Tagalog",
+                        "Detecta automáticamente el idioma del dispositivo o elige Español (es-MX), Inglés, Portugués (Brasil), Indonesio, Vietnamita o Tagalo"
+                    ),
+                    badge = resolvedActiveLanguage.flagBadge,
+                    badgeColor = LaunchGreen
+                )
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    com.example.util.AppLanguage.entries.forEach { langOption ->
+                        val isSelected = selectedLanguageMode == langOption
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(
+                                    if (isSelected) HubBlue.copy(alpha = 0.16f)
+                                    else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)
+                                )
+                                .border(
+                                    width = if (isSelected) 1.5.dp else 1.dp,
+                                    color = if (isSelected) HubBlue else MaterialTheme.colorScheme.outline.copy(alpha = 0.3f),
+                                    shape = RoundedCornerShape(12.dp)
+                                )
+                                .clickable {
+                                    viewModel.setAppLanguageMode(langOption)
+                                    com.example.util.ConsoleHapticManager.playSelectClick(context)
+                                }
+                                .padding(horizontal = 12.dp, vertical = 10.dp)
+                                .testTag("language_option_${langOption.code.lowercase(Locale.ROOT)}"),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(6.dp))
+                                        .background(
+                                            if (isSelected) HubBlue else MaterialTheme.colorScheme.surface
+                                        )
+                                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = langOption.flagBadge,
+                                        style = MaterialTheme.typography.labelSmall.copy(
+                                            fontWeight = FontWeight.ExtraBold,
+                                            color = if (isSelected) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
+                                            fontSize = 10.sp
+                                        ),
+                                        maxLines = 1,
+                                        softWrap = false
+                                    )
+                                }
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = if (langOption == com.example.util.AppLanguage.AUTO) {
+                                            com.example.util.tr(
+                                                "Auto-Detect (System)",
+                                                "Detección Automática (Sistema)",
+                                                "Detecção Automática (Sistema)",
+                                                "Deteksi Otomatis (Sistem)",
+                                                "Tự động nhận diện (Hệ thống)",
+                                                "Auto-Detect (System)"
+                                            )
+                                        } else {
+                                            langOption.nativeLabel
+                                        },
+                                        style = MaterialTheme.typography.bodyMedium.copy(
+                                            fontWeight = FontWeight.Bold,
+                                            color = MaterialTheme.colorScheme.onSurface
+                                        ),
+                                        maxLines = 1,
+                                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                                    )
+                                    Text(
+                                        text = langOption.englishSubtitle,
+                                        style = MaterialTheme.typography.bodySmall.copy(
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            fontSize = 11.sp
+                                        ),
+                                        maxLines = 1,
+                                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                                    )
+                                }
+                            }
+
+                            if (isSelected) {
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Icon(
+                                    imageVector = Icons.Default.Check,
+                                    contentDescription = null,
+                                    tint = LaunchGreen,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -228,8 +353,11 @@ fun SettingsScreen(
         item {
             CyberCard {
                 SectionTitle(
-                    title = "Display Mode & Background",
-                    subtitle = "Automatically follows your device display mode (Light / Dark) or use a custom color"
+                    title = com.example.util.tr("Display Mode & Background", "Modo de Pantalla y Fondo"),
+                    subtitle = com.example.util.tr(
+                        "Automatically follows your device display mode (Light / Dark) or use a custom color",
+                        "Sigue automáticamente el modo de pantalla de tu dispositivo (Claro / Oscuro) o usa un color personalizado"
+                    )
                 )
 
                 Spacer(modifier = Modifier.height(12.dp))
@@ -363,7 +491,7 @@ fun SettingsScreen(
                             .padding(top = 16.dp)
                     ) {
                         Text(
-                            text = "CURATED BACKGROUND PRESETS",
+                            text = com.example.util.tr("CURATED BACKGROUND PRESETS", "FONDOS PREDETERMINADOS"),
                             style = MaterialTheme.typography.labelSmall,
                             fontWeight = FontWeight.ExtraBold,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -436,7 +564,7 @@ fun SettingsScreen(
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     Text(
-                                        text = "Custom Color Mixer",
+                                        text = com.example.util.tr("Custom Color Mixer", "Mezclador de Color Personalizado"),
                                         style = MaterialTheme.typography.titleSmall,
                                         fontWeight = FontWeight.Bold,
                                         color = MaterialTheme.colorScheme.onSurface
@@ -459,7 +587,7 @@ fun SettingsScreen(
 
                                 // Red Slider
                                 ColorChannelSlider(
-                                    label = "Red",
+                                    label = com.example.util.tr("Red", "Rojo"),
                                     value = redChannel.toInt(),
                                     trackColor = Color(0xFFEF4444),
                                     onValueChange = { newR ->
@@ -473,7 +601,7 @@ fun SettingsScreen(
 
                                 // Green Slider
                                 ColorChannelSlider(
-                                    label = "Green",
+                                    label = com.example.util.tr("Green", "Verde"),
                                     value = greenChannel.toInt(),
                                     trackColor = Color(0xFF22C55E),
                                     onValueChange = { newG ->
@@ -487,7 +615,7 @@ fun SettingsScreen(
 
                                 // Blue Slider
                                 ColorChannelSlider(
-                                    label = "Blue",
+                                    label = com.example.util.tr("Blue", "Azul"),
                                     value = blueChannel.toInt(),
                                     trackColor = Color(0xFF3B82F6),
                                     onValueChange = { newB ->
@@ -514,8 +642,11 @@ fun SettingsScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     SectionTitle(
-                        title = "Lite Mode (Reduced Animations)",
-                        subtitle = "Disables heavy spring transitions, tile scaling, and boot effects for low-end phones"
+                        title = com.example.util.tr("Lite Mode (Reduced Animations)", "Modo Ligero (Animaciones Reducidas)"),
+                        subtitle = com.example.util.tr(
+                            "Disables heavy spring transitions, tile scaling, and boot effects for low-end phones",
+                            "Desactiva transiciones pesadas, escalado de tarjetas y efectos de inicio para móviles de gama baja"
+                        )
                     )
                 }
 
@@ -531,7 +662,10 @@ fun SettingsScreen(
                             .padding(horizontal = 10.dp, vertical = 4.dp)
                     ) {
                         Text(
-                            text = "Disabled by default • Optional toggle for ≤ 4 GB RAM devices",
+                            text = com.example.util.tr(
+                                "Disabled by default • Optional toggle for ≤ 4 GB RAM devices",
+                                "Desactivado por defecto • Opción para dispositivos con ≤ 4 GB de RAM"
+                            ),
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
                             color = HubBlue
@@ -561,7 +695,7 @@ fun SettingsScreen(
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = "Enable Lite Mode (Reduced Animations)",
+                            text = com.example.util.tr("Enable Lite Mode (Reduced Animations)", "Activar Modo Ligero (Animaciones Reducidas)"),
                             style = MaterialTheme.typography.bodyMedium.copy(
                                 fontWeight = FontWeight.Bold,
                                 color = MaterialTheme.colorScheme.onSurface
@@ -569,9 +703,9 @@ fun SettingsScreen(
                         )
                         Text(
                             text = if (reducedAnimations) {
-                                "Active: Instant transitions & 0-lag static tile focus"
+                                com.example.util.tr("Active: Instant transitions & 0-lag static tile focus", "Activo: Transiciones instantáneas y enfoque sin retraso")
                             } else {
-                                "Off by default: Full console spring physics & startup animation"
+                                com.example.util.tr("Off by default: Full console spring physics & startup animation", "Desactivado: Física completa de consola y animación de inicio")
                             },
                             style = MaterialTheme.typography.bodySmall.copy(
                                 color = if (reducedAnimations) LaunchGreen else MaterialTheme.colorScheme.onSurfaceVariant,
@@ -597,12 +731,153 @@ fun SettingsScreen(
             }
         }
 
+        // 2b2. Memory, Cache & Battery Footprint Engine
+        item {
+            val memoryStats by viewModel.memoryStats.collectAsState()
+            val lastTrimResult by viewModel.lastMemoryTrimResult.collectAsState()
+            val isCleaningMemory by viewModel.isCleaningMemory.collectAsState()
+            val isBgPaused by viewModel.isBackgroundTelemetryPaused.collectAsState()
+
+            CyberCard {
+                SectionTitle(
+                    title = com.example.util.tr(
+                        "Memory, Cache & Battery Footprint",
+                        "Memoria, Caché y Consumo de Batería"
+                    ),
+                    subtitle = com.example.util.tr(
+                        "Auto-trim on launch, low-memory alerts & boost start • Auto-pause background telemetry when idle",
+                        "Limpieza automática al iniciar, alerta de memoria y al impulsar • Pausa automática en inactividad"
+                    )
+                )
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f))
+                        .border(
+                            width = 1.dp,
+                            color = HubBlue.copy(alpha = 0.35f),
+                            shape = RoundedCornerShape(12.dp)
+                        )
+                        .padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = com.example.util.tr("RAM & Storage Footprint", "Huella de RAM y Almacenamiento"),
+                                style = MaterialTheme.typography.bodyMedium.copy(
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                            )
+                            val usagePct = if (memoryStats.totalRamMb > 0) {
+                                ((memoryStats.usedRamMb * 100L) / memoryStats.totalRamMb).toInt()
+                            } else 0
+                            Text(
+                                text = "RAM: ${memoryStats.usedRamMb}MB / ${memoryStats.totalRamMb}MB (${usagePct}%) • Storage Free: ${String.format(Locale.US, "%.1f", memoryStats.internalStorageFreeGb)}GB",
+                                style = MaterialTheme.typography.bodySmall.copy(
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    fontSize = 11.sp
+                                )
+                            )
+                        }
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(50))
+                                .background(LaunchGreen.copy(alpha = 0.16f))
+                                .border(1.dp, LaunchGreen.copy(alpha = 0.5f), RoundedCornerShape(50))
+                                .padding(horizontal = 8.dp, vertical = 4.dp)
+                        ) {
+                            Text(
+                                text = if (isBgPaused) {
+                                    com.example.util.tr("IDLE SAVER ON", "AHORRO ACTIVO")
+                                } else {
+                                    com.example.util.tr("AUTO-GUARD ACTIVE", "GUARDIA ACTIVA")
+                                },
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    fontWeight = FontWeight.ExtraBold,
+                                    color = LaunchGreen,
+                                    fontSize = 10.sp
+                                )
+                            )
+                        }
+                    }
+
+                    Text(
+                        text = com.example.util.tr(
+                            "• Battery Guard: Automatically pauses 120Hz Choreographer, CPU sysfs polling, and wake locks when minimized with no active game boost or HUD overlay.\n• Memory Guard: Automatically purges internal/external cache, trims bitmap pools, and prunes telemetry buffers on cold launch, system low-memory signals, and Game Boost start.",
+                            "• Guardia de Batería: Pausa automáticamente el muestreo de 120Hz, lecturas de CPU y wake locks al minimizar sin sesión activa.\n• Guardia de Memoria: Limpia caché interna/externa, pools de bitmaps y buffers al iniciar, ante poca memoria y al activar Game Boost."
+                        ),
+                        style = MaterialTheme.typography.bodySmall.copy(
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            fontSize = 11.sp
+                        )
+                    )
+
+                    if (lastTrimResult != null) {
+                        val res = lastTrimResult!!
+                        val cacheKb = (res.cacheClearedBytes / 1024L).coerceAtLeast(0L)
+                        Text(
+                            text = com.example.util.tr(
+                                "Last Cleanup (${res.reason}): ${res.ramFreedMb} MB RAM freed • ${cacheKb} KB cache purged (${res.backgroundAppsTrimmed} bg apps trimmed)",
+                                "Última Limpieza (${res.reason}): ${res.ramFreedMb} MB RAM liberada • ${cacheKb} KB caché purgada (${res.backgroundAppsTrimmed} apps en 2do plano)"
+                            ),
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                color = HubBlue,
+                                fontWeight = FontWeight.Bold
+                            ),
+                            modifier = Modifier.testTag("last_memory_trim_summary_text")
+                        )
+                    }
+
+                    Button(
+                        onClick = {
+                            com.example.util.ConsoleHapticManager.playSelectClick(context)
+                            viewModel.cleanRamAndCacheNow()
+                        },
+                        enabled = !isCleaningMemory,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = HubBlue,
+                            contentColor = Color.Black
+                        ),
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("purge_cache_and_ram_button")
+                    ) {
+                        Text(
+                            text = if (isCleaningMemory) {
+                                com.example.util.tr("Purging Cache & Trimming RAM...", "Purgando Caché y Liberando RAM...")
+                            } else {
+                                com.example.util.tr("Purge Cache & Trim RAM Now", "Purgar Caché y Liberar RAM Ahora")
+                            },
+                            style = MaterialTheme.typography.labelLarge.copy(
+                                fontWeight = FontWeight.ExtraBold,
+                                color = Color.Black
+                            )
+                        )
+                    }
+                }
+            }
+        }
+
         // 2c. Console & Controller Preferences (Auto Big Screen on Landscape + Controller Shortcut Overlay Toggle)
         item {
             CyberCard {
                 SectionTitle(
-                    title = "Console & Controller Experience",
-                    subtitle = "Automatic landscape Big Screen mode & controller shortcut bar visibility"
+                    title = com.example.util.tr("Console & Controller Experience", "Experiencia de Consola y Mando"),
+                    subtitle = com.example.util.tr(
+                        "Automatic landscape Big Screen mode & controller shortcut bar visibility",
+                        "Modo Pantalla Grande automático en horizontal y visibilidad de la barra de atajos"
+                    )
                 )
 
                 Spacer(modifier = Modifier.height(10.dp))
@@ -631,14 +906,17 @@ fun SettingsScreen(
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                text = "Automatic Big Screen on Landscape",
+                                text = com.example.util.tr("Automatic Big Screen on Landscape", "Pantalla Grande Automática en Horizontal"),
                                 style = MaterialTheme.typography.bodyMedium.copy(
                                     fontWeight = FontWeight.Bold,
                                     color = MaterialTheme.colorScheme.onSurface
                                 )
                             )
                             Text(
-                                text = "Automatically switch to Big Screen Mode when turning your phone sideways. Pressing the Controller Home/Guide button always activates Big Screen Mode even if turned off.",
+                                text = com.example.util.tr(
+                                    "Automatically switch to Big Screen Mode when turning your phone sideways. Pressing the Controller Home/Guide button always activates Big Screen Mode even if turned off.",
+                                    "Cambia automáticamente al Modo Pantalla Grande al girar el teléfono horizontalmente. El botón Home del mando siempre activa el Modo Pantalla Grande."
+                                ),
                                 style = MaterialTheme.typography.bodySmall.copy(
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     fontSize = 11.sp
@@ -683,14 +961,17 @@ fun SettingsScreen(
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                text = "Controller Shortcut Overlay Bar",
+                                text = com.example.util.tr("Controller Shortcut Overlay Bar", "Barra de Atajos del Mando"),
                                 style = MaterialTheme.typography.bodyMedium.copy(
                                     fontWeight = FontWeight.Bold,
                                     color = MaterialTheme.colorScheme.onSurface
                                 )
                             )
                             Text(
-                                text = "Show 'A Launch • X Boost • Y Record • L1/R1' legend bar when a controller is connected (enabled by default)",
+                                text = com.example.util.tr(
+                                    "Show '${activeControllerGlyphs.southGlyph} Launch • ${activeControllerGlyphs.westGlyph} Boost • ${activeControllerGlyphs.northGlyph} Record • ${activeControllerGlyphs.leftBumper}/${activeControllerGlyphs.rightBumper}' legend bar when a controller is connected (enabled by default)",
+                                    "Muestra la barra '${activeControllerGlyphs.southGlyph} Iniciar • ${activeControllerGlyphs.westGlyph} Impulsar • ${activeControllerGlyphs.northGlyph} Grabar • ${activeControllerGlyphs.leftBumper}/${activeControllerGlyphs.rightBumper}' cuando hay un mando conectado"
+                                ),
                                 style = MaterialTheme.typography.bodySmall.copy(
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     fontSize = 11.sp
@@ -711,16 +992,89 @@ fun SettingsScreen(
                             modifier = Modifier.testTag("toggle_controller_legend_bar")
                         )
                     }
+
+                    // Toggle 3: Console Controller UI Sounds (Controller Connected Only)
+                    var consoleSoundsEnabled by remember {
+                        mutableStateOf(com.example.util.ConsoleUiSoundManager.isConsoleUiSoundsEnabled(context))
+                    }
+                    var soundsFocused by remember { mutableStateOf(false) }
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .onFocusChanged { soundsFocused = it.isFocused }
+                            .clip(RoundedCornerShape(12.dp))
+                            .border(
+                                width = if (soundsFocused) 2.dp else 1.dp,
+                                color = if (soundsFocused) Color.White else MaterialTheme.colorScheme.outline.copy(alpha = 0.25f),
+                                shape = RoundedCornerShape(12.dp)
+                            )
+                            .clickable {
+                                val next = !consoleSoundsEnabled
+                                consoleSoundsEnabled = next
+                                com.example.util.ConsoleUiSoundManager.setConsoleUiSoundsEnabled(context, next)
+                                if (next) com.example.util.ConsoleHapticManager.playSelectClick(context)
+                            }
+                            .focusable()
+                            .padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = com.example.util.tr(
+                                    "Console Mode UI Sounds (Controller Connected Only)",
+                                    "Sonidos de Interfaz en Modo Consola (Solo con Mando)"
+                                ),
+                                style = MaterialTheme.typography.bodyMedium.copy(
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                            )
+                            Text(
+                                text = com.example.util.tr(
+                                    "Plays tactile console navigation ticks, button confirmation chimes, and launch chords only when a controller is connected",
+                                    "Reproduce sonidos táctiles de navegación, confirmación y lanzamiento solo cuando hay un mando conectado"
+                                ),
+                                style = MaterialTheme.typography.bodySmall.copy(
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    fontSize = 11.sp
+                                )
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Switch(
+                            checked = consoleSoundsEnabled,
+                            onCheckedChange = { enabled ->
+                                consoleSoundsEnabled = enabled
+                                com.example.util.ConsoleUiSoundManager.setConsoleUiSoundsEnabled(context, enabled)
+                                if (enabled) com.example.util.ConsoleHapticManager.playSelectClick(context)
+                            },
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = Color.White,
+                                checkedTrackColor = HubBlue
+                            ),
+                            modifier = Modifier.testTag("toggle_console_controller_ui_sounds")
+                        )
+                    }
                 }
             }
+        }
+
+        // 2d. Controller Layout Selector (PlayStation, Xbox, Nintendo Switch, Auto-Detect)
+        item {
+            com.example.ui.components.ControllerLayoutSelectorCard(
+                selectedMode = controllerLayoutMode,
+                resolvedGlyphs = activeControllerGlyphs,
+                onSelectMode = { viewModel.setControllerLayoutMode(it) }
+            )
         }
 
         // 3. Unified Permissions Center Card
         item {
             CyberCard {
                 SectionTitle(
-                    title = "Permissions & Feature Access",
-                    subtitle = "Review what each permission grants and why features need it"
+                    title = com.example.util.tr("Permissions & Feature Access", "Permisos y Acceso a Funciones"),
+                    subtitle = com.example.util.tr("Review what each permission grants and why features need it", "Revisa qué otorga cada permiso y por qué lo necesitan las funciones")
                 )
 
                 Spacer(modifier = Modifier.height(10.dp))
@@ -739,7 +1093,7 @@ fun SettingsScreen(
                     Icon(imageVector = Icons.Default.Security, contentDescription = null)
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = "Open Unified Permissions Page",
+                        text = com.example.util.tr("Open Unified Permissions Page", "Abrir Página de Permisos Unificada"),
                         fontWeight = FontWeight.Bold
                     )
                 }
@@ -750,8 +1104,8 @@ fun SettingsScreen(
         item {
             CyberCard {
                 SectionTitle(
-                    title = "Tweak Safety Warnings",
-                    subtitle = "Disclosure before applying performance tweaks"
+                    title = com.example.util.tr("Tweak Safety Warnings", "Advertencias de Seguridad de Ajustes"),
+                    subtitle = com.example.util.tr("Disclosure before applying performance tweaks", "Aviso antes de aplicar ajustes de rendimiento")
                 )
 
                 Spacer(modifier = Modifier.height(10.dp))
@@ -763,14 +1117,17 @@ fun SettingsScreen(
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = "Show Warnings Before Activating",
+                            text = com.example.util.tr("Show Warnings Before Activating", "Mostrar Advertencias Antes de Activar"),
                             style = MaterialTheme.typography.bodyMedium.copy(
                                 fontWeight = FontWeight.SemiBold,
                                 color = MaterialTheme.colorScheme.onSurface
                             )
                         )
                         Text(
-                            text = "Alerts about online game anti-cheat notices, heat buildup, and animation changes",
+                            text = com.example.util.tr(
+                                "Alerts about online game anti-cheat notices, heat buildup, and animation changes",
+                                "Alertas sobre avisos antitrampas en juegos en línea, temperatura y cambios de animación"
+                            ),
                             style = MaterialTheme.typography.bodySmall.copy(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 fontSize = 11.sp
@@ -791,65 +1148,51 @@ fun SettingsScreen(
             }
         }
 
-        // 5. System & Hardware Shortcuts
+        // 5. G Max Gaming Hub Version 1.0 Launch Badge
         item {
             CyberCard {
-                SectionTitle(
-                    title = "Device System Shortcuts",
-                    subtitle = "Direct access to OS developer and display controls"
-                )
-
-                Spacer(modifier = Modifier.height(10.dp))
-
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedButton(
-                        onClick = { SystemSettingsHelper.openDeveloperOptions(context) },
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(10.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.DeveloperMode,
-                            contentDescription = null,
-                            tint = RecorderCoral
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("settings_app_version_card"),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = "Open Developer Options",
-                            color = MaterialTheme.colorScheme.onSurface
+                            text = "G Max Gaming Hub",
+                            style = MaterialTheme.typography.titleSmall.copy(
+                                fontWeight = FontWeight.ExtraBold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        )
+                        Text(
+                            text = com.example.util.tr(
+                                "Automatic Language Sync • Device Locale Active",
+                                "Sincronización Automática de Idioma • Idioma del Dispositivo Activo"
+                            ),
+                            style = MaterialTheme.typography.bodySmall.copy(
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                fontSize = 11.sp
+                            )
                         )
                     }
-
-                    OutlinedButton(
-                        onClick = { SystemSettingsHelper.openDisplaySettings(context) },
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(10.dp)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(50))
+                            .background(LaunchGreen.copy(alpha = 0.16f))
+                            .border(1.dp, LaunchGreen.copy(alpha = 0.45f), RoundedCornerShape(50))
+                            .padding(horizontal = 12.dp, vertical = 6.dp)
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.Refresh,
-                            contentDescription = null,
-                            tint = HubBlue
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = "Open Display & 120Hz Refresh Settings",
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                    }
-
-                    OutlinedButton(
-                        onClick = { SystemSettingsHelper.openOverlayPermissionSettings(context) },
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(10.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Layers,
-                            contentDescription = null,
-                            tint = LaunchGreen
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = "Screen Overlay (HUD) Permission",
-                            color = MaterialTheme.colorScheme.onSurface
+                            text = com.example.util.tr("Version 1.0", "Versión 1.0"),
+                            style = MaterialTheme.typography.labelMedium.copy(
+                                fontWeight = FontWeight.ExtraBold,
+                                color = LaunchGreen
+                            ),
+                            maxLines = 1,
+                            softWrap = false
                         )
                     }
                 }

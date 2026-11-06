@@ -5,6 +5,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.yield
 import kotlin.math.sqrt
 
 class BenchmarkEngine {
@@ -26,16 +27,20 @@ class BenchmarkEngine {
         while (isActive && (System.currentTimeMillis() - startTime) < totalMs) {
             val windowStart = System.currentTimeMillis()
             var opsInWindow = 0L
+            var chunkCounter = 0
 
-            // Run heavy floating point & matrix calculation across cores
+            // Run heavy floating point & matrix calculation across cores with cooperative yielding
             val windowDurationMs = 1000L
             while (System.currentTimeMillis() - windowStart < windowDurationMs && isActive) {
-                // Compute mathematical stress chunk
                 var acc = 1.0
                 for (i in 1..2500) {
                     acc += sqrt(i.toDouble()) * 0.9999 + (i % 7)
                 }
                 opsInWindow += 2500
+                chunkCounter++
+                if (chunkCounter % 64 == 0) {
+                    yield()
+                }
             }
 
             val currentOpsPerSec = opsInWindow.toDouble() / (windowDurationMs / 1000.0)

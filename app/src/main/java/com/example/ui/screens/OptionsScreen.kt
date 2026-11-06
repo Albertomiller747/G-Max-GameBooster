@@ -119,36 +119,35 @@ fun OptionsScreen(
     var pendingOptionToActivate by remember { mutableStateOf<PerformanceOption?>(null) }
     val boostFeedback by viewModel.boostFeedback.collectAsState()
     val overlaySettings by viewModel.overlaySettings.collectAsState()
+    val controllerOverlayConfig by viewModel.controllerOverlayConfig.collectAsState()
+    val controllerHealthState by viewModel.controllerHealthState.collectAsState()
+    val controllerLayoutMode by viewModel.controllerLayoutMode.collectAsState()
+    val activeControllerGlyphs by viewModel.activeControllerGlyphs.collectAsState()
     var showAntiCheatNotice by remember { mutableStateOf(false) }
     var showDevModeTutorial by remember { mutableStateOf(false) }
 
     val requestActivateOption: (PerformanceOption) -> Unit = { option ->
-        val isApplied = appliedOptionIds.contains(option.id)
-        if (option.actionType == OptionActionType.DIRECT_SECURE_SETTINGS_ANIMATIONS ||
-            option.actionType == OptionActionType.DIRECT_SECURE_SETTINGS_DNS
-        ) {
-            if (!com.example.util.SecureSettingsManager.canWriteSecureSettings(context)) {
-                showDevModeTutorial = true
+        val runOptionActivation: () -> Unit = {
+            if (option.id == "tweak_crosshair" || option.actionType == OptionActionType.DIRECT_CROSSHAIR_OVERLAY) {
+                if (!overlaySettings.antiCheatNoticeAcknowledged && !overlaySettings.isEnabled) {
+                    showAntiCheatNotice = true
+                } else {
+                    handleOptionClick(context, option, viewModel) {
+                        selectedOptionForModal = option
+                    }
+                }
             } else {
                 handleOptionClick(context, option, viewModel) {
                     selectedOptionForModal = option
                 }
             }
-        } else if (option.id == "tweak_crosshair" || option.actionType == OptionActionType.DIRECT_CROSSHAIR_OVERLAY) {
-            if (!overlaySettings.antiCheatNoticeAcknowledged) {
-                showAntiCheatNotice = true
-            } else {
-                handleOptionClick(context, option, viewModel) {
-                    selectedOptionForModal = option
-                }
-            }
-        } else if (isApplied || suppressActivationWarning) {
-            handleOptionClick(context, option, viewModel) {
-                selectedOptionForModal = option
-            }
-        } else {
-            pendingOptionToActivate = option
         }
+        com.example.util.AdMobManager.maybeTriggerPostActionAd(
+            context = context,
+            actionLabelEn = "Apply Tweaks",
+            actionLabelEs = "Aplicar Ajustes",
+            onAdFinished = runOptionActivation
+        )
     }
 
     val featuredOptions = remember(context) { PerformanceOptionsRepository.getFeaturedOptions(context) }
@@ -171,50 +170,58 @@ fun OptionsScreen(
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(top = 12.dp, bottom = 100.dp)
         ) {
-            // 1. Search Bar following MaterialTheme.colorScheme
+            // 1. Search Bar following MaterialTheme.colorScheme (sized so placeholder is never cut off)
             item {
                 Box(modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)) {
-                    Row(
+                    OutlinedTextField(
+                        value = searchQuery,
+                        onValueChange = { searchQuery = it },
+                        leadingIcon = {
+                            Icon(
+                                imageVector = Icons.Default.Search,
+                                contentDescription = "Search",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        },
+                        trailingIcon = if (searchQuery.isNotEmpty()) {
+                            {
+                                IconButton(
+                                    onClick = { searchQuery = "" },
+                                    modifier = Modifier.size(28.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Close,
+                                        contentDescription = "Clear search",
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+                            }
+                        } else null,
+                        placeholder = {
+                            Text(
+                                text = com.example.util.tr("Search Options & Performance Tweaks", "Buscar Opciones y Ajustes de Rendimiento"),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                fontSize = 13.5.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        },
+                        singleLine = true,
+                        shape = RoundedCornerShape(24.dp),
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(48.dp)
-                            .clip(RoundedCornerShape(24.dp))
-                            .background(MaterialTheme.colorScheme.surface)
-                            .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.45f), RoundedCornerShape(24.dp))
-                            .padding(horizontal = 16.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Search,
-                            contentDescription = "Search",
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(20.dp)
+                            .testTag("search_options_field"),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedContainerColor = MaterialTheme.colorScheme.surface,
+                            unfocusedContainerColor = MaterialTheme.colorScheme.surface,
+                            focusedBorderColor = HubBlue,
+                            unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.45f),
+                            focusedTextColor = MaterialTheme.colorScheme.onSurface,
+                            unfocusedTextColor = MaterialTheme.colorScheme.onSurface
                         )
-                        Spacer(modifier = Modifier.width(10.dp))
-                        OutlinedTextField(
-                            value = searchQuery,
-                            onValueChange = { searchQuery = it },
-                            placeholder = {
-                                Text(
-                                    text = "Search Options & Performance Tweaks",
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    fontSize = 14.sp
-                                )
-                            },
-                            singleLine = true,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .testTag("search_options_field"),
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedContainerColor = Color.Transparent,
-                                unfocusedContainerColor = Color.Transparent,
-                                focusedBorderColor = Color.Transparent,
-                                unfocusedBorderColor = Color.Transparent,
-                                focusedTextColor = MaterialTheme.colorScheme.onSurface,
-                                unfocusedTextColor = MaterialTheme.colorScheme.onSurface
-                            )
-                        )
-                    }
+                    )
                 }
             }
 
@@ -315,7 +322,7 @@ fun OptionsScreen(
                 item {
                     Spacer(modifier = Modifier.height(16.dp))
                     Text(
-                        text = "Search Results (${matches.size})",
+                        text = com.example.util.tr("Search Results (${matches.size})", "Resultados de Búsqueda (${matches.size})"),
                         style = MaterialTheme.typography.titleMedium.copy(
                             fontWeight = FontWeight.Bold,
                             color = MaterialTheme.colorScheme.onBackground
@@ -341,25 +348,11 @@ fun OptionsScreen(
                     }
                 }
             } else {
-                // Dedicated Tactical Crosshair Customizer Card
-                item {
-                    Spacer(modifier = Modifier.height(16.dp))
-                    TacticalCrosshairCard(
-                        overlaySettings = overlaySettings,
-                        onToggle = { enabled -> viewModel.setCrosshairEnabled(context, enabled) },
-                        onSelectStyle = { style -> viewModel.updateCrosshairStyle(style) },
-                        onSelectColor = { colorVal -> viewModel.updateCrosshairColor(colorVal) },
-                        onSelectSize = { size -> viewModel.updateCrosshairSize(size) },
-                        onShowAntiCheatNotice = { showAntiCheatNotice = true },
-                        modifier = Modifier.padding(horizontal = 16.dp)
-                    )
-                }
-
                 // 3. Section: Most Popular Tweaks
                 item {
                     Spacer(modifier = Modifier.height(20.dp))
                     Text(
-                        text = "Most Popular Tweaks",
+                        text = com.example.util.tr("Most Popular Tweaks", "Ajustes Más Populares"),
                         style = MaterialTheme.typography.titleLarge.copy(
                             fontWeight = FontWeight.Bold,
                             color = MaterialTheme.colorScheme.onBackground,
@@ -390,7 +383,7 @@ fun OptionsScreen(
                 item {
                     Spacer(modifier = Modifier.height(24.dp))
                     Text(
-                        text = "Hardware & Kernel Governors",
+                        text = com.example.util.tr("Hardware & Kernel Governors", "Hardware y Gobernadores de Kernel"),
                         style = MaterialTheme.typography.titleLarge.copy(
                             fontWeight = FontWeight.Bold,
                             color = MaterialTheme.colorScheme.onBackground,
@@ -421,7 +414,7 @@ fun OptionsScreen(
                 item {
                     Spacer(modifier = Modifier.height(24.dp))
                     Text(
-                        text = "System Latency & Compilers",
+                        text = com.example.util.tr("System Latency & Compilers", "Latencia del Sistema y Compiladores"),
                         style = MaterialTheme.typography.titleLarge.copy(
                             fontWeight = FontWeight.Bold,
                             color = MaterialTheme.colorScheme.onBackground,
@@ -452,6 +445,17 @@ fun OptionsScreen(
                         Divider(color = dividerColor, thickness = 0.8.dp)
                     }
                 }
+
+                // 6. Native Ad Card embedded in the Tweaks scrollable list with 32dp top buffer
+                item {
+                    Box(modifier = Modifier.padding(horizontal = 16.dp)) {
+                        com.example.ui.components.GMaxNativeAdCard(
+                            placementTag = "tweaks_bottom",
+                            topBuffer = 32.dp,
+                            bottomBuffer = 24.dp
+                        )
+                    }
+                }
             }
         }
 
@@ -476,14 +480,11 @@ fun OptionsScreen(
                     option = option,
                     isApplied = isApplied,
                     onToggleApplied = {
-                        if (!isApplied) {
-                            requestActivateOption(option)
-                        } else {
-                            viewModel.toggleOptionApplied(option.id)
-                        }
+                        requestActivateOption(option)
                     },
                     onOpenSettings = {
-                        openSystemSetting(context, option.actionType)
+                        requestActivateOption(option)
+                        selectedOptionForModal = null
                     },
                     onDismiss = { selectedOptionForModal = null },
                     onOpenDevTutorial = {
@@ -963,16 +964,19 @@ fun OptionDetailModal(
         if (option.actionType != OptionActionType.ADB_ONLY_COMMAND) {
             Button(
                 onClick = onOpenSettings,
-                colors = ButtonDefaults.buttonColors(containerColor = HubBlue, contentColor = Color.White),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = if (isApplied) LaunchGreen else HubBlue,
+                    contentColor = Color.White
+                ),
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(48.dp),
                 shape = RoundedCornerShape(12.dp)
             ) {
-                Icon(imageVector = Icons.Default.OpenInNew, contentDescription = null, modifier = Modifier.size(18.dp))
+                Icon(imageVector = Icons.Default.Bolt, contentDescription = null, modifier = Modifier.size(18.dp))
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
-                    text = "Open Phone Setting Now",
+                    text = if (isApplied) "Deactivate Tweak Now" else "Apply Tweak Now",
                     fontWeight = FontWeight.Bold,
                     fontSize = 14.sp
                 )

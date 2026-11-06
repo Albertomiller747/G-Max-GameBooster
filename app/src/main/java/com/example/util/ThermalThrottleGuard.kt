@@ -44,6 +44,7 @@ class ThermalThrottleGuard(private val context: Context) {
     private var thermalListener: PowerManager.OnThermalStatusChangedListener? = null
     private var baselineFps = 60
     private var lastObservedFps = 60
+    private var isRegistered = false
 
     private val batteryReceiver = object : BroadcastReceiver() {
         override fun onReceive(c: Context?, intent: Intent?) {
@@ -60,10 +61,20 @@ class ThermalThrottleGuard(private val context: Context) {
     }
 
     init {
+        start()
+    }
+
+    fun start() {
+        if (isRegistered) return
+        isRegistered = true
         // Register genuine battery broadcast receiver for hardware temperature
         try {
             val filter = IntentFilter(Intent.ACTION_BATTERY_CHANGED)
-            val stickyIntent = context.registerReceiver(batteryReceiver, filter)
+            val stickyIntent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                context.registerReceiver(batteryReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
+            } else {
+                context.registerReceiver(batteryReceiver, filter)
+            }
             stickyIntent?.let {
                 val rawTemp = it.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, -1)
                 if (rawTemp > 0) {
@@ -80,8 +91,10 @@ class ThermalThrottleGuard(private val context: Context) {
             val currentStatus = powerManager.currentThermalStatus
             handleThermalStatusChanged(currentStatus)
 
-            thermalListener = PowerManager.OnThermalStatusChangedListener { status ->
-                handleThermalStatusChanged(status)
+            if (thermalListener == null) {
+                thermalListener = PowerManager.OnThermalStatusChangedListener { status ->
+                    handleThermalStatusChanged(status)
+                }
             }
             try {
                 powerManager.addThermalStatusListener(context.mainExecutor, thermalListener!!)
@@ -205,7 +218,9 @@ class ThermalThrottleGuard(private val context: Context) {
         _state.value = _state.value.copy(activeThrottleAlert = null)
     }
 
-    fun destroy() {
+    fun pause() {
+        if (!isRegistered) return
+        isRegistered = false
         try {
             context.unregisterReceiver(batteryReceiver)
         } catch (_: Exception) {}
@@ -215,5 +230,9 @@ class ThermalThrottleGuard(private val context: Context) {
                 powerManager.removeThermalStatusListener(thermalListener!!)
             } catch (_: Exception) {}
         }
+    }
+
+    fun destroy() {
+        pause()
     }
 }

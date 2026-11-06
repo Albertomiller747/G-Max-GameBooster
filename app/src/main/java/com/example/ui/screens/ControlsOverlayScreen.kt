@@ -90,6 +90,10 @@ fun ControlsOverlayScreen(
     val overlaySettings by viewModel.overlaySettings.collectAsState()
     val overlayConfig by viewModel.overlayConfig.collectAsState()
     val gamepads by viewModel.gamepads.collectAsState()
+    val controllerLayoutMode by viewModel.controllerLayoutMode.collectAsState()
+    val activeControllerGlyphs by viewModel.activeControllerGlyphs.collectAsState()
+    val controllerOverlayConfig by viewModel.controllerOverlayConfig.collectAsState()
+    val controllerHealthState by viewModel.controllerHealthState.collectAsState()
     var showAntiCheatNotice by remember { mutableStateOf(false) }
 
     if (showAntiCheatNotice) {
@@ -301,6 +305,51 @@ fun ControlsOverlayScreen(
                     )
                 )
             }
+        }
+
+        // Real-Time Controller Input Screen Overlay & Layout Selector
+        item {
+            val proUnlockUntilMs by com.example.util.AdMobManager.proControllerUnlockUntilMs.collectAsState()
+            val isProUnlocked = proUnlockUntilMs > System.currentTimeMillis() || com.example.util.AdMobManager.isProControllerUnlocked()
+            com.example.ui.components.ControllerScreenOverlayCard(
+                config = controllerOverlayConfig,
+                controllerState = controllerHealthState,
+                glyphs = activeControllerGlyphs,
+                selectedLayoutMode = controllerLayoutMode,
+                onSelectLayoutMode = { viewModel.setControllerLayoutMode(it) },
+                onSelectStickTrackingMode = { viewModel.setControllerOverlayStickTrackingMode(it) },
+                onToggleEnabled = { enableRequested ->
+                    if (enableRequested && !com.example.util.ControllerHealthManager.isWiredControllerConnected(context)) {
+                        viewModel.setControllerOverlayEnabled(false)
+                        viewModel.triggerWiredControllerRequiredPopup()
+                    } else if (enableRequested && !isProUnlocked) {
+                        com.example.util.AdMobManager.requestProControllerRewardedUnlock(context) {
+                            viewModel.setControllerOverlayEnabled(true)
+                        }
+                    } else {
+                        viewModel.setControllerOverlayEnabled(enableRequested)
+                    }
+                },
+                onToggleAutoScale = { viewModel.setControllerOverlayAutoScale(it) },
+                onScaleFactorChange = { viewModel.setControllerOverlayScaleFactor(it) },
+                onOpacityChange = { viewModel.setControllerOverlayOpacity(it) },
+                onToggleLockTouch = { viewModel.setControllerOverlayLockTouch(it) },
+                onToggleDisableSpeakerAudio = { viewModel.setControllerOverlayDisableSpeakerAudio(it) },
+                onHighlightColorChange = { viewModel.setControllerOverlayHighlightColor(it) },
+                onTriggerDemoPulse = { viewModel.triggerControllerOverlayDemoPulse() },
+                onSimulateButtonToggle = { btnKey ->
+                    val currentlyPressed = controllerHealthState.pressedButtons.contains(btnKey)
+                    viewModel.controllerHealthManager.setSimulatedButtonState(btnKey, !currentlyPressed)
+                }
+            )
+        }
+
+        item {
+            com.example.ui.components.ControllerLayoutSelectorCard(
+                selectedMode = controllerLayoutMode,
+                resolvedGlyphs = activeControllerGlyphs,
+                onSelectMode = { viewModel.setControllerLayoutMode(it) }
+            )
         }
 
         // Gamepad Detection & Controller Mapping Guide (Section 8)

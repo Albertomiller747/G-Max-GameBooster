@@ -286,59 +286,9 @@
         "updatedAt"
       ]
     },
-    "LeaderboardEntry": {
-      "title": "LeaderboardEntry",
-      "description": "Public worldwide leaderboard entry displaying only profile image, username, country flag, and Gamerscore without exposing private PII.",
-      "type": "object",
-      "properties": {
-        "userId": {
-          "type": "string",
-          "description": "The authenticated Firebase user UID owning this leaderboard entry."
-        },
-        "username": {
-          "type": "string",
-          "description": "Unique gamer username handle."
-        },
-        "photoUrl": {
-          "type": "string",
-          "description": "User profile picture URL or cached path."
-        },
-        "countryCode": {
-          "type": "string",
-          "description": "Selected ISO 3166-1 alpha-2 country code."
-        },
-        "countryName": {
-          "type": "string",
-          "description": "Selected country display name."
-        },
-        "gamerscore": {
-          "type": "integer",
-          "description": "Worldwide Gamerscore ranking points."
-        },
-        "isVerifiedDeveloper": {
-          "type": "boolean",
-          "description": "True exclusively for the verified developer account Albertomiller747@gmail.com."
-        },
-        "updatedAt": {
-          "type": "string",
-          "format": "date-time",
-          "description": "Server timestamp when the leaderboard entry was last updated."
-        }
-      },
-      "required": [
-        "userId",
-        "username",
-        "photoUrl",
-        "countryCode",
-        "countryName",
-        "gamerscore",
-        "isVerifiedDeveloper",
-        "updatedAt"
-      ]
-    },
     "UsernameClaim": {
       "title": "UsernameClaim",
-      "description": "Enforces global username uniqueness across the worldwide leaderboard.",
+      "description": "Enforces global username uniqueness and stores public gamer card fields for direct @username profile lookup.",
       "type": "object",
       "properties": {
         "userId": {
@@ -349,16 +299,155 @@
           "type": "string",
           "description": "Case-preserved username (3 to 20 alphanumeric/underscore characters)."
         },
+        "displayName": {
+          "type": "string",
+          "description": "Public display name for @username profile lookup."
+        },
+        "bio": {
+          "type": "string",
+          "description": "Public player bio for @username profile lookup."
+        },
+        "photoUrl": {
+          "type": "string",
+          "description": "Public profile avatar URL for @username profile lookup."
+        },
+        "bannerUrl": {
+          "type": "string",
+          "description": "Public profile banner preset or URL for @username profile lookup."
+        },
+        "countryCode": {
+          "type": "string",
+          "description": "ISO 3166-1 alpha-2 country code."
+        },
+        "countryName": {
+          "type": "string",
+          "description": "Country display name."
+        },
+        "gamerscore": {
+          "type": "integer",
+          "description": "Player Gamerscore points."
+        },
+        "mostPlayedGameName": {
+          "type": "string",
+          "description": "Most played game title."
+        },
+        "mostPlayedMinutes": {
+          "type": "integer",
+          "description": "Minutes played in the most played game."
+        },
+        "totalPlayTimeMinutes": {
+          "type": "integer",
+          "description": "Total cumulative gaming minutes."
+        },
+        "selectedTags": {
+          "type": "array",
+          "description": "Up to 4 premade profile tag IDs."
+        },
+        "isVerifiedDeveloper": {
+          "type": "boolean",
+          "description": "True exclusively for the verified developer account Albertomiller747@gmail.com."
+        },
         "updatedAt": {
           "type": "string",
           "format": "date-time",
-          "description": "Server timestamp when the username was claimed or updated."
+          "description": "Server timestamp when the username claim was created or updated."
         }
       },
       "required": [
         "userId",
         "username",
         "updatedAt"
+      ]
+    },
+    "TopGearProduct": {
+      "title": "TopGearProduct",
+      "description": "Curated affiliate mobile gaming gear item for the Top Gear tab, remotely editable without an app update.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique product identifier."
+        },
+        "category": {
+          "type": "string",
+          "description": "Category chip label (Cooling, Controllers, Finger Sleeves, Power, Audio, Accessories)."
+        },
+        "group": {
+          "type": "string",
+          "description": "Product group title (e.g., Phone Coolers, Wireless Console & PC Controllers)."
+        },
+        "tier": {
+          "type": "string",
+          "description": "Product tier (budget, value, or premium)."
+        },
+        "badge": {
+          "type": "string",
+          "description": "Optional badge label (e.g., Best Pick, Editor's Pick)."
+        },
+        "name": {
+          "type": "string",
+          "description": "Curated short product name."
+        },
+        "image_url": {
+          "type": "string",
+          "description": "Remote product image URL (or blank to use Amazon Creators API / placeholder)."
+        },
+        "benefit_line": {
+          "type": "string",
+          "description": "One-line core benefit summary."
+        },
+        "benefits": {
+          "type": "array",
+          "description": "Up to 3 short benefit bullet strings."
+        },
+        "price_level": {
+          "type": "string",
+          "description": "Price level symbol ($, $$, or $$$)."
+        },
+        "best_for": {
+          "type": "string",
+          "description": "Who this product is best suited for."
+        },
+        "trade_off": {
+          "type": "string",
+          "description": "Honest trade-off or limitation."
+        },
+        "pairs_with": {
+          "type": "string",
+          "description": "Optional GMAX feature pairing label."
+        },
+        "affiliate_url": {
+          "type": "string",
+          "description": "Amazon affiliate short URL opened in the external browser."
+        },
+        "merchant": {
+          "type": "string",
+          "description": "Merchant name (Amazon)."
+        },
+        "active": {
+          "type": "boolean",
+          "description": "Whether this product is active and visible."
+        },
+        "last_updated": {
+          "type": "string",
+          "description": "ISO date string when this product entry was last updated."
+        }
+      },
+      "required": [
+        "id",
+        "category",
+        "group",
+        "tier",
+        "name",
+        "benefit_line",
+        "benefits",
+        "price_level",
+        "best_for",
+        "trade_off",
+        "affiliate_url",
+        "merchant",
+        "active",
+        "last_updated"
       ]
     }
   },
@@ -369,17 +458,17 @@
       },
       "description": "Stores each authenticated user's personal profile, most played game summary, date of birth, and synchronized app/boost/HUD/controller/recorder settings."
     },
-    "/leaderboard/{userId}": {
-      "schema": {
-        "$ref": "#/entities/LeaderboardEntry"
-      },
-      "description": "Public worldwide leaderboard entries sorted by gamerscore descending."
-    },
     "/usernames/{usernameLower}": {
       "schema": {
         "$ref": "#/entities/UsernameClaim"
       },
-      "description": "Global registry of claimed lowercase usernames to enforce unique handles."
+      "description": "Global registry of claimed lowercase usernames to enforce unique handles and support direct @username external profile lookup."
+    },
+    "/top_gear_products/{productId}": {
+      "schema": {
+        "$ref": "#/entities/TopGearProduct"
+      },
+      "description": "Remotely configurable catalog of curated Top Gear affiliate products readable by signed-in users and writable exclusively by the verified developer."
     }
   }
 }

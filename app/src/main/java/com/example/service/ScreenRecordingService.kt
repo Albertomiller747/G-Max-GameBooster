@@ -326,7 +326,7 @@ class ScreenRecordingService : Service() {
                 val resultCode = intent.getIntExtra(EXTRA_RESULT_CODE, 0)
                 @Suppress("DEPRECATION")
                 val resultData = intent.getParcelableExtra<Intent>(EXTRA_RESULT_DATA)
-                val settings = ScreenRecordingManager.loadSettings(this)
+                val settings = ScreenRecordingManager.getEffectiveRecordingSettings(this)
                 val modeName = intent.getStringExtra(EXTRA_AUDIO_SOURCE_MODE)
                 val resolvedMode = if (!modeName.isNullOrBlank()) {
                     try {
@@ -472,18 +472,64 @@ class ScreenRecordingService : Service() {
         }
     }
 
+    private fun resolveAlignedRecordingDimensions(
+        targetShortEdge: Int,
+        targetLongEdge: Int
+    ): Pair<Int, Int> {
+        val wm = getSystemService(Context.WINDOW_SERVICE) as? android.view.WindowManager
+        val dm = resources.displayMetrics
+        var rawW = dm.widthPixels.coerceAtLeast(720)
+        var rawH = dm.heightPixels.coerceAtLeast(720)
+
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && wm != null) {
+                val bounds = wm.currentWindowMetrics.bounds
+                if (bounds.width() > 0 && bounds.height() > 0) {
+                    rawW = bounds.width()
+                    rawH = bounds.height()
+                }
+            } else if (wm != null) {
+                val realMetrics = android.util.DisplayMetrics()
+                @Suppress("DEPRECATION")
+                wm.defaultDisplay?.getRealMetrics(realMetrics)
+                if (realMetrics.widthPixels > 0 && realMetrics.heightPixels > 0) {
+                    rawW = realMetrics.widthPixels
+                    rawH = realMetrics.heightPixels
+                }
+            }
+        } catch (_: Exception) {}
+
+        val isPortrait = rawW < rawH
+        val screenShort = minOf(rawW, rawH).coerceAtLeast(1)
+        val screenLong = maxOf(rawW, rawH).coerceAtLeast(1)
+        val screenAspect = screenLong.toDouble() / screenShort.toDouble()
+
+        val desiredShort = minOf(targetShortEdge, targetLongEdge).coerceIn(480, screenShort)
+        // Align both dimensions to multiples of 16 so H.264 macroblocks never produce black/green corner padding
+        val alignedShort = ((desiredShort + 8) / 16 * 16).coerceAtLeast(480)
+        val computedLong = (alignedShort * screenAspect).toInt()
+        val alignedLong = ((computedLong + 8) / 16 * 16).coerceAtLeast(alignedShort)
+
+        return if (isPortrait) {
+            alignedShort to alignedLong
+        } else {
+            alignedLong to alignedShort
+        }
+    }
+
     private fun startRecording(resultCode: Int, resultData: Intent, audioMode: AudioSourceMode) {
         if (_isRecording.value) return
 
         try {
-            val settings = ScreenRecordingManager.loadSettings(this)
-            currentWidth = settings.width
-            currentHeight = settings.height
+            val settings = ScreenRecordingManager.getEffectiveRecordingSettings(this)
+            val (alignedW, alignedH) = resolveAlignedRecordingDimensions(
+                targetShortEdge = minOf(settings.width, settings.height),
+                targetLongEdge = maxOf(settings.width, settings.height)
+            )
+            currentWidth = alignedW
+            currentHeight = alignedH
             currentFps = settings.fps
             currentBitrate = settings.bitrateMbps * 1000 * 1000
-
-            if (currentWidth % 2 != 0) currentWidth -= 1
-            if (currentHeight % 2 != 0) currentHeight -= 1
 
             val hasAudioPerm = ContextCompat.checkSelfPermission(
                 this,
@@ -715,13 +761,18 @@ class ScreenRecordingService : Service() {
         var audioTrackIndex = -1
         var muxerStarted = false
 
-        val pcmReadBytes = 4096
+        val bytesPerFrame = 2 * AUDIO_CHANNEL_COUNT // 4 bytes per stereo 16-bit PCM frame
+        val pcmChunkFrames = 1024 // ~23.22 ms per AAC frame @ 44.1 kHz
+        val pcmReadBytes = pcmChunkFrames * bytesPerFrame // 4096 bytes
         val internalBytes = ByteArray(pcmReadBytes)
         val micBytes = ByteArray(pcmReadBytes)
         val mixedBytes = ByteArray(pcmReadBytes)
 
         val startNs = System.nanoTime()
         var totalAudioFramesWritten = 0L
+        var firstVideoCodecPtsUs = -1L
+        var lastVideoMuxPtsUs = 0L
+        var lastAudioMuxPtsUs = 0L
 
         val pendingVideoSamples = mutableListOf<Pair<ByteBuffer, MediaCodec.BufferInfo>>()
         val pendingAudioSamples = mutableListOf<Pair<ByteBuffer, MediaCodec.BufferInfo>>()
@@ -743,58 +794,87 @@ class ScreenRecordingService : Service() {
 
         try {
             while (!isStoppingMuxer.get()) {
-                // A. Read PCM audio from Internal AudioPlaybackCapture (+ optional Mic) and feed to AAC encoder
-                val inIndex = try { aEncoder.dequeueInputBuffer(2_000) } catch (_: Exception) { -1 }
-                if (inIndex >= 0) {
-                    val inBuf = aEncoder.getInputBuffer(inIndex)
-                    if (inBuf != null) {
-                        inBuf.clear()
-                        val maxToRead = minOf(inBuf.remaining(), pcmReadBytes)
-                        val readInternal = try {
-                            internalRec.read(internalBytes, 0, maxToRead)
-                        } catch (_: Exception) { 0 }
+                val elapsedWallUs = ((System.nanoTime() - startNs) / 1000L).coerceAtLeast(0L)
+                val targetAudioFramesByNow = (elapsedWallUs * AUDIO_SAMPLE_RATE) / 1_000_000L
 
-                        val bytesToEncode = if (readInternal > 0) readInternal else maxToRead
-                        if (readInternal <= 0) {
-                            java.util.Arrays.fill(internalBytes, 0, bytesToEncode, 0.toByte())
-                        }
+                // A. Only feed an audio chunk when wall-clock time has advanced by at least one chunk
+                // This prevents silence buffers from racing ahead of real time and desyncing audio/video speed!
+                if (totalAudioFramesWritten <= targetAudioFramesByNow) {
+                    val inIndex = try { aEncoder.dequeueInputBuffer(1_500) } catch (_: Exception) { -1 }
+                    if (inIndex >= 0) {
+                        val inBuf = aEncoder.getInputBuffer(inIndex)
+                        if (inBuf != null) {
+                            inBuf.clear()
+                            val maxToRead = minOf(inBuf.remaining(), pcmReadBytes)
+                            val readInternal = try {
+                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                                    internalRec.read(internalBytes, 0, maxToRead, AudioRecord.READ_NON_BLOCKING)
+                                } else {
+                                    internalRec.read(internalBytes, 0, maxToRead)
+                                }
+                            } catch (_: Exception) { 0 }
 
-                        val readMic = if (micRec != null) {
-                            try { micRec.read(micBytes, 0, bytesToEncode) } catch (_: Exception) { 0 }
-                        } else {
-                            0
-                        }
-
-                        val sourceArray = if (readMic > 0) {
-                            // Mix 16-bit little-endian stereo PCM samples (Internal Gameplay + Voice Mic)
-                            val sampleCount = bytesToEncode / 2
-                            val intShortBuf = ByteBuffer.wrap(internalBytes, 0, bytesToEncode)
-                                .order(ByteOrder.LITTLE_ENDIAN)
-                                .asShortBuffer()
-                            val micShortBuf = ByteBuffer.wrap(micBytes, 0, bytesToEncode)
-                                .order(ByteOrder.LITTLE_ENDIAN)
-                                .asShortBuffer()
-                            val outShortBuf = ByteBuffer.wrap(mixedBytes, 0, bytesToEncode)
-                                .order(ByteOrder.LITTLE_ENDIAN)
-                                .asShortBuffer()
-
-                            for (i in 0 until sampleCount) {
-                                val sInt = intShortBuf.get(i).toInt()
-                                val sMic = if (i * 2 < readMic) micShortBuf.get(i).toInt() else 0
-                                val mixed = (sInt + sMic).coerceIn(Short.MIN_VALUE.toInt(), Short.MAX_VALUE.toInt())
-                                outShortBuf.put(i, mixed.toShort())
+                            val bytesToEncode = if (readInternal > 0) {
+                                // Align to stereo frame boundary (4 bytes)
+                                (readInternal / bytesPerFrame) * bytesPerFrame
+                            } else {
+                                maxToRead
                             }
-                            mixedBytes
-                        } else {
-                            internalBytes
-                        }
 
-                        inBuf.put(sourceArray, 0, bytesToEncode)
-                        val ptsUs = (totalAudioFramesWritten * 1_000_000L) / AUDIO_SAMPLE_RATE
-                        totalAudioFramesWritten += (bytesToEncode / (2 * AUDIO_CHANNEL_COUNT))
-                        try {
-                            aEncoder.queueInputBuffer(inIndex, 0, bytesToEncode, ptsUs, 0)
-                        } catch (_: Exception) {}
+                            if (readInternal <= 0 && bytesToEncode > 0) {
+                                java.util.Arrays.fill(internalBytes, 0, bytesToEncode, 0.toByte())
+                            }
+
+                            val readMic = if (micRec != null && bytesToEncode > 0) {
+                                try {
+                                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                                        micRec.read(micBytes, 0, bytesToEncode, AudioRecord.READ_NON_BLOCKING)
+                                    } else {
+                                        micRec.read(micBytes, 0, bytesToEncode)
+                                    }
+                                } catch (_: Exception) { 0 }
+                            } else {
+                                0
+                            }
+
+                            if (bytesToEncode > 0) {
+                                val sourceArray = if (readMic > 0) {
+                                    val sampleCount = bytesToEncode / 2
+                                    val intShortBuf = ByteBuffer.wrap(internalBytes, 0, bytesToEncode)
+                                        .order(ByteOrder.LITTLE_ENDIAN)
+                                        .asShortBuffer()
+                                    val micShortBuf = ByteBuffer.wrap(micBytes, 0, bytesToEncode)
+                                        .order(ByteOrder.LITTLE_ENDIAN)
+                                        .asShortBuffer()
+                                    val outShortBuf = ByteBuffer.wrap(mixedBytes, 0, bytesToEncode)
+                                        .order(ByteOrder.LITTLE_ENDIAN)
+                                        .asShortBuffer()
+
+                                    for (i in 0 until sampleCount) {
+                                        val sInt = intShortBuf.get(i).toInt()
+                                        val sMic = if (i * 2 < readMic) micShortBuf.get(i).toInt() else 0
+                                        val mixed = (sInt + sMic).coerceIn(Short.MIN_VALUE.toInt(), Short.MAX_VALUE.toInt())
+                                        outShortBuf.put(i, mixed.toShort())
+                                    }
+                                    mixedBytes
+                                } else {
+                                    internalBytes
+                                }
+
+                                inBuf.put(sourceArray, 0, bytesToEncode)
+                                val ptsUs = ((totalAudioFramesWritten * 1_000_000L) / AUDIO_SAMPLE_RATE)
+                                    .coerceAtLeast(lastAudioMuxPtsUs + 1L)
+                                lastAudioMuxPtsUs = ptsUs
+                                totalAudioFramesWritten += (bytesToEncode / bytesPerFrame)
+                                try {
+                                    aEncoder.queueInputBuffer(inIndex, 0, bytesToEncode, ptsUs, 0)
+                                } catch (_: Exception) {}
+                            } else {
+                                try {
+                                    aEncoder.queueInputBuffer(inIndex, 0, 0, elapsedWallUs, 0)
+                                } catch (_: Exception) {}
+                            }
+                        }
                     }
                 }
 
@@ -815,7 +895,7 @@ class ScreenRecordingService : Service() {
                             encodedData.limit(aBufferInfo.offset + aBufferInfo.size)
                             if (muxerStarted) {
                                 try { muxer.writeSampleData(audioTrackIndex, encodedData, aBufferInfo) } catch (_: Exception) {}
-                            } else if (pendingAudioSamples.size < 120) {
+                            } else if (pendingAudioSamples.size < 180) {
                                 val copyBuf = ByteBuffer.allocateDirect(aBufferInfo.size)
                                 copyBuf.put(encodedData)
                                 copyBuf.flip()
@@ -831,7 +911,7 @@ class ScreenRecordingService : Service() {
                     }
                 }
 
-                // C. Drain Video Encoder output
+                // C. Drain Video Encoder output using hardware surface PTS anchored to t=0
                 while (true) {
                     val outIndex = try { vEncoder.dequeueOutputBuffer(vBufferInfo, 2_000) } catch (_: Exception) { break }
                     if (outIndex == MediaCodec.INFO_TRY_AGAIN_LATER) {
@@ -846,17 +926,21 @@ class ScreenRecordingService : Service() {
                         if (encodedData != null && (vBufferInfo.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG) == 0 && vBufferInfo.size > 0) {
                             encodedData.position(vBufferInfo.offset)
                             encodedData.limit(vBufferInfo.offset + vBufferInfo.size)
-                            // Normalize video presentationTimeUs relative to startNs so audio & video stay in sync
-                            val normalizedPtsUs = ((System.nanoTime() - startNs) / 1000L).coerceAtLeast(0L)
-                            vBufferInfo.presentationTimeUs = normalizedPtsUs
+                            if (firstVideoCodecPtsUs < 0L) {
+                                firstVideoCodecPtsUs = vBufferInfo.presentationTimeUs
+                            }
+                            val relativeVideoPtsUs = (vBufferInfo.presentationTimeUs - firstVideoCodecPtsUs)
+                                .coerceAtLeast(lastVideoMuxPtsUs + 1L)
+                            lastVideoMuxPtsUs = relativeVideoPtsUs
+                            vBufferInfo.presentationTimeUs = relativeVideoPtsUs
                             if (muxerStarted) {
                                 try { muxer.writeSampleData(videoTrackIndex, encodedData, vBufferInfo) } catch (_: Exception) {}
-                            } else if (pendingVideoSamples.size < 90) {
+                            } else if (pendingVideoSamples.size < 120) {
                                 val copyBuf = ByteBuffer.allocateDirect(vBufferInfo.size)
                                 copyBuf.put(encodedData)
                                 copyBuf.flip()
                                 val copyInfo = MediaCodec.BufferInfo().apply {
-                                    set(0, vBufferInfo.size, normalizedPtsUs, vBufferInfo.flags)
+                                    set(0, vBufferInfo.size, relativeVideoPtsUs, vBufferInfo.flags)
                                 }
                                 pendingVideoSamples.add(copyBuf to copyInfo)
                             }
@@ -881,7 +965,13 @@ class ScreenRecordingService : Service() {
                     ) {
                         encodedData.position(vBufferInfo.offset)
                         encodedData.limit(vBufferInfo.offset + vBufferInfo.size)
-                        vBufferInfo.presentationTimeUs = ((System.nanoTime() - startNs) / 1000L).coerceAtLeast(0L)
+                        if (firstVideoCodecPtsUs < 0L) {
+                            firstVideoCodecPtsUs = vBufferInfo.presentationTimeUs
+                        }
+                        val relativeVideoPtsUs = (vBufferInfo.presentationTimeUs - firstVideoCodecPtsUs)
+                            .coerceAtLeast(lastVideoMuxPtsUs + 1L)
+                        lastVideoMuxPtsUs = relativeVideoPtsUs
+                        vBufferInfo.presentationTimeUs = relativeVideoPtsUs
                         try { muxer.writeSampleData(videoTrackIndex, encodedData, vBufferInfo) } catch (_: Exception) {}
                     }
                     try { vEncoder.releaseOutputBuffer(outIndex, false) } catch (_: Exception) {}
@@ -1064,6 +1154,7 @@ class ScreenRecordingService : Service() {
                     saveVideoToMediaStore(file)
                 }
             }
+            com.example.util.AppReviewManager.onScreenRecordingStopped(this)
         }
 
         try {
@@ -1127,23 +1218,12 @@ class ScreenRecordingService : Service() {
 
     private fun startForegroundServiceNotification(includeMicrophoneType: Boolean) {
         val notification = buildRecorderNotification(this, true, _recordingSeconds.value)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-            val hasAudioPerm = ContextCompat.checkSelfPermission(
-                this,
-                android.Manifest.permission.RECORD_AUDIO
-            ) == PackageManager.PERMISSION_GRANTED
-            val fgType = if (includeMicrophoneType && hasAudioPerm) {
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
-            } else {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            startForeground(
+                NOTIFICATION_ID,
+                notification,
                 ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
-            }
-            try {
-                startForeground(NOTIFICATION_ID, notification, fgType)
-            } catch (_: Exception) {
-                startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION)
-            }
-        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION)
+            )
         } else {
             startForeground(NOTIFICATION_ID, notification)
         }

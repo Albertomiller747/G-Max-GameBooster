@@ -19,62 +19,89 @@ class StorageSpeedTester(private val context: Context) {
     )
 
     suspend fun runSpeedTest(): StorageSpeedResult = withContext(Dispatchers.IO) {
-        val testFile = File(context.filesDir, "speed_benchmark_tmp.bin")
-        val sizeMb = 12 // 12 MB test block
-        val totalBytes = sizeMb * 1024 * 1024
-        val buffer = ByteArray(64 * 1024) // 64 KB buffer
-        Random().nextBytes(buffer)
+        val testFile = File(context.cacheDir, "ufs_speed_benchmark_tmp.bin")
+        val blockBytes = 1024 * 1024 // 1 MB sequential block size
+        val totalBlocks = 32 // 32 MB total test payload
+        val totalBytes = totalBlocks.toLong() * blockBytes.toLong()
+
+        // Generate uncompressible pseudo-random payload with per-block entropy mutation
+        val writeBuffer = ByteArray(blockBytes)
+        val rng = Random(System.nanoTime())
+        rng.nextBytes(writeBuffer)
 
         var writeSpeed = 0.0
         var readSpeed = 0.0
 
         try {
-            // Write Test
+            if (testFile.exists()) {
+                testFile.delete()
+            }
+
+            // 1. Sequential Hardware Write Test (with per-chunk entropy + final fdatasync)
             val writeStart = System.nanoTime()
-            FileOutputStream(testFile).use { fos ->
-                var written = 0
-                while (written < totalBytes) {
-                    val toWrite = minOf(buffer.size, totalBytes - written)
-                    fos.write(buffer, 0, toWrite)
-                    written += toWrite
+            FileOutputStream(testFile, false).use { fos ->
+                val channel = fos.channel
+                val byteBuf = java.nio.ByteBuffer.allocateDirect(blockBytes)
+                for (blockIndex in 0 until totalBlocks) {
+                    // Mutate 64 bytes per 1MB block to prevent filesystem deduplication/compression
+                    for (k in 0 until 64) {
+                        writeBuffer[(blockIndex * 131 + k * 997) and (blockBytes - 1)] =
+                            (blockIndex xor k xor 0x5A).toByte()
+                    }
+                    byteBuf.clear()
+                    byteBuf.put(writeBuffer)
+                    byteBuf.flip()
+                    while (byteBuf.hasRemaining()) {
+                        channel.write(byteBuf)
+                    }
                 }
+                channel.force(true)
                 fos.fd.sync()
             }
             val writeEnd = System.nanoTime()
-            val writeSeconds = (writeEnd - writeStart) / 1_000_000_000.0
-            if (writeSeconds > 0) {
-                writeSpeed = (totalBytes / (1024.0 * 1024.0)) / writeSeconds
-            }
+            val writeSeconds = ((writeEnd - writeStart) / 1_000_000_000.0).coerceAtLeast(0.001)
+            writeSpeed = (totalBytes.toDouble() / (1024.0 * 1024.0)) / writeSeconds
 
-            // Read Test
-            val readBuffer = ByteArray(64 * 1024)
+            // 2. Sequential Hardware Read Test (1MB direct channel reads)
             val readStart = System.nanoTime()
+            var checksum = 0L
             FileInputStream(testFile).use { fis ->
-                var readTotal = 0
+                val channel = fis.channel
+                val readBuf = java.nio.ByteBuffer.allocateDirect(blockBytes)
+                var readTotal = 0L
                 while (readTotal < totalBytes) {
-                    val read = fis.read(readBuffer)
-                    if (read == -1) break
-                    readTotal += read
+                    readBuf.clear()
+                    val n = channel.read(readBuf)
+                    if (n <= 0) break
+                    readBuf.flip()
+                    checksum += readBuf.get(0).toLong()
+                    readTotal += n
                 }
             }
             val readEnd = System.nanoTime()
-            val readSeconds = (readEnd - readStart) / 1_000_000_000.0
-            if (readSeconds > 0) {
-                readSpeed = (totalBytes / (1024.0 * 1024.0)) / readSeconds
+            val readSeconds = ((readEnd - readStart) / 1_000_000_000.0).coerceAtLeast(0.001)
+            readSpeed = (totalBytes.toDouble() / (1024.0 * 1024.0)) / readSeconds
+
+            // Clean up temporary benchmark file immediately
+            testFile.delete()
+
+            val tierLabel = when {
+                readSpeed >= 1200.0 || writeSpeed >= 600.0 -> "UFS 3.1 / 4.0 High-Speed Flash"
+                readSpeed >= 500.0 || writeSpeed >= 220.0 -> "UFS 2.1 / 2.2 Flash Storage"
+                else -> "Internal eMMC / UFS Flash Storage"
             }
 
-            // Clean up
-            testFile.delete()
-
             StorageSpeedResult(
-                writeSpeedMBps = (writeSpeed * 10).toLong() / 10.0,
-                readSpeedMBps = (readSpeed * 10).toLong() / 10.0,
-                testFileSizeBytes = totalBytes.toLong(),
+                writeSpeedMBps = kotlin.math.round(writeSpeed * 10.0) / 10.0,
+                readSpeedMBps = kotlin.math.round(readSpeed * 10.0) / 10.0,
+                testFileSizeBytes = totalBytes + (checksum and 0L),
                 isSuccess = true,
-                message = "Internal UFS/eMMC Flash Tested Successfully"
+                message = "$tierLabel • 32MB Hardware Sync Verified"
             )
         } catch (e: Exception) {
-            testFile.delete()
+            try {
+                testFile.delete()
+            } catch (_: Exception) {}
             StorageSpeedResult(
                 isSuccess = false,
                 message = "Benchmark failed: ${e.localizedMessage}"

@@ -26,6 +26,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -35,9 +36,11 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -91,6 +94,7 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.CornerRadius
@@ -159,7 +163,7 @@ fun GamesScreen(
     val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
     val autoBigScreenLandscape by viewModel.autoBigScreenLandscape.collectAsState()
     val isBigScreenManual by viewModel.isBigScreenModeManual.collectAsState()
-    val isBigScreenMode = (isLandscape && autoBigScreenLandscape) || isBigScreenManual
+    val isBigScreenMode = isBigScreenManual || (isLandscape && autoBigScreenLandscape)
 
     val thermalInfo by viewModel.thermalInfo.collectAsState()
     val hardwareSpecs by viewModel.hardwareSpecs.collectAsState()
@@ -174,21 +178,35 @@ fun GamesScreen(
     val gamepads by viewModel.gamepads.collectAsState()
     val reducedAnimations by viewModel.reducedAnimations.collectAsState()
     val showControllerLegendBar by viewModel.showControllerLegendBar.collectAsState()
+    val activeControllerGlyphs by viewModel.activeControllerGlyphs.collectAsState()
     val isControllerConnected = gamepads.isNotEmpty()
     val firstGameFocusRequester = remember { FocusRequester() }
+    val dailyStreakState by viewModel.dailyStreakState.collectAsState()
+    val streakFeedback by viewModel.streakFeedbackMessage.collectAsState()
 
     var searchQuery by remember { mutableStateOf("") }
     var showAddGameDialog by remember { mutableStateOf(false) }
+    var showStreakHubModal by remember { mutableStateOf(false) }
+    var showStreakLostModal by remember { mutableStateOf(false) }
     var gameForLaunchPopup by remember { mutableStateOf<InstalledApp?>(null) }
     var usageGranted by remember { mutableStateOf(hasUsageAccessPermission(context)) }
+    val isDeviceOnline by com.example.util.rememberIsDeviceOnline()
 
-    // Refresh play stats and Usage Access status whenever user returns to the screen
+    // Automatically surface the "Streak Lost!" 12h grace period repair screen when a streak breaks
+    LaunchedEffect(dailyStreakState.isStreakBrokenRepairable) {
+        if (dailyStreakState.isStreakBrokenRepairable) {
+            showStreakLostModal = true
+        }
+    }
+
+    // Refresh play stats, Usage Access, and midnight streak rollover whenever user returns to the screen
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
                 usageGranted = hasUsageAccessPermission(context)
                 viewModel.refreshPlayStats()
+                viewModel.refreshDailyStreak()
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -235,6 +253,10 @@ fun GamesScreen(
         }
     }
 
+    LaunchedEffect(selectedGamePackage) {
+        viewModel.setFocusedGamePackage(selectedGamePackage)
+    }
+
     // Ensure D-Pad and joystick start directly on the first game icon tile rather than the top bar or search bar
     LaunchedEffect(filteredGames.firstOrNull()?.packageName, isControllerConnected) {
         if (filteredGames.isNotEmpty()) {
@@ -245,25 +267,40 @@ fun GamesScreen(
         }
     }
 
-    // Active spotlight game for Big Screen Console Mode
+    // Active spotlight game for Big Screen Console Mode (always resolves a valid spotlight card in Console Mode)
     val spotlightStats: GamePlayStats? = remember(
         selectedGamePackage,
         selectedRecentPackage,
         selectedMostPlayedPackage,
         recentlyPlayedGames,
         mostPlayedGames,
-        libraryGames
+        libraryGames,
+        installedApps,
+        isBigScreenMode
     ) {
         val pkg = selectedGamePackage ?: selectedRecentPackage ?: selectedMostPlayedPackage
         val allStats = (recentlyPlayedGames + mostPlayedGames).associateBy { it.game.packageName }
-        if (pkg != null) {
+        val resolved = if (pkg != null) {
             allStats[pkg] ?: libraryGames.firstOrNull { it.packageName == pkg }?.let {
                 GamePlayStats(it, 0L, 0L, 0)
             }
         } else {
             recentlyPlayedGames.firstOrNull()
                 ?: libraryGames.firstOrNull()?.let { GamePlayStats(it, 0L, 0L, 0) }
+                ?: installedApps.firstOrNull { it.isGame }?.let { GamePlayStats(it, 0L, 0L, 0) }
         }
+        resolved ?: if (isBigScreenMode) {
+            GamePlayStats(
+                game = InstalledApp(
+                    packageName = "console.deck.ready",
+                    appName = "GMAX Console Mode Ready",
+                    isGame = true
+                ),
+                lastPlayedEpochMs = 0L,
+                totalPlayTimeMs = 0L,
+                launchCount = 0
+            )
+        } else null
     }
 
     val tileSizeDp = if (isBigScreenMode) 182.dp else 156.dp
@@ -297,18 +334,29 @@ fun GamesScreen(
                 val isCompactPortraitBar = !isBigScreenMode
                 val barHeight = if (isCompactPortraitBar) 42.dp else 52.dp
                 val barCorner = if (isCompactPortraitBar) 12.dp else 16.dp
-                val btnPadH = if (isCompactPortraitBar) 10.dp else 14.dp
-                val btnFont = if (isCompactPortraitBar) 11.5.sp else 13.sp
-                val iconSize = if (isCompactPortraitBar) 15.dp else 18.dp
+                val btnPadH = if (isCompactPortraitBar) 8.dp else 14.dp
+                val btnFont = if (isCompactPortraitBar) 11.sp else 13.sp
+                val iconSize = if (isCompactPortraitBar) 14.dp else 18.dp
+
+                var isSearchBarEditable by remember { mutableStateOf(false) }
+                LaunchedEffect(isControllerConnected) {
+                    if (isControllerConnected && searchQuery.isEmpty()) {
+                        isSearchBarEditable = false
+                        try {
+                            firstGameFocusRequester.requestFocus()
+                        } catch (_: Exception) {}
+                    }
+                }
 
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(if (isCompactPortraitBar) 8.dp else 12.dp)
+                    horizontalArrangement = Arrangement.spacedBy(if (isCompactPortraitBar) 6.dp else 12.dp)
                 ) {
                     Box(
                         modifier = Modifier
                             .weight(1f)
+                            .widthIn(min = 120.dp)
                             .height(barHeight)
                             .clip(RoundedCornerShape(barCorner))
                             .background(MaterialTheme.colorScheme.surface)
@@ -317,18 +365,28 @@ fun GamesScreen(
                                 if (searchQuery.isNotEmpty()) HubBlue else MaterialTheme.colorScheme.outline.copy(alpha = 0.4f),
                                 RoundedCornerShape(barCorner)
                             )
+                            .focusProperties {
+                                // Prevent controller D-Pad from getting trapped in the Search bar unless user explicitly tapped it
+                                canFocus = !isControllerConnected || isSearchBarEditable
+                            }
+                            .clickable {
+                                isSearchBarEditable = true
+                            }
                             .padding(horizontal = if (isCompactPortraitBar) 10.dp else 14.dp)
                             .onPreviewKeyEvent { keyEvent ->
                                 if (keyEvent.type == KeyEventType.KeyDown &&
                                     (keyEvent.key == Key.DirectionDown ||
                                             keyEvent.key == Key.DirectionUp ||
+                                            keyEvent.key == Key.DirectionRight ||
                                             keyEvent.key == Key.ButtonB ||
+                                            keyEvent.key == Key.Back ||
                                             keyEvent.key == Key.Escape)
                                 ) {
+                                    isSearchBarEditable = false
                                     try {
                                         firstGameFocusRequester.requestFocus()
                                     } catch (_: Exception) {
-                                        focusManager.clearFocus()
+                                        focusManager.moveFocus(androidx.compose.ui.focus.FocusDirection.Down)
                                     }
                                     true
                                 } else {
@@ -355,32 +413,45 @@ fun GamesScreen(
                             ) {
                                 if (searchQuery.isEmpty()) {
                                     Text(
-                                        text = if (isCompactPortraitBar) "Search games..." else "Search games in console launcher...",
+                                        text = if (isCompactPortraitBar) {
+                                            com.example.util.tr("Search games...", "Buscar juegos...")
+                                        } else {
+                                            com.example.util.tr("Search games in console launcher...", "Buscar juegos en el lanzador de consola...")
+                                        },
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         fontSize = if (isCompactPortraitBar) 12.sp else 13.5.sp,
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis
                                     )
                                 }
-                                androidx.compose.foundation.text.BasicTextField(
-                                    value = searchQuery,
-                                    onValueChange = { searchQuery = it },
-                                    singleLine = true,
-                                    textStyle = MaterialTheme.typography.bodyMedium.copy(
-                                        color = MaterialTheme.colorScheme.onSurface,
-                                        fontSize = if (isCompactPortraitBar) 12.5.sp else 14.sp,
-                                        fontWeight = FontWeight.Medium
-                                    ),
-                                    cursorBrush = androidx.compose.ui.graphics.SolidColor(HubBlue),
-                                    modifier = Modifier.fillMaxWidth()
-                                )
+                                if (!isControllerConnected || isSearchBarEditable || searchQuery.isNotEmpty()) {
+                                    androidx.compose.foundation.text.BasicTextField(
+                                        value = searchQuery,
+                                        onValueChange = { searchQuery = it },
+                                        singleLine = true,
+                                        textStyle = MaterialTheme.typography.bodyMedium.copy(
+                                            color = MaterialTheme.colorScheme.onSurface,
+                                            fontSize = if (isCompactPortraitBar) 12.5.sp else 14.sp,
+                                            fontWeight = FontWeight.Medium
+                                        ),
+                                        cursorBrush = androidx.compose.ui.graphics.SolidColor(HubBlue),
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .focusProperties {
+                                                canFocus = !isControllerConnected || isSearchBarEditable
+                                            }
+                                    )
+                                }
                             }
                             if (searchQuery.isNotEmpty()) {
                                 Box(
                                     modifier = Modifier
                                         .size(22.dp)
                                         .clip(CircleShape)
-                                        .clickable { searchQuery = "" },
+                                        .clickable {
+                                            searchQuery = ""
+                                            isSearchBarEditable = false
+                                        },
                                     contentAlignment = Alignment.Center
                                 ) {
                                     Icon(
@@ -394,13 +465,26 @@ fun GamesScreen(
                         }
                     }
 
-                    // Quick Boost Button
+                    // Quick Boost Button (Normal Boost works 100% offline; Beast Boost requires internet)
                     var boostBtnFocused by remember { mutableStateOf(false) }
                     Button(
                         onClick = {
                             ConsoleHapticManager.playLaunchPulse(context)
                             val target = filteredGames.firstOrNull { it.packageName == selectedGamePackage }
-                            viewModel.quickBoost(targetApp = target, mode = selectedBoostMode)
+                            val effectiveMode = if (selectedBoostMode == BoostMode.BEAST && !isDeviceOnline) {
+                                android.widget.Toast.makeText(
+                                    context,
+                                    com.example.util.AppStrings.trText(
+                                        "Beast Boost requires internet. Running offline Normal Boost.",
+                                        "Modo Bestia requiere internet. Ejecutando Impulso Normal sin conexión."
+                                    ),
+                                    android.widget.Toast.LENGTH_SHORT
+                                ).show()
+                                BoostMode.GAMING
+                            } else {
+                                selectedBoostMode
+                            }
+                            viewModel.quickBoost(targetApp = target, mode = effectiveMode)
                         },
                         shape = RoundedCornerShape(barCorner),
                         colors = ButtonDefaults.buttonColors(
@@ -430,14 +514,14 @@ fun GamesScreen(
                         )
                         Spacer(modifier = Modifier.width(4.dp))
                         Text(
-                            text = "Boost",
+                            text = com.example.util.tr("Boost", "Impulsar"),
                             fontWeight = FontWeight.Bold,
                             fontSize = btnFont
                         )
                         if (isControllerConnected) {
                             Spacer(modifier = Modifier.width(4.dp))
                             InlineControllerGlyphBadge(
-                                glyph = "X",
+                                glyph = activeControllerGlyphs.westGlyph,
                                 badgeColor = Color.White,
                                 textColor = HubBlue
                             )
@@ -475,12 +559,76 @@ fun GamesScreen(
                         )
                         Spacer(modifier = Modifier.width(3.dp))
                         Text(
-                            text = "Add",
+                            text = com.example.util.tr("Add", "Añadir"),
                             color = MaterialTheme.colorScheme.onSurface,
                             fontWeight = FontWeight.Bold,
                             fontSize = btnFont
                         )
                     }
+
+                    // Console Mode Toggle Button (Activates / Exits Big Screen Console Mode immediately)
+                    var consoleBtnFocused by remember { mutableStateOf(false) }
+                    OutlinedButton(
+                        onClick = {
+                            ConsoleHapticManager.playLaunchPulse(context)
+                            viewModel.setBigScreenModeManual(!isBigScreenMode)
+                        },
+                        shape = RoundedCornerShape(barCorner),
+                        contentPadding = PaddingValues(horizontal = btnPadH, vertical = 0.dp),
+                        border = BorderStroke(
+                            width = if (consoleBtnFocused || isBigScreenMode) 2.dp else 1.dp,
+                            color = when {
+                                consoleBtnFocused -> Color.White
+                                isBigScreenMode -> LaunchGreen
+                                else -> HubBlue.copy(alpha = 0.65f)
+                            }
+                        ),
+                        colors = ButtonDefaults.outlinedButtonColors(
+                            containerColor = if (isBigScreenMode) LaunchGreen.copy(alpha = 0.16f) else HubBlue.copy(alpha = 0.10f)
+                        ),
+                        modifier = Modifier
+                            .height(barHeight)
+                            .onFocusChanged {
+                                if (it.isFocused && !consoleBtnFocused) {
+                                    ConsoleHapticManager.playFocusTick(context)
+                                }
+                                consoleBtnFocused = it.isFocused
+                            }
+                            .testTag("launcher_console_mode_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Tv,
+                            contentDescription = "Console Mode",
+                            tint = if (isBigScreenMode) LaunchGreen else HubBlue,
+                            modifier = Modifier.size(iconSize)
+                        )
+                        if (!isCompactPortraitBar) {
+                            Spacer(modifier = Modifier.width(3.dp))
+                            Text(
+                                text = if (isBigScreenMode) {
+                                    com.example.util.tr("Exit Console", "Salir Consola")
+                                } else {
+                                    com.example.util.tr("Console", "Consola")
+                                },
+                                color = if (isBigScreenMode) LaunchGreen else HubBlue,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = btnFont
+                            )
+                        }
+                    }
+
+                    // Daily Streak & G-Tokens Pill in Top Launcher Bar
+                    com.example.ui.components.DailyStreakTopBarPill(
+                        streakState = dailyStreakState,
+                        onClick = {
+                            ConsoleHapticManager.playSelectClick(context)
+                            if (dailyStreakState.isStreakBrokenRepairable) {
+                                showStreakLostModal = true
+                            } else {
+                                showStreakHubModal = true
+                            }
+                        }
+                    )
                 }
             }
 
@@ -489,18 +637,34 @@ fun GamesScreen(
                 item {
                     BigScreenSpotlightCard(
                         stats = spotlightStats,
-                        freeRamText = String.format(Locale.US, "%.1f GB Free RAM", freeRamGb),
+                        freeRamText = String.format(
+                            Locale.US,
+                            com.example.util.tr("%.1f GB Free RAM", "%.1f GB RAM Libre"),
+                            freeRamGb
+                        ),
                         tempText = String.format(Locale.US, "%.1f°C", thermalInfo.batteryTempC),
                         showControllerGlyphs = isControllerConnected,
+                        controllerGlyphs = activeControllerGlyphs,
                         onQuickPlayNormal = {
                             ConsoleHapticManager.playLaunchPulse(context)
                             viewModel.setBoostMode(BoostMode.GAMING)
                             viewModel.quickBoost(targetApp = spotlightStats.game, mode = BoostMode.GAMING)
                         },
                         onQuickPlayBeast = {
-                            ConsoleHapticManager.playLaunchPulse(context)
-                            viewModel.setBoostMode(BoostMode.BEAST)
-                            viewModel.quickBoost(targetApp = spotlightStats.game, mode = BoostMode.BEAST)
+                            if (!isDeviceOnline) {
+                                android.widget.Toast.makeText(
+                                    context,
+                                    com.example.util.AppStrings.trText(
+                                        "Beast Boost requires an internet connection. Normal Boost is available offline.",
+                                        "El Modo Bestia requiere conexión a internet. El Impulso Normal está disponible sin conexión."
+                                    ),
+                                    android.widget.Toast.LENGTH_SHORT
+                                ).show()
+                            } else {
+                                ConsoleHapticManager.playLaunchPulse(context)
+                                viewModel.setBoostMode(BoostMode.BEAST)
+                                viewModel.quickBoost(targetApp = spotlightStats.game, mode = BoostMode.BEAST)
+                            }
                         },
                         onConfigurePopup = {
                             ConsoleHapticManager.playSelectClick(context)
@@ -589,14 +753,14 @@ fun GamesScreen(
                                 Spacer(modifier = Modifier.width(12.dp))
                                 Column {
                                     Text(
-                                        text = "${sessionState.mode?.title ?: "BOOST"} ACTIVE",
+                                        text = "${sessionState.mode?.title ?: com.example.util.tr("BOOST", "IMPULSO")} ${com.example.util.tr("ACTIVE", "ACTIVO")}",
                                         style = MaterialTheme.typography.labelSmall,
                                         color = accent,
                                         fontWeight = FontWeight.ExtraBold,
                                         letterSpacing = 0.8.sp
                                     )
                                     Text(
-                                        text = "Remaining: ${sessionState.formattedCountdown}",
+                                        text = "${com.example.util.tr("Remaining", "Restante")}: ${sessionState.formattedCountdown}",
                                         style = MaterialTheme.typography.titleMedium,
                                         color = MaterialTheme.colorScheme.onSurface,
                                         fontWeight = FontWeight.Bold
@@ -613,7 +777,7 @@ fun GamesScreen(
                                 border = BorderStroke(1.dp, accent)
                             ) {
                                 Text(
-                                    text = "Stop",
+                                    text = com.example.util.tr("Stop", "Detener"),
                                     color = accent,
                                     fontWeight = FontWeight.Bold,
                                     fontSize = 12.sp
@@ -642,7 +806,7 @@ fun GamesScreen(
                                 )
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Text(
-                                    text = "RECENTLY PLAYED",
+                                    text = com.example.util.tr("RECENTLY PLAYED", "JUGADOS RECIENTEMENTE"),
                                     style = MaterialTheme.typography.titleMedium.copy(
                                         fontWeight = FontWeight.ExtraBold,
                                         color = MaterialTheme.colorScheme.onBackground,
@@ -676,7 +840,7 @@ fun GamesScreen(
                                     contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
                                 ) {
                                     Text(
-                                        text = "Sync Device History",
+                                        text = com.example.util.tr("Sync Device History", "Sincronizar Historial"),
                                         fontSize = 11.sp,
                                         fontWeight = FontWeight.Bold,
                                         color = HubBlue
@@ -684,7 +848,7 @@ fun GamesScreen(
                                 }
                             } else {
                                 Text(
-                                    text = "Live UsageStats + Hub Sessions",
+                                    text = com.example.util.tr("Live UsageStats + Hub Sessions", "Estadísticas en Vivo + Sesiones"),
                                     style = MaterialTheme.typography.labelSmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
@@ -744,7 +908,7 @@ fun GamesScreen(
                                 )
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Text(
-                                    text = "MOST PLAYED",
+                                    text = com.example.util.tr("MOST PLAYED", "MÁS JUGADOS"),
                                     style = MaterialTheme.typography.titleMedium.copy(
                                         fontWeight = FontWeight.ExtraBold,
                                         color = MaterialTheme.colorScheme.onBackground,
@@ -769,7 +933,7 @@ fun GamesScreen(
                             }
 
                             Text(
-                                text = "Ranked by Total Play Time",
+                                text = com.example.util.tr("Ranked by Total Play Time", "Ordenado por Tiempo Total"),
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -825,7 +989,7 @@ fun GamesScreen(
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = "MY GAMES",
+                            text = com.example.util.tr("MY GAMES", "MIS JUEGOS"),
                             style = MaterialTheme.typography.titleMedium.copy(
                                 fontWeight = FontWeight.ExtraBold,
                                 color = MaterialTheme.colorScheme.onBackground,
@@ -848,16 +1012,6 @@ fun GamesScreen(
                             )
                         }
                     }
-
-                    Text(
-                        text = if (isControllerConnected) {
-                            "D-Pad to focus • Press A to Launch"
-                        } else {
-                            "Tap a game to focus & Launch"
-                        },
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
                 }
             }
 
@@ -885,9 +1039,9 @@ fun GamesScreen(
                             Spacer(modifier = Modifier.height(10.dp))
                             Text(
                                 text = if (searchQuery.isNotBlank()) {
-                                    "No games match \"$searchQuery\""
+                                    com.example.util.tr("No games match \"$searchQuery\"", "Ningún juego coincide con \"$searchQuery\"")
                                 } else {
-                                    "Your Launcher Library is Empty"
+                                    com.example.util.tr("Your Launcher Library is Empty", "Tu Biblioteca del Lanzador está Vacía")
                                 },
                                 style = MaterialTheme.typography.titleMedium,
                                 fontWeight = FontWeight.Bold,
@@ -895,7 +1049,10 @@ fun GamesScreen(
                             )
                             Spacer(modifier = Modifier.height(4.dp))
                             Text(
-                                text = "Add installed games from your device to launch with Boost & HUD.",
+                                text = com.example.util.tr(
+                                    "Add installed games from your device to launch with Boost & HUD.",
+                                    "Añade juegos instalados desde tu dispositivo para iniciar con Impulso y HUD."
+                                ),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 textAlign = TextAlign.Center
@@ -911,7 +1068,7 @@ fun GamesScreen(
                             ) {
                                 Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
                                 Spacer(modifier = Modifier.width(6.dp))
-                                Text("Add Games", fontWeight = FontWeight.Bold)
+                                Text(com.example.util.tr("Add Games", "Añadir Juegos"), fontWeight = FontWeight.Bold)
                             }
                         }
                     }
@@ -963,7 +1120,7 @@ fun GamesScreen(
             // 7. Device Status & Telemetry Strip
             item {
                 Text(
-                    text = "SYSTEM TELEMETRY",
+                    text = com.example.util.tr("SYSTEM TELEMETRY", "TELEMETRÍA DEL SISTEMA"),
                     style = MaterialTheme.typography.labelLarge.copy(
                         fontWeight = FontWeight.ExtraBold,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -981,9 +1138,9 @@ fun GamesScreen(
                     LauncherMetricCard(
                         modifier = Modifier.weight(1f),
                         icon = Icons.Default.Speed,
-                        title = "Available RAM",
+                        title = com.example.util.tr("Available RAM", "RAM Disponible"),
                         value = String.format(Locale.US, "%.1f / %.1f GB", freeRamGb, totalRamGb),
-                        subtitle = String.format(Locale.US, "%.0f%% Free", freeRamPercent),
+                        subtitle = String.format(Locale.US, com.example.util.tr("%.0f%% Free", "%.0f%% Libre"), freeRamPercent),
                         accentColor = HubBlue
                     )
 
@@ -991,9 +1148,9 @@ fun GamesScreen(
                     LauncherMetricCard(
                         modifier = Modifier.weight(1f),
                         icon = Icons.Default.Storage,
-                        title = "Free Storage",
+                        title = com.example.util.tr("Free Storage", "Espacio Libre"),
                         value = String.format(Locale.US, "%.1f GB", freeStorageGb),
-                        subtitle = String.format(Locale.US, "%.0f%% Available", freeStoragePercent),
+                        subtitle = String.format(Locale.US, com.example.util.tr("%.0f%% Available", "%.0f%% Disponible"), freeStoragePercent),
                         accentColor = LaunchGreen
                     )
 
@@ -1007,12 +1164,21 @@ fun GamesScreen(
                     LauncherMetricCard(
                         modifier = Modifier.weight(1f),
                         icon = Icons.Default.Thermostat,
-                        title = "Core Temp",
+                        title = com.example.util.tr("Core Temp", "Temp. Núcleo"),
                         value = String.format(Locale.US, "%.1f°C", tempC),
                         subtitle = thermalInfo.thermalStatusName,
                         accentColor = tempColor
                     )
                 }
+            }
+
+            // 8. Native Ad Card embedded in the scrollable list with 32dp top buffer from interactive tiles
+            item {
+                com.example.ui.components.GMaxNativeAdCard(
+                    placementTag = "launcher_bottom",
+                    topBuffer = 32.dp,
+                    bottomBuffer = 24.dp
+                )
             }
         }
 
@@ -1020,6 +1186,7 @@ fun GamesScreen(
         if (isControllerConnected && showControllerLegendBar) {
             ConsoleControllerLegendBar(
                 isBigScreenMode = isBigScreenMode,
+                glyphs = activeControllerGlyphs,
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .padding(horizontal = 16.dp, vertical = 8.dp)
@@ -1081,9 +1248,22 @@ fun GamesScreen(
                     viewModel.toggleOverlayAutoScale(context, !overlayConfig.autoScaleSmallScreens)
                 },
                 onOpenGame = { chosenMode ->
-                    viewModel.setBoostMode(chosenMode)
+                    val effectiveMode = if (chosenMode == BoostMode.BEAST && !isDeviceOnline) {
+                        android.widget.Toast.makeText(
+                            context,
+                            com.example.util.AppStrings.trText(
+                                "Beast Boost requires internet. Launching with offline Normal Boost.",
+                                "Modo Bestia requiere internet. Iniciando con Impulso Normal sin conexión."
+                            ),
+                            android.widget.Toast.LENGTH_SHORT
+                        ).show()
+                        BoostMode.GAMING
+                    } else {
+                        chosenMode
+                    }
+                    viewModel.setBoostMode(effectiveMode)
                     gameForLaunchPopup = null
-                    viewModel.quickBoost(targetApp = targetGame, mode = chosenMode)
+                    viewModel.quickBoost(targetApp = targetGame, mode = effectiveMode)
                 },
                 onRemoveFromLibrary = {
                     ConsoleHapticManager.playSelectClick(context)
@@ -1094,6 +1274,47 @@ fun GamesScreen(
                     SystemSettingsHelper.openAppDetails(context, targetGame.packageName)
                 },
                 onDismiss = { gameForLaunchPopup = null }
+            )
+        }
+
+        // Dedicated Daily Engagement Streak & G-Tokens Economy Modal
+        if (showStreakHubModal) {
+            com.example.ui.components.DailyStreakHubModalDialog(
+                streakState = dailyStreakState,
+                feedbackMessage = streakFeedback,
+                onBuyStreakFreeze = {
+                    viewModel.buyStreakFreeze()
+                },
+                onSelectNeonColor = { hexColor ->
+                    viewModel.selectStreakHudNeonColor(hexColor)
+                },
+                onOpenRepairModal = {
+                    showStreakHubModal = false
+                    showStreakLostModal = true
+                },
+                onDismiss = {
+                    viewModel.clearStreakFeedbackMessage()
+                    showStreakHubModal = false
+                }
+            )
+        }
+
+        // "Streak Lost!" 12-Hour Grace Period Rewarded Ad Repair Modal
+        if (showStreakLostModal && dailyStreakState.isStreakBrokenRepairable) {
+            com.example.ui.components.StreakLostRepairModalDialog(
+                streakState = dailyStreakState,
+                onRepairViaRewardedAd = {
+                    viewModel.repairBrokenStreakAfterRewardedAd()
+                    showStreakLostModal = false
+                    showStreakHubModal = true
+                },
+                onLetStreakReset = {
+                    viewModel.resetBrokenStreakToZero()
+                    showStreakLostModal = false
+                },
+                onDismiss = {
+                    showStreakLostModal = false
+                }
             )
         }
     }
@@ -1109,6 +1330,7 @@ private fun BigScreenSpotlightCard(
     freeRamText: String,
     tempText: String,
     showControllerGlyphs: Boolean,
+    controllerGlyphs: com.example.model.ControllerGlyphMap = com.example.model.ControllerLayoutResolver.playStationGlyphs,
     onQuickPlayNormal: () -> Unit,
     onQuickPlayBeast: () -> Unit,
     onConfigurePopup: () -> Unit
@@ -1266,7 +1488,7 @@ private fun BigScreenSpotlightCard(
                         if (showControllerGlyphs) {
                             Spacer(modifier = Modifier.width(5.dp))
                             InlineControllerGlyphBadge(
-                                glyph = "A",
+                                glyph = controllerGlyphs.southGlyph,
                                 badgeColor = Color.White,
                                 textColor = LaunchGreen
                             )
@@ -1296,7 +1518,7 @@ private fun BigScreenSpotlightCard(
                         if (showControllerGlyphs) {
                             Spacer(modifier = Modifier.width(5.dp))
                             InlineControllerGlyphBadge(
-                                glyph = "X",
+                                glyph = controllerGlyphs.westGlyph,
                                 badgeColor = Color.White,
                                 textColor = RecorderCoral
                             )
@@ -1349,6 +1571,7 @@ private fun InlineControllerGlyphBadge(
 @Composable
 private fun ConsoleControllerLegendBar(
     isBigScreenMode: Boolean,
+    glyphs: com.example.model.ControllerGlyphMap = com.example.model.ControllerLayoutResolver.playStationGlyphs,
     modifier: Modifier = Modifier
 ) {
     val config = LocalConfiguration.current
@@ -1373,10 +1596,10 @@ private fun ConsoleControllerLegendBar(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy((9f * scale).dp)
         ) {
-            ControllerKeyHint(badge = "A", label = "Launch", badgeColor = LaunchGreen, scale = scale)
-            ControllerKeyHint(badge = "X", label = "Boost", badgeColor = HubBlue, scale = scale)
-            ControllerKeyHint(badge = "Y", label = "Record", badgeColor = Color(0xFFF59E0B), scale = scale)
-            ControllerKeyHint(badge = "L1/R1", label = "Tabs", scale = scale)
+            ControllerKeyHint(badge = glyphs.southGlyph, label = com.example.util.tr("Launch", "Iniciar"), badgeColor = LaunchGreen, scale = scale)
+            ControllerKeyHint(badge = glyphs.westGlyph, label = com.example.util.tr("Boost", "Impulsar"), badgeColor = HubBlue, scale = scale)
+            ControllerKeyHint(badge = glyphs.northGlyph, label = com.example.util.tr("Record", "Grabar"), badgeColor = Color(0xFFF59E0B), scale = scale)
+            ControllerKeyHint(badge = "${glyphs.leftBumper}/${glyphs.rightBumper}", label = com.example.util.tr("Tabs", "Pestañas"), scale = scale)
         }
     }
 }
@@ -1632,7 +1855,7 @@ private fun TileLaunchButtonContent(
             )
             Spacer(modifier = Modifier.width(6.dp))
             Text(
-                text = "Launch",
+                text = com.example.util.tr("Launch", "Iniciar"),
                 fontWeight = FontWeight.ExtraBold,
                 fontSize = 13.sp
             )
@@ -1676,7 +1899,10 @@ private fun PreLaunchBoosterPopup(
     val context = LocalContext.current
     val configuration = LocalConfiguration.current
     val screenWidthDp = configuration.screenWidthDp.coerceAtLeast(320)
+    val screenHeightDp = configuration.screenHeightDp.coerceAtLeast(320)
+    val isCompactHeight = screenHeightDp < 520
     val isOverlayEnabled = overlayConfig.isEnabled
+    val openGameFocusRequester = remember { FocusRequester() }
     val normalBoostFocusRequester = remember { FocusRequester() }
     var chosenMode by remember(initialBoostMode) {
         mutableStateOf(
@@ -1684,30 +1910,39 @@ private fun PreLaunchBoosterPopup(
         )
     }
 
-    // Automatically focus and outline the Normal Booster button when the popup opens
+    // Automatically focus the Open Game button first so pressing 'A' in Console Mode launches immediately without scrolling
     LaunchedEffect(Unit) {
         kotlinx.coroutines.delay(50)
         try {
-            normalBoostFocusRequester.requestFocus()
-        } catch (_: Exception) {}
+            openGameFocusRequester.requestFocus()
+        } catch (_: Exception) {
+            try {
+                normalBoostFocusRequester.requestFocus()
+            } catch (_: Exception) {}
+        }
     }
 
-    Dialog(onDismissRequest = onDismiss) {
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)
+    ) {
         Surface(
             shape = RoundedCornerShape(22.dp),
             color = MaterialTheme.colorScheme.surface,
             border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.35f)),
             tonalElevation = 6.dp,
             modifier = Modifier
-                .fillMaxWidth()
+                .fillMaxWidth(if (screenWidthDp > 560) 0.86f else 0.94f)
+                .widthIn(max = 560.dp)
+                .heightIn(max = (screenHeightDp - 24).coerceAtLeast(280).dp)
                 .testTag("pre_launch_booster_popup")
         ) {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(18.dp)
+                    .padding(horizontal = 18.dp, vertical = if (isCompactHeight) 12.dp else 16.dp)
             ) {
-                // Header: Game Icon + Name + Close button (touch clickable so D-pad starts on Normal Boost)
+                // Header: Game Icon + Name + Close button (always visible at top)
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
@@ -1739,7 +1974,7 @@ private fun PreLaunchBoosterPopup(
                                 overflow = TextOverflow.Ellipsis
                             )
                             Text(
-                                text = "Configure Boost & Display Overlay",
+                                text = com.example.util.tr("Configure Boost & Display Overlay", "Configurar Impulso y Superposición"),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -1762,13 +1997,19 @@ private fun PreLaunchBoosterPopup(
                     }
                 }
 
-                Spacer(modifier = Modifier.height(14.dp))
+                Spacer(modifier = Modifier.height(if (isCompactHeight) 8.dp else 12.dp))
 
-                // 1. Booster Mode Selector: Normal vs Beast Booster
-                Text(
-                    text = "SELECT BOOSTER MODE",
-                    style = MaterialTheme.typography.labelSmall,
-                    fontWeight = FontWeight.ExtraBold,
+                // Scrollable middle configuration section so Landscape / Console Mode never cuts off the Open Game button
+                Column(
+                    modifier = Modifier
+                        .weight(1f, fill = false)
+                        .verticalScroll(rememberScrollState())
+                ) {
+                    // 1. Booster Mode Selector: Normal vs Beast Booster
+                    Text(
+                        text = com.example.util.tr("SELECT BOOSTER MODE", "SELECCIONAR MODO DE IMPULSO"),
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.ExtraBold,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     letterSpacing = 0.8.sp
                 )
@@ -1780,7 +2021,7 @@ private fun PreLaunchBoosterPopup(
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     val isNormal = chosenMode != BoostMode.BEAST
-                    var normalFocused by remember { mutableStateOf(true) }
+                    var normalFocused by remember { mutableStateOf(false) }
                     var beastFocused by remember { mutableStateOf(false) }
 
                     // Normal Booster Option (Default initial focus with white outline)
@@ -1840,13 +2081,13 @@ private fun PreLaunchBoosterPopup(
                             )
                             Spacer(modifier = Modifier.height(3.dp))
                             Text(
-                                text = "Normal Booster",
+                                text = com.example.util.tr("Normal Booster", "Impulso Normal"),
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 12.5.sp,
                                 color = MaterialTheme.colorScheme.onSurface
                             )
                             Text(
-                                text = "Balanced • 3h",
+                                text = com.example.util.tr("Balanced • Offline Ready", "Equilibrado • Sin Conexión"),
                                 fontSize = 10.5.sp,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -1900,13 +2141,13 @@ private fun PreLaunchBoosterPopup(
                             )
                             Spacer(modifier = Modifier.height(3.dp))
                             Text(
-                                text = "Beast Booster",
+                                text = com.example.util.tr("Beast Booster", "Modo Bestia"),
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 12.5.sp,
                                 color = MaterialTheme.colorScheme.onSurface
                             )
                             Text(
-                                text = "Max FPS • 90m",
+                                text = com.example.util.tr("Max FPS • Online", "Máx FPS • En Línea"),
                                 fontSize = 10.5.sp,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -2139,11 +2380,12 @@ private fun PreLaunchBoosterPopup(
                         }
                     }
                 }
+                } // End scrollable middle section
 
-                Spacer(modifier = Modifier.height(14.dp))
+                Spacer(modifier = Modifier.height(if (isCompactHeight) 8.dp else 12.dp))
 
-                // 3. Final Button: Open Game
-                var openGameFocused by remember { mutableStateOf(false) }
+                // 3. Pinned Final Button: Open Game (Never cut off in Console / Landscape Mode, focused first for instant launch)
+                var openGameFocused by remember { mutableStateOf(true) }
                 Button(
                     onClick = { onOpenGame(chosenMode) },
                     colors = ButtonDefaults.buttonColors(
@@ -2153,18 +2395,29 @@ private fun PreLaunchBoosterPopup(
                     shape = RoundedCornerShape(14.dp),
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(52.dp)
+                        .height(if (isCompactHeight) 46.dp else 52.dp)
+                        .focusRequester(openGameFocusRequester)
                         .onFocusChanged {
                             if (it.isFocused && !openGameFocused) {
                                 ConsoleHapticManager.playFocusTick(context)
                             }
                             openGameFocused = it.isFocused
                         }
+                        .onKeyEvent { ev ->
+                            if (ev.type == KeyEventType.KeyDown &&
+                                (ev.key == Key.DirectionCenter || ev.key == Key.Enter || ev.key == Key.ButtonA)
+                            ) {
+                                ConsoleHapticManager.playSelectClick(context)
+                                onOpenGame(chosenMode)
+                                true
+                            } else false
+                        }
                         .border(
                             width = if (openGameFocused) 3.dp else 0.dp,
                             color = if (openGameFocused) Color.White else Color.Transparent,
                             shape = RoundedCornerShape(14.dp)
                         )
+                        .focusable()
                         .testTag("popup_open_game_button")
                 ) {
                     Icon(
@@ -2174,7 +2427,7 @@ private fun PreLaunchBoosterPopup(
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = "Open Game",
+                        text = com.example.util.tr("Open Game", "Abrir Juego"),
                         fontWeight = FontWeight.ExtraBold,
                         fontSize = 16.sp
                     )
@@ -2188,7 +2441,7 @@ private fun PreLaunchBoosterPopup(
                     }
                 }
 
-                Spacer(modifier = Modifier.height(8.dp))
+                Spacer(modifier = Modifier.height(if (isCompactHeight) 4.dp else 8.dp))
 
                 // Subtle bottom utility row: App Info & Remove from Library
                 Row(
@@ -2204,7 +2457,7 @@ private fun PreLaunchBoosterPopup(
                         )
                         Spacer(modifier = Modifier.width(4.dp))
                         Text(
-                            text = "App Info",
+                            text = com.example.util.tr("App Info", "Info de App"),
                             fontSize = 12.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -2219,7 +2472,7 @@ private fun PreLaunchBoosterPopup(
                         )
                         Spacer(modifier = Modifier.width(4.dp))
                         Text(
-                            text = "Remove from Launcher",
+                            text = com.example.util.tr("Remove from Launcher", "Quitar del Lanzador"),
                             fontSize = 12.sp,
                             color = RecorderCoral
                         )
@@ -2341,7 +2594,7 @@ private fun DashedAddGameTile(
                 )
                 Spacer(modifier = Modifier.height(8.dp))
                 Text(
-                    text = "Add Game",
+                    text = com.example.util.tr("Add Game", "Añadir Juego"),
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -2417,26 +2670,45 @@ private fun PopupOverlayMetricChip(
 fun AppIconImage(packageName: String, modifier: Modifier = Modifier) {
     val context = LocalContext.current
     val bitmap = remember(packageName) {
-        try {
-            val pm = context.packageManager
-            val appInfo = pm.getApplicationInfo(packageName, 0)
-            val highResDrawable = try {
-                val res = pm.getResourcesForApplication(appInfo)
-                if (appInfo.icon != 0) {
-                    res.getDrawableForDensity(appInfo.icon, DisplayMetrics.DENSITY_XXXHIGH, null)
-                } else null
+        if (packageName.isBlank()) {
+            null
+        } else {
+            try {
+                val pm = context.packageManager
+                val drawable = try {
+                    val launchIntent = pm.getLaunchIntentForPackage(packageName)
+                    if (launchIntent != null) {
+                        pm.getActivityIcon(launchIntent)
+                    } else null
+                } catch (_: Exception) {
+                    null
+                } ?: try {
+                    val appInfo = pm.getApplicationInfo(packageName, 0)
+                    val res = pm.getResourcesForApplication(appInfo)
+                    if (appInfo.icon != 0) {
+                        res.getDrawableForDensity(appInfo.icon, DisplayMetrics.DENSITY_XXXHIGH, null)
+                    } else null
+                } catch (_: Exception) {
+                    null
+                } ?: try {
+                    pm.getApplicationIcon(packageName)
+                } catch (_: Exception) {
+                    null
+                }
+
+                if (drawable != null) {
+                    val targetSize = 256
+                    val bmp = Bitmap.createBitmap(targetSize, targetSize, Bitmap.Config.ARGB_8888)
+                    val canvas = Canvas(bmp)
+                    drawable.setBounds(0, 0, targetSize, targetSize)
+                    drawable.draw(canvas)
+                    bmp
+                } else {
+                    null
+                }
             } catch (_: Exception) {
                 null
-            } ?: pm.getApplicationIcon(packageName)
-
-            val targetSize = 256
-            val bmp = Bitmap.createBitmap(targetSize, targetSize, Bitmap.Config.ARGB_8888)
-            val canvas = Canvas(bmp)
-            highResDrawable.setBounds(0, 0, targetSize, targetSize)
-            highResDrawable.draw(canvas)
-            bmp
-        } catch (_: Exception) {
-            null
+            }
         }
     }
 
@@ -2505,7 +2777,7 @@ fun AddGameDialog(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = "Add Game to Launcher",
+                        text = com.example.util.tr("Add Game to Launcher", "Añadir Juego al Lanzador"),
                         style = MaterialTheme.typography.titleLarge,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onSurface
@@ -2526,7 +2798,7 @@ fun AddGameDialog(
                     onValueChange = { searchQuery = it },
                     placeholder = {
                         Text(
-                            "Search installed games & apps...",
+                            com.example.util.tr("Search installed games & apps...", "Buscar juegos y apps instaladas..."),
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             fontSize = 13.sp
                         )
@@ -2650,7 +2922,7 @@ fun AddGameDialog(
                                     shape = RoundedCornerShape(10.dp),
                                     contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
                                 ) {
-                                    Text("Add", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                    Text(com.example.util.tr("Add", "Añadir"), fontSize = 12.sp, fontWeight = FontWeight.Bold)
                                 }
                             }
                         }

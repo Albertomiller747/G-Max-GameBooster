@@ -49,7 +49,9 @@ data class GamepadDevice(
     val vendorId: Int,
     val productId: Int,
     val hasVibrator: Boolean = false,
-    val isConnected: Boolean = true
+    val isConnected: Boolean = true,
+    val isWiredUsb: Boolean = false,
+    val connectionTypeLabel: String = if (isWiredUsb) "Wired USB" else "Bluetooth / Wireless"
 )
 
 data class GameGuidance(

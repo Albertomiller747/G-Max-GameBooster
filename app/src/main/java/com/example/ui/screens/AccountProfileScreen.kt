@@ -86,6 +86,7 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.VerticalDivider
@@ -122,7 +123,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.credentials.CredentialManager
 import coil.compose.AsyncImage
-import com.example.data.repository.LeaderboardEntry
 import com.example.data.repository.UserAccountRepository
 import com.example.ui.components.CyberCard
 import com.example.ui.components.SectionTitle
@@ -141,6 +141,7 @@ import com.example.util.ProfileTagCategory
 import com.example.viewmodel.GameBoosterViewModel
 import java.text.SimpleDateFormat
 import java.util.Locale
+import kotlinx.coroutines.launch
 
 private val DeveloperGold = Color(0xFFFFD700)
 private val DeveloperAmber = Color(0xFFF59E0B)
@@ -157,19 +158,23 @@ fun AccountProfileScreen(
     onBack: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    var showLeaderboardTab by rememberSaveable { mutableStateOf(false) }
+    var showEditProfilePage by rememberSaveable { mutableStateOf(false) }
+    var selectedExternalProfile by remember { mutableStateOf<com.example.util.ExternalPlayerProfileData?>(null) }
+    var usernameSearchQuery by rememberSaveable { mutableStateOf("") }
+    var isSearchingUsername by remember { mutableStateOf(false) }
+    var usernameSearchError by remember { mutableStateOf<String?>(null) }
+    var closestSearchResults by remember { mutableStateOf<List<com.example.util.ExternalPlayerProfileData>>(emptyList()) }
 
     BackHandler {
-        if (showLeaderboardTab) {
-            showLeaderboardTab = false
-        } else {
-            onBack()
+        when {
+            selectedExternalProfile != null -> selectedExternalProfile = null
+            showEditProfilePage -> showEditProfilePage = false
+            else -> onBack()
         }
     }
 
     LaunchedEffect(Unit) {
         viewModel.refreshPlayStats()
-        viewModel.startWorldwideLeaderboardSync()
     }
 
     val context = LocalContext.current
@@ -186,8 +191,6 @@ fun AccountProfileScreen(
     val userUsername by viewModel.userUsername.collectAsState()
     val userCountryCode by viewModel.userCountryCode.collectAsState()
     val userCountryName by viewModel.userCountryName.collectAsState()
-    val leaderboardEntries by viewModel.leaderboardEntries.collectAsState()
-    val isLeaderboardLoading by viewModel.isLeaderboardLoading.collectAsState()
     val isCheckingUsername by viewModel.isCheckingUsername.collectAsState()
     val usernameError by viewModel.usernameError.collectAsState()
     val customDisplayName by viewModel.customDisplayName.collectAsState()
@@ -197,6 +200,8 @@ fun AccountProfileScreen(
     val selectedProfileTagIds by viewModel.selectedProfileTags.collectAsState()
     val isVerifiedDeveloper by viewModel.isVerifiedDeveloperAccount.collectAsState()
     val mostPlayedGames by viewModel.mostPlayedGames.collectAsState()
+    val libraryGames by viewModel.libraryGames.collectAsState()
+    val installedApps by viewModel.installedApps.collectAsState()
     val totalPlayTimeSummary by viewModel.totalPlayTimeSummary.collectAsState()
     val selectedTargetGame by viewModel.selectedTargetGame.collectAsState()
     val selectedBoostMode by viewModel.selectedBoostMode.collectAsState()
@@ -204,6 +209,9 @@ fun AccountProfileScreen(
     val overlayConfig by viewModel.overlayConfig.collectAsState()
     val gamerscoreData by viewModel.gamerscoreData.collectAsState()
     val customDeletionUrl by viewModel.customDeletionUrl.collectAsState()
+    val seasonHalvingCount by viewModel.seasonHalvingCount.collectAsState()
+    val dailyStreakState by viewModel.dailyStreakState.collectAsState()
+    val streakFeedback by viewModel.streakFeedbackMessage.collectAsState()
 
     var showDobDialog by remember { mutableStateOf(false) }
     var showBioDialog by remember { mutableStateOf(false) }
@@ -215,6 +223,8 @@ fun AccountProfileScreen(
     var showDeleteAccountConfirmDialog by remember { mutableStateOf(false) }
     var showEditDeletionUrlDialog by remember { mutableStateOf(false) }
     var showGoogleFormHelpDialog by remember { mutableStateOf(false) }
+    var showProfileStreakHubModal by remember { mutableStateOf(false) }
+    var showProfileStreakLostModal by remember { mutableStateOf(false) }
     var isDeletingAccount by remember { mutableStateOf(false) }
     var isSigningIn by remember { mutableStateOf(false) }
     var authError by remember { mutableStateOf<String?>(null) }
@@ -243,7 +253,7 @@ fun AccountProfileScreen(
         ?: currentUser?.displayName?.takeIf { it.isNotBlank() }
         ?: cloudProfile?.displayName?.takeIf { it.isNotBlank() }
         ?: if (isVerifiedDeveloper) PremadeTagsCatalog.OFFICIAL_DEVELOPER_NAME
-        else if (isSignedIn) "G-Max Gamer" else "Guest Gamer"
+        else if (isSignedIn) "G Max Gamer" else "Guest Gamer"
     val displayName = PremadeTagsCatalog.sanitizeDisplayName(rawDisplayName, isVerifiedDeveloper)
 
     val resolvedUsername = remember(userUsername, cloudProfile?.username, displayName, isVerifiedDeveloper) {
@@ -299,12 +309,54 @@ fun AccountProfileScreen(
     }
 
     val topLocalStat = mostPlayedGames.firstOrNull()
-    val mostPlayedTitle = when {
-        topLocalStat != null -> topLocalStat.game.appName
+    val lastSessionTarget = remember(totalMinutesAllSessions, mostPlayedGames.size, selectedTargetGame?.packageName) {
+        com.example.util.BoosterSessionManager(context).getLastTargetGame()
+    }
+    val lastSessionPkg = lastSessionTarget.first.orEmpty()
+    val lastSessionName = lastSessionTarget.second.orEmpty()
+    val mostPlayedTitle: String = when {
+        topLocalStat != null && topLocalStat.game.appName.isNotBlank() -> topLocalStat.game.appName
+        lastSessionName.isNotBlank() && lastSessionName != "All Games" -> lastSessionName
         !cloudProfile?.mostPlayedGameName.isNullOrBlank() &&
-            cloudProfile?.mostPlayedGameName != "No games played yet" -> cloudProfile!!.mostPlayedGameName
-        selectedTargetGame != null -> selectedTargetGame!!.appName
+            cloudProfile?.mostPlayedGameName != "No games played yet" &&
+            cloudProfile?.mostPlayedGameName != "All Games" -> cloudProfile?.mostPlayedGameName.orEmpty()
+        selectedTargetGame != null && selectedTargetGame!!.appName.isNotBlank() -> selectedTargetGame!!.appName
+        libraryGames.isNotEmpty() -> libraryGames.first().appName
+        installedApps.any { it.isGame } -> installedApps.first { it.isGame }.appName
         else -> "No games played yet"
+    }
+    val mostPlayedGamePkg = remember(
+        topLocalStat?.game?.packageName,
+        lastSessionPkg,
+        cloudProfile?.mostPlayedGamePkg,
+        selectedTargetGame?.packageName,
+        mostPlayedTitle,
+        libraryGames,
+        installedApps
+    ) {
+        val candidates = listOfNotNull(
+            topLocalStat?.game?.packageName?.takeIf { it.isNotBlank() },
+            lastSessionPkg.takeIf { it.isNotBlank() },
+            cloudProfile?.mostPlayedGamePkg?.takeIf { it.isNotBlank() },
+            selectedTargetGame?.packageName?.takeIf { it.isNotBlank() },
+            libraryGames.firstOrNull { it.appName.equals(mostPlayedTitle, ignoreCase = true) }?.packageName,
+            installedApps.firstOrNull { it.appName.equals(mostPlayedTitle, ignoreCase = true) }?.packageName,
+            installedApps.firstOrNull {
+                mostPlayedTitle != "No games played yet" &&
+                    (it.appName.contains(mostPlayedTitle, ignoreCase = true) ||
+                        mostPlayedTitle.contains(it.appName, ignoreCase = true))
+            }?.packageName,
+            libraryGames.firstOrNull()?.packageName,
+            installedApps.firstOrNull { it.isGame }?.packageName
+        )
+        candidates.firstOrNull { pkg ->
+            try {
+                context.packageManager.getApplicationInfo(pkg, 0)
+                true
+            } catch (_: Exception) {
+                false
+            }
+        } ?: candidates.firstOrNull().orEmpty()
     }
     val mostPlayedMinutes = when {
         topLocalStat != null -> (topLocalStat.totalPlayTimeMs / 60_000L).coerceAtLeast(1L)
@@ -332,37 +384,11 @@ fun AccountProfileScreen(
         }
     }
 
-    // Merge worldwide leaderboard entries with current user's live profile entry so the user always sees their rank
-    val mergedLeaderboard = remember(
-        leaderboardEntries,
-        currentUser?.uid,
-        resolvedUsername,
-        userAvatarUrl,
-        resolvedCountryOption,
-        gamerscoreData.totalScore
-    ) {
-        val myUid = currentUser?.uid ?: "local_self_user"
-        val selfEntry = LeaderboardEntry(
-            id = myUid,
-            userId = myUid,
-            username = resolvedUsername,
-            photoUrl = userAvatarUrl,
-            countryCode = resolvedCountryOption.code,
-            countryName = resolvedCountryOption.name,
-            gamerscore = gamerscoreData.totalScore
+    val seasonState = remember(seasonHalvingCount) {
+        com.example.util.SeasonLeaderboardEngine.evaluateSeasonState(
+            context = context,
+            currentRank = 0
         )
-        val filteredRemote = leaderboardEntries.filter {
-            it.userId != myUid && !it.username.equals(resolvedUsername, ignoreCase = true)
-        }
-        (filteredRemote + selfEntry).sortedByDescending { it.gamerscore }
-    }
-
-    val currentUserRank = remember(mergedLeaderboard, currentUser?.uid, resolvedUsername) {
-        val myUid = currentUser?.uid ?: "local_self_user"
-        val idx = mergedLeaderboard.indexOfFirst {
-            it.userId == myUid || it.username.equals(resolvedUsername, ignoreCase = true)
-        }
-        if (idx >= 0) idx + 1 else 1
     }
 
     BoxWithConstraints(
@@ -373,18 +399,77 @@ fun AccountProfileScreen(
         val scale = (maxWidth.value / 390f).coerceIn(0.82f, 1.22f)
         val horizontalPad = 16.scaledDp(scale)
 
-        if (showLeaderboardTab) {
-            WorldwideLeaderboardContent(
-                entries = mergedLeaderboard,
-                currentUserUid = currentUser?.uid ?: "local_self_user",
-                currentUsername = resolvedUsername,
-                isLoading = isLeaderboardLoading,
+        if (selectedExternalProfile != null) {
+            com.example.ui.components.ExternalUserProfileScreen(
+                profile = selectedExternalProfile!!,
                 scale = scale,
-                onBackToProfile = { showLeaderboardTab = false },
-                onEditUsername = {
-                    viewModel.clearUsernameError()
-                    showUsernameDialog = true
+                onBack = { selectedExternalProfile = null },
+                modifier = Modifier.fillMaxSize()
+            )
+        } else if (showEditProfilePage) {
+            com.example.ui.components.EditProfileSubScreen(
+                initialDisplayName = displayName,
+                initialUsername = resolvedUsername,
+                initialEmail = currentUser?.email ?: customEmail.ifBlank { emailText },
+                initialBio = resolvedBio,
+                initialDob = if (userDateOfBirth == "Not Set") "18.May.2001" else userDateOfBirth,
+                userAvatarUrl = userAvatarUrl,
+                countryOption = resolvedCountryOption,
+                activeTopFiveBadge = seasonState.activeTopFiveBadge,
+                isEmailVerified = currentUser?.isEmailVerified == true || isSignedIn,
+                scale = scale,
+                onBack = { showEditProfilePage = false },
+                onPickAvatar = {
+                    avatarPickerLauncher.launch(
+                        PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                    )
                 },
+                onOpenCountryPicker = { showCountryPickerDialog = true },
+                onOpenDobPicker = { showDobDialog = true },
+                onVerifyEmailClicked = { emailToVerify ->
+                    viewModel.setCustomProfileCredentials(displayName, emailToVerify)
+                    if (currentUser == null) {
+                        isSigningIn = true
+                        UserAccountRepository.onGoogleSignInClicked(
+                            context = context,
+                            credentialManager = credentialManager,
+                            onAuthSuccess = {
+                                isSigningIn = false
+                                viewModel.onUserSignedInSuccess("Google")
+                                Toast.makeText(context, "Google Account verified & linked!", Toast.LENGTH_SHORT).show()
+                            },
+                            onAuthError = {
+                                isSigningIn = false
+                                activeProfileSocialPickerProvider = "Google"
+                            },
+                            scope = coroutineScope,
+                            onAuthCancelled = {
+                                isSigningIn = false
+                                Toast.makeText(context, "Email saved to profile", Toast.LENGTH_SHORT).show()
+                            },
+                            onRequireFallbackPicker = {
+                                isSigningIn = false
+                                activeProfileSocialPickerProvider = "Google"
+                            }
+                        )
+                    } else {
+                        Toast.makeText(context, "Email verified via Google Account!", Toast.LENGTH_SHORT).show()
+                    }
+                },
+                onSaveProfileChanges = { newName, newNickname, newEmail, newBio, newDob ->
+                    viewModel.setCustomProfileCredentials(newName, newEmail)
+                    viewModel.setUserBio(newBio)
+                    viewModel.setUserDateOfBirth(newDob.ifBlank { "Not Set" })
+                    if (newNickname.isNotBlank() && !newNickname.equals(resolvedUsername, ignoreCase = true)) {
+                        viewModel.updateUsername(newNickname) { _, _ -> }
+                    }
+                    showEditProfilePage = false
+                    Toast.makeText(context, "Profile settings saved!", Toast.LENGTH_SHORT).show()
+                },
+                equippedTags = equippedTags,
+                currentBanner = userBannerUrl,
+                onOpenTagPicker = { showTagPickerDialog = true },
+                onOpenBannerPicker = { showBannerPickerDialog = true },
                 modifier = Modifier.fillMaxSize()
             )
         } else {
@@ -395,93 +480,55 @@ fun AccountProfileScreen(
                 contentPadding = PaddingValues(top = 12.scaledDp(scale), bottom = 100.dp),
                 verticalArrangement = Arrangement.spacedBy(14.scaledDp(scale))
             ) {
-                // 1. Rebuilt Hero Profile Section (Reference IMG_0371.webp structure in Cyber Theme)
+                // 1. PROFILE SETTING Header + Identity Summary Card
                 item {
-                    RebuiltCyberProfileHero(
+                    com.example.ui.components.ProfileSettingHeaderAndIdentityCard(
                         displayName = displayName,
                         username = resolvedUsername,
                         emailText = emailText,
+                        bio = resolvedBio,
                         userAvatarUrl = userAvatarUrl,
-                        userBannerUrl = userBannerUrl,
                         countryOption = resolvedCountryOption,
                         isVerifiedDeveloper = isVerifiedDeveloper,
-                        isSignedIn = isSignedIn,
-                        hasCloudUser = currentUser != null,
+                        activeTopFiveBadge = seasonState.activeTopFiveBadge,
                         equippedTags = equippedTags,
-                        gamerscoreData = gamerscoreData,
-                        formattedAllSessionsTime = formattedAllSessionsTime,
-                        totalSessionsCount = totalSessionsCount,
                         scale = scale,
                         onBack = onBack,
-                        onPickAvatar = {
-                            avatarPickerLauncher.launch(
-                                PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
-                            )
-                        },
-                        onChangeBanner = { showBannerPickerDialog = true },
-                        onEditUsername = {
-                            viewModel.clearUsernameError()
-                            showUsernameDialog = true
-                        },
-                        onSelectCountry = { showCountryPickerDialog = true },
-                        onOpenGamerscoreInfo = { showGamerscoreInfoDialog = true },
-                        onOpenTagPicker = { showTagPickerDialog = true }
+                        onOpenEditProfile = { showEditProfilePage = true },
+                        onOpenTagPicker = { showTagPickerDialog = true },
+                        isVipStreakUnlocked = dailyStreakState.isVipBadgeUnlocked
                     )
                 }
 
-                // 2. Worldwide Leaderboard Section Card (Carries user to Leaderboard Tab when pressed)
+                // 1A. Daily Engagement Streak & G-Tokens Economy Profile Card
                 item {
-                    WorldwideLeaderboardCard(
-                        username = resolvedUsername,
-                        countryOption = resolvedCountryOption,
-                        gamerscore = gamerscoreData.totalScore,
-                        rankPosition = currentUserRank,
-                        totalCompetitors = mergedLeaderboard.size,
-                        scale = scale,
-                        onOpenLeaderboard = {
-                            viewModel.startWorldwideLeaderboardSync()
-                            showLeaderboardTab = true
-                        }
+                    com.example.ui.components.ProfileDailyStreakCard(
+                        streakState = dailyStreakState,
+                        onOpenStreakHub = { showProfileStreakHubModal = true },
+                        onOpenRepairDialog = { showProfileStreakLostModal = true }
                     )
                 }
 
-                // 3. Gamer Bio Card (Moved ABOVE Total Gaming Time as requested)
+                // 1B. Search Player by Username / Display Name Card -> Ranked Closest Matches & Opens ExternalUserProfileScreen
                 item {
-                    CyberCard(
-                        modifier = Modifier
-                            .clickable { showBioDialog = true }
-                            .testTag("profile_edit_bio_card")
-                    ) {
-                        Row(
+                    CyberCard {
+                        Column(
                             modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
+                            verticalArrangement = Arrangement.spacedBy(8.scaledDp(scale))
                         ) {
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier.weight(1f)
+                                horizontalArrangement = Arrangement.spacedBy(8.scaledDp(scale))
                             ) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(44.scaledDp(scale))
-                                        .clip(RoundedCornerShape(13.scaledDp(scale)))
-                                        .background(HubBlue.copy(alpha = 0.15f))
-                                        .border(1.dp, HubBlue.copy(alpha = 0.45f), RoundedCornerShape(13.scaledDp(scale))),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Info,
-                                        contentDescription = "Profile Bio",
-                                        tint = HubBlue,
-                                        modifier = Modifier.size(22.scaledDp(scale))
-                                    )
-                                }
-
-                                Spacer(modifier = Modifier.width(12.scaledDp(scale)))
-
-                                Column(modifier = Modifier.weight(1f)) {
+                                Icon(
+                                    imageVector = Icons.Default.Search,
+                                    contentDescription = "Search Player",
+                                    tint = HubBlue,
+                                    modifier = Modifier.size(18.scaledDp(scale))
+                                )
+                                Column {
                                     Text(
-                                        text = "GAMER BIO",
+                                        text = com.example.util.tr("FIND PLAYER BY USERNAME OR NAME", "BUSCAR JUGADOR POR USUARIO O NOMBRE"),
                                         style = MaterialTheme.typography.labelSmall.copy(
                                             fontWeight = FontWeight.ExtraBold,
                                             color = HubBlue,
@@ -489,46 +536,199 @@ fun AccountProfileScreen(
                                             letterSpacing = 0.8.sp
                                         )
                                     )
-                                    Spacer(modifier = Modifier.height(2.scaledDp(scale)))
                                     Text(
-                                        text = if (resolvedBio.isNotBlank()) resolvedBio else "No bio added yet — tap Edit to write your gamer bio",
-                                        style = MaterialTheme.typography.bodyMedium.copy(
-                                            fontWeight = if (resolvedBio.isNotBlank()) FontWeight.Bold else FontWeight.Medium,
-                                            fontSize = 13.scaledSp(scale),
-                                            color = if (resolvedBio.isNotBlank()) MaterialTheme.colorScheme.onSurface
-                                            else MaterialTheme.colorScheme.onSurfaceVariant
+                                        text = com.example.util.tr(
+                                            "Matches closest @username (unique) or display name (shared)",
+                                            "Busca el @usuario (único) o nombre (compartido) más cercano"
                                         ),
-                                        maxLines = 3,
-                                        overflow = TextOverflow.Ellipsis
+                                        style = MaterialTheme.typography.labelSmall.copy(
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            fontSize = 10.scaledSp(scale)
+                                        )
                                     )
                                 }
                             }
 
-                            Spacer(modifier = Modifier.width(8.scaledDp(scale)))
-
-                            OutlinedButton(
-                                onClick = { showBioDialog = true },
-                                shape = RoundedCornerShape(12.scaledDp(scale)),
-                                border = BorderStroke(1.dp, HubBlue.copy(alpha = 0.5f)),
-                                contentPadding = PaddingValues(
-                                    horizontal = 11.scaledDp(scale),
-                                    vertical = 6.scaledDp(scale)
-                                ),
-                                modifier = Modifier.testTag("edit_bio_button")
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.scaledDp(scale))
                             ) {
-                                Icon(
-                                    imageVector = Icons.Default.Edit,
-                                    contentDescription = "Edit Bio",
-                                    tint = HubBlue,
-                                    modifier = Modifier.size(14.scaledDp(scale))
+                                OutlinedTextField(
+                                    value = usernameSearchQuery,
+                                    onValueChange = { nextVal ->
+                                        usernameSearchQuery = nextVal.removePrefix("@").take(32)
+                                        usernameSearchError = null
+                                        val q = usernameSearchQuery.trim()
+                                        if (q.length >= 2) {
+                                            coroutineScope.launch {
+                                                val res = viewModel.searchClosestPlayerProfiles(q, maxResults = 5)
+                                                closestSearchResults = res.getOrDefault(emptyList())
+                                            }
+                                        } else {
+                                            closestSearchResults = emptyList()
+                                        }
+                                    },
+                                    placeholder = {
+                                        Text(
+                                            text = com.example.util.tr("Enter @username or display name", "Ingresa @usuario o nombre"),
+                                            style = MaterialTheme.typography.bodySmall
+                                        )
+                                    },
+                                    prefix = {
+                                        Text(
+                                            text = "@",
+                                            color = HubBlue,
+                                            fontWeight = FontWeight.ExtraBold
+                                        )
+                                    },
+                                    singleLine = true,
+                                    shape = RoundedCornerShape(14.scaledDp(scale)),
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .testTag("search_player_username_input")
                                 )
-                                Spacer(modifier = Modifier.width(4.scaledDp(scale)))
+
+                                Button(
+                                    onClick = {
+                                        val q = usernameSearchQuery.trim()
+                                        if (q.length < 2) {
+                                            usernameSearchError = com.example.util.AppStrings.trText(
+                                                "Enter at least 2 characters.",
+                                                "Ingresa al menos 2 caracteres."
+                                            )
+                                            return@Button
+                                        }
+                                        isSearchingUsername = true
+                                        usernameSearchError = null
+                                        coroutineScope.launch {
+                                            val res = viewModel.searchClosestPlayerProfiles(q, maxResults = 6)
+                                            isSearchingUsername = false
+                                            val matches = res.getOrDefault(emptyList())
+                                            closestSearchResults = matches
+                                            val topMatch = matches.firstOrNull()
+                                            if (topMatch != null) {
+                                                selectedExternalProfile = topMatch
+                                            } else {
+                                                usernameSearchError = res.exceptionOrNull()?.localizedMessage
+                                                    ?: com.example.util.AppStrings.trText(
+                                                        "No close player match found for \"$q\".",
+                                                        "No se encontró ningún jugador cercano a \"$q\"."
+                                                    )
+                                            }
+                                        }
+                                    },
+                                    enabled = !isSearchingUsername,
+                                    shape = RoundedCornerShape(14.scaledDp(scale)),
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = HubBlue,
+                                        contentColor = Color(0xFF06101E)
+                                    ),
+                                    modifier = Modifier
+                                        .height(52.scaledDp(scale))
+                                        .testTag("search_player_username_button")
+                                ) {
+                                    if (isSearchingUsername) {
+                                        CircularProgressIndicator(
+                                            modifier = Modifier.size(18.scaledDp(scale)),
+                                            strokeWidth = 2.dp,
+                                            color = Color(0xFF06101E)
+                                        )
+                                    } else {
+                                        Text(
+                                            text = com.example.util.tr("View", "Ver"),
+                                            style = MaterialTheme.typography.labelLarge.copy(
+                                                fontWeight = FontWeight.ExtraBold
+                                            )
+                                        )
+                                    }
+                                }
+                            }
+
+                            if (closestSearchResults.isNotEmpty()) {
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(top = 4.scaledDp(scale)),
+                                    verticalArrangement = Arrangement.spacedBy(6.scaledDp(scale))
+                                ) {
+                                    Text(
+                                        text = com.example.util.tr("CLOSEST MATCHING ACCOUNTS", "CUENTAS MÁS CERCANAS"),
+                                        style = MaterialTheme.typography.labelSmall.copy(
+                                            fontWeight = FontWeight.Bold,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            fontSize = 10.scaledSp(scale)
+                                        )
+                                    )
+                                    closestSearchResults.forEachIndexed { idx, candidate ->
+                                        Surface(
+                                            onClick = { selectedExternalProfile = candidate },
+                                            shape = RoundedCornerShape(12.scaledDp(scale)),
+                                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+                                            border = BorderStroke(
+                                                width = 1.dp,
+                                                color = if (idx == 0) HubBlue.copy(alpha = 0.6f) else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)
+                                            ),
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .testTag("search_player_match_item_$idx")
+                                        ) {
+                                            Row(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .padding(horizontal = 12.scaledDp(scale), vertical = 9.scaledDp(scale)),
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.SpaceBetween
+                                            ) {
+                                                Column(modifier = Modifier.weight(1f)) {
+                                                    Row(
+                                                        verticalAlignment = Alignment.CenterVertically,
+                                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                                    ) {
+                                                        Text(
+                                                            text = "${candidate.flagEmoji} ${candidate.displayName}",
+                                                            style = MaterialTheme.typography.bodyMedium.copy(
+                                                                fontWeight = FontWeight.ExtraBold,
+                                                                color = MaterialTheme.colorScheme.onSurface
+                                                            )
+                                                        )
+                                                        if (idx == 0) {
+                                                            Text(
+                                                                text = com.example.util.tr("BEST MATCH", "MEJOR COINCIDENCIA"),
+                                                                style = MaterialTheme.typography.labelSmall.copy(
+                                                                    color = HubBlue,
+                                                                    fontWeight = FontWeight.Black,
+                                                                    fontSize = 9.sp
+                                                                )
+                                                            )
+                                                        }
+                                                    }
+                                                    Text(
+                                                        text = "@${candidate.username} • ${candidate.gamerscore} GS",
+                                                        style = MaterialTheme.typography.labelSmall.copy(
+                                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                        )
+                                                    )
+                                                }
+                                                Text(
+                                                    text = com.example.util.tr("Open", "Abrir"),
+                                                    style = MaterialTheme.typography.labelMedium.copy(
+                                                        color = HubBlue,
+                                                        fontWeight = FontWeight.ExtraBold
+                                                    )
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            if (!usernameSearchError.isNullOrBlank()) {
                                 Text(
-                                    text = "Edit",
-                                    style = MaterialTheme.typography.labelMedium.copy(
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 12.scaledSp(scale),
-                                        color = HubBlue
+                                    text = usernameSearchError!!,
+                                    style = MaterialTheme.typography.labelSmall.copy(
+                                        color = RecorderCoral,
+                                        fontWeight = FontWeight.SemiBold
                                     )
                                 )
                             }
@@ -536,7 +736,97 @@ fun AccountProfileScreen(
                     }
                 }
 
-                // 4. Performance Overview & Total Gaming Time (Smooth Area Chart matching IMG_0371.webp)
+                // 2. General Settings Card
+                item {
+                    com.example.ui.components.ProfileSettingSectionCard(
+                        sectionTitle = com.example.util.tr("General", "General"),
+                        scale = scale
+                    ) {
+                        com.example.ui.components.ProfileSettingActionRow(
+                            icon = Icons.Default.AccountCircle,
+                            iconTint = HubBlue,
+                            title = com.example.util.tr("Edit Profile", "Editar Perfil"),
+                            subtitle = com.example.util.tr(
+                                "Change avatar, name, bio, DOB, profile tags & cyber banner",
+                                "Cambiar avatar, nombre, biografía, fecha de nacimiento, etiquetas y banner"
+                            ),
+                            scale = scale,
+                            testTag = "open_edit_profile_row",
+                            onClick = { showEditProfilePage = true }
+                        )
+                        HorizontalDivider(color = Color(0xFF1A2639))
+                        com.example.ui.components.ProfileSettingActionRow(
+                            icon = if (currentUser != null) Icons.Default.CloudDone else Icons.Default.CloudSync,
+                            iconTint = if (currentUser != null) LaunchGreen else HubBlue,
+                            title = if (currentUser != null) {
+                                com.example.util.tr("Google Account Connected", "Cuenta de Google Conectada")
+                            } else {
+                                com.example.util.tr("Connect Google Account", "Conectar Cuenta de Google")
+                            },
+                            subtitle = if (currentUser != null) {
+                                com.example.util.tr(
+                                    "${currentUser?.email ?: emailText} • Tap to sync settings to cloud",
+                                    "${currentUser?.email ?: emailText} • Toca para sincronizar ajustes en la nube"
+                                )
+                            } else {
+                                com.example.util.tr(
+                                    "Sign in with Google for cloud backup & verified leaderboard identity",
+                                    "Inicia sesión con Google para respaldo en la nube e identidad verificada en clasificación"
+                                )
+                            },
+                            badgeText = if (currentUser != null) com.example.util.tr("LINKED", "VINCULADO") else com.example.util.tr("SIGN IN", "ENTRAR"),
+                            badgeColor = if (currentUser != null) LaunchGreen else HubBlue,
+                            scale = scale,
+                            testTag = "general_google_account_row",
+                            onClick = {
+                                if (currentUser != null) {
+                                    viewModel.syncAllSettingsToCloudNow()
+                                    Toast.makeText(
+                                        context,
+                                        com.example.util.AppStrings.trText(
+                                            "Syncing profile settings to Google Cloud...",
+                                            "Sincronizando ajustes de perfil con Google Cloud..."
+                                        ),
+                                        Toast.LENGTH_SHORT
+                                    ).show()
+                                } else {
+                                    authError = null
+                                    isSigningIn = true
+                                    UserAccountRepository.onGoogleSignInClicked(
+                                        context = context,
+                                        credentialManager = credentialManager,
+                                        onAuthSuccess = {
+                                            isSigningIn = false
+                                            viewModel.onUserSignedInSuccess("Google")
+                                            Toast.makeText(
+                                                context,
+                                                com.example.util.AppStrings.trText(
+                                                    "Connected to Google Account!",
+                                                    "¡Conectado a la cuenta de Google!"
+                                                ),
+                                                Toast.LENGTH_SHORT
+                                            ).show()
+                                        },
+                                        onAuthError = {
+                                            isSigningIn = false
+                                            activeProfileSocialPickerProvider = "Google"
+                                        },
+                                        scope = coroutineScope,
+                                        onAuthCancelled = {
+                                            isSigningIn = false
+                                        },
+                                        onRequireFallbackPicker = {
+                                            isSigningIn = false
+                                            activeProfileSocialPickerProvider = "Google"
+                                        }
+                                    )
+                                }
+                            }
+                        )
+                    }
+                }
+
+                // 3. Performance Overview & Total Gaming Time (Smooth Area Chart)
                 item {
                     CyberCard(borderColor = HubBlue.copy(alpha = 0.55f)) {
                         Column(
@@ -574,7 +864,7 @@ fun AccountProfileScreen(
 
                                     Column(modifier = Modifier.weight(1f)) {
                                         Text(
-                                            text = "TOTAL GAMING TIME",
+                                            text = com.example.util.tr("TOTAL GAMING TIME", "TIEMPO TOTAL DE JUEGO"),
                                             style = MaterialTheme.typography.labelSmall.copy(
                                                 fontWeight = FontWeight.ExtraBold,
                                                 color = HubBlue,
@@ -593,7 +883,10 @@ fun AccountProfileScreen(
                                             )
                                             Spacer(modifier = Modifier.width(6.scaledDp(scale)))
                                             Text(
-                                                text = "across $totalSessionsCount ${if (totalSessionsCount == 1L) "session" else "sessions"}",
+                                                text = com.example.util.tr(
+                                                    "across $totalSessionsCount ${if (totalSessionsCount == 1L) "session" else "sessions"}",
+                                                    "en $totalSessionsCount ${if (totalSessionsCount == 1L) "sesión" else "sesiones"}"
+                                                ),
                                                 style = MaterialTheme.typography.bodySmall.copy(
                                                     fontSize = 11.scaledSp(scale),
                                                     color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -660,7 +953,7 @@ fun AccountProfileScreen(
                                     Spacer(modifier = Modifier.width(10.scaledDp(scale)))
                                     Column {
                                         Text(
-                                            text = "GAMERSCORE",
+                                            text = com.example.util.tr("GAMERSCORE", "PUNTUACIÓN GAMER"),
                                             style = MaterialTheme.typography.labelSmall.copy(
                                                 fontWeight = FontWeight.ExtraBold,
                                                 color = primaryGamerscoreColor,
@@ -735,7 +1028,10 @@ fun AccountProfileScreen(
                                     horizontalArrangement = Arrangement.SpaceBetween
                                 ) {
                                     Text(
-                                        text = "${gamerscoreData.rankTier} • Progress to Next Rank",
+                                        text = com.example.util.tr(
+                                            "${gamerscoreData.rankTier} • Progress to Next Rank",
+                                            "${gamerscoreData.rankTier} • Progreso al Siguiente Rango"
+                                        ),
                                         style = MaterialTheme.typography.bodySmall.copy(
                                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                                             fontSize = 11.scaledSp(scale),
@@ -769,21 +1065,21 @@ fun AccountProfileScreen(
                                 horizontalArrangement = Arrangement.spacedBy(8.scaledDp(scale))
                             ) {
                                 GamerscoreMetricChip(
-                                    label = "Play Time",
+                                    label = com.example.util.tr("Play Time", "Tiempo"),
                                     value = "+${gamerscoreData.playTimePoints} pts",
                                     accent = HubBlue,
                                     scale = scale,
                                     modifier = Modifier.weight(1f)
                                 )
                                 GamerscoreMetricChip(
-                                    label = "Sessions",
+                                    label = com.example.util.tr("Sessions", "Sesiones"),
                                     value = "+${gamerscoreData.sessionsPoints} pts",
                                     accent = LaunchGreen,
                                     scale = scale,
                                     modifier = Modifier.weight(1f)
                                 )
                                 GamerscoreMetricChip(
-                                    label = "Milestones",
+                                    label = com.example.util.tr("Milestones", "Logros"),
                                     value = "+${gamerscoreData.milestoneBonusPoints} pts",
                                     accent = SolarGold,
                                     scale = scale,
@@ -794,26 +1090,45 @@ fun AccountProfileScreen(
                     }
                 }
 
-                // 6. Most Played Game Card
+                // 6. Most Played Game Card (renders real installed game icon when available)
                 item {
                     CyberCard {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            com.example.ui.components.GMaxBrandIcon(
-                                size = 46.scaledDp(scale),
-                                cornerRadius = 14.scaledDp(scale),
-                                showGlowBorder = true,
-                                glowColor = LaunchGreen,
-                                contentDescription = "Most Played Game"
-                            )
+                            if (mostPlayedGamePkg.isNotBlank()) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(46.scaledDp(scale))
+                                        .clip(RoundedCornerShape(14.scaledDp(scale)))
+                                        .border(
+                                            width = 1.5.dp,
+                                            color = LaunchGreen.copy(alpha = 0.75f),
+                                            shape = RoundedCornerShape(14.scaledDp(scale))
+                                        )
+                                        .testTag("most_played_game_real_icon")
+                                ) {
+                                    AppIconImage(
+                                        packageName = mostPlayedGamePkg,
+                                        modifier = Modifier.fillMaxSize()
+                                    )
+                                }
+                            } else {
+                                com.example.ui.components.GMaxBrandIcon(
+                                    size = 46.scaledDp(scale),
+                                    cornerRadius = 14.scaledDp(scale),
+                                    showGlowBorder = true,
+                                    glowColor = LaunchGreen,
+                                    contentDescription = "Most Played Game"
+                                )
+                            }
 
                             Spacer(modifier = Modifier.width(12.scaledDp(scale)))
 
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(
-                                    text = "MOST PLAYED GAME",
+                                    text = com.example.util.tr("MOST PLAYED GAME", "JUEGO MÁS JUGADO"),
                                     style = MaterialTheme.typography.labelSmall.copy(
                                         fontWeight = FontWeight.ExtraBold,
                                         color = LaunchGreen,
@@ -823,7 +1138,11 @@ fun AccountProfileScreen(
                                 )
                                 Spacer(modifier = Modifier.height(2.scaledDp(scale)))
                                 Text(
-                                    text = mostPlayedTitle,
+                                    text = if (mostPlayedTitle == "No games played yet") {
+                                        com.example.util.tr("No games played yet", "Aún no se han jugado juegos")
+                                    } else {
+                                        mostPlayedTitle
+                                    },
                                     style = MaterialTheme.typography.titleMedium.copy(
                                         fontWeight = FontWeight.ExtraBold,
                                         fontSize = 15.scaledSp(scale),
@@ -833,7 +1152,11 @@ fun AccountProfileScreen(
                                     overflow = TextOverflow.Ellipsis
                                 )
                                 Text(
-                                    text = formattedPlayTime,
+                                    text = if (mostPlayedMinutes <= 0L) {
+                                        com.example.util.tr("Launch any game to track play time", "Inicia cualquier juego para registrar el tiempo")
+                                    } else {
+                                        formattedPlayTime
+                                    },
                                     style = MaterialTheme.typography.bodySmall.copy(
                                         fontSize = 11.scaledSp(scale),
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -844,244 +1167,50 @@ fun AccountProfileScreen(
                     }
                 }
 
-                // 7. Profile Tags & Customization Card
+                // 7. Preferences Card (Log Out)
                 item {
-                    CyberCard {
-                        Column(verticalArrangement = Arrangement.spacedBy(12.scaledDp(scale))) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.SpaceBetween
-                            ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    modifier = Modifier.weight(1f)
-                                ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(44.scaledDp(scale))
-                                            .clip(RoundedCornerShape(12.scaledDp(scale)))
-                                            .background(HubBlue.copy(alpha = 0.15f))
-                                            .border(1.dp, HubBlue.copy(alpha = 0.45f), RoundedCornerShape(12.scaledDp(scale))),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Default.LocalOffer,
-                                            contentDescription = "Profile Tags",
-                                            tint = HubBlue,
-                                            modifier = Modifier.size(20.scaledDp(scale))
-                                        )
-                                    }
-
-                                    Spacer(modifier = Modifier.width(10.scaledDp(scale)))
-
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Row(
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(6.scaledDp(scale))
-                                        ) {
-                                            Text(
-                                                text = "PROFILE TAGS",
-                                                style = MaterialTheme.typography.labelSmall.copy(
-                                                    fontWeight = FontWeight.ExtraBold,
-                                                    color = HubBlue,
-                                                    fontSize = 10.scaledSp(scale),
-                                                    letterSpacing = 0.8.sp
-                                                )
-                                            )
-                                            Box(
-                                                modifier = Modifier
-                                                    .clip(RoundedCornerShape(50))
-                                                    .background(LaunchGreen.copy(alpha = 0.16f))
-                                                    .padding(horizontal = 6.scaledDp(scale), vertical = 2.dp)
-                                            ) {
-                                                Text(
-                                                    text = "${equippedTags.size} / ${PremadeTagsCatalog.MAX_EQUIPPED_TAGS} EQUIPPED",
-                                                    style = MaterialTheme.typography.labelSmall.copy(
-                                                        fontWeight = FontWeight.ExtraBold,
-                                                        color = LaunchGreen,
-                                                        fontSize = 9.scaledSp(scale)
-                                                    )
-                                                )
-                                            }
-                                        }
-                                        Text(
-                                            text = "Equip up to 4 tags to showcase on your gamer profile",
-                                            style = MaterialTheme.typography.bodySmall.copy(
-                                                fontSize = 11.scaledSp(scale),
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                                            )
-                                        )
-                                    }
-                                }
-
-                                OutlinedButton(
-                                    onClick = { showTagPickerDialog = true },
-                                    shape = RoundedCornerShape(12.scaledDp(scale)),
-                                    border = BorderStroke(1.dp, HubBlue.copy(alpha = 0.55f)),
-                                    contentPadding = PaddingValues(
-                                        horizontal = 10.scaledDp(scale),
-                                        vertical = 6.scaledDp(scale)
-                                    ),
-                                    modifier = Modifier.testTag("edit_profile_tags_button")
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Edit,
-                                        contentDescription = "Choose Profile Tags",
-                                        tint = HubBlue,
-                                        modifier = Modifier.size(14.scaledDp(scale))
-                                    )
-                                    Spacer(modifier = Modifier.width(4.scaledDp(scale)))
-                                    Text(
-                                        text = "Choose Tags",
-                                        style = MaterialTheme.typography.labelMedium.copy(
-                                            fontWeight = FontWeight.Bold,
-                                            fontSize = 11.scaledSp(scale),
-                                            color = HubBlue
-                                        )
-                                    )
-                                }
+                    com.example.ui.components.ProfileSettingSectionCard(
+                        sectionTitle = com.example.util.tr("Preferences", "Preferencias"),
+                        scale = scale
+                    ) {
+                        com.example.ui.components.ProfileSettingActionRow(
+                            icon = Icons.AutoMirrored.Filled.Logout,
+                            iconTint = RecorderCoral,
+                            title = com.example.util.tr("Log Out", "Cerrar Sesión"),
+                            subtitle = com.example.util.tr("Securely log out of Account", "Cerrar sesión de forma segura"),
+                            titleColor = RecorderCoral,
+                            scale = scale,
+                            testTag = "preferences_logout_row",
+                            onClick = {
+                                UserAccountRepository.signOut(
+                                    credentialManager = credentialManager,
+                                    onSignOutComplete = {
+                                        viewModel.onUserSignedOut()
+                                        Toast.makeText(
+                                            context,
+                                            com.example.util.AppStrings.trText(
+                                                "Logged out of your account",
+                                                "Sesión cerrada correctamente"
+                                            ),
+                                            Toast.LENGTH_SHORT
+                                        ).show()
+                                    },
+                                    scope = coroutineScope
+                                )
                             }
-
-                            // Equipped Tags FlowRow
-                            FlowRow(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(8.scaledDp(scale)),
-                                verticalArrangement = Arrangement.spacedBy(8.scaledDp(scale))
-                            ) {
-                                if (isVerifiedDeveloper) {
-                                    VerifiedDeveloperGoldStarBadge(
-                                        compact = false,
-                                        modifier = Modifier.testTag("permanent_fifth_developer_tag")
-                                    )
-                                }
-
-                                if (equippedTags.isEmpty()) {
-                                    Box(
-                                        modifier = Modifier
-                                            .clip(RoundedCornerShape(10.scaledDp(scale)))
-                                            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f))
-                                            .clickable { showTagPickerDialog = true }
-                                            .padding(horizontal = 12.scaledDp(scale), vertical = 8.scaledDp(scale))
-                                    ) {
-                                        Text(
-                                            text = "+ Tap 'Choose Tags' to equip gamer tags",
-                                            style = MaterialTheme.typography.labelMedium.copy(
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                fontSize = 11.scaledSp(scale),
-                                                fontWeight = FontWeight.SemiBold
-                                            )
-                                        )
-                                    }
-                                } else {
-                                    equippedTags.forEach { tag ->
-                                        PremadeTagChip(
-                                            tag = tag,
-                                            isSelected = true,
-                                            onClick = { showTagPickerDialog = true }
-                                        )
-                                    }
-                                }
-                            }
-                        }
+                        )
                     }
                 }
 
-                // 8. Date of Birth Card
-                item {
-                    CyberCard {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(44.scaledDp(scale))
-                                        .clip(RoundedCornerShape(13.scaledDp(scale)))
-                                        .background(HubBlue.copy(alpha = 0.15f))
-                                        .border(1.dp, HubBlue.copy(alpha = 0.45f), RoundedCornerShape(13.scaledDp(scale))),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Cake,
-                                        contentDescription = "Date of Birth",
-                                        tint = HubBlue,
-                                        modifier = Modifier.size(22.scaledDp(scale))
-                                    )
-                                }
-
-                                Spacer(modifier = Modifier.width(12.scaledDp(scale)))
-
-                                Column {
-                                    Text(
-                                        text = "DATE OF BIRTH",
-                                        style = MaterialTheme.typography.labelSmall.copy(
-                                            fontWeight = FontWeight.ExtraBold,
-                                            color = HubBlue,
-                                            fontSize = 10.scaledSp(scale),
-                                            letterSpacing = 0.8.sp
-                                        )
-                                    )
-                                    Spacer(modifier = Modifier.height(2.scaledDp(scale)))
-                                    Text(
-                                        text = userDateOfBirth,
-                                        style = MaterialTheme.typography.titleMedium.copy(
-                                            fontWeight = FontWeight.ExtraBold,
-                                            fontSize = 15.scaledSp(scale),
-                                            color = MaterialTheme.colorScheme.onSurface
-                                        )
-                                    )
-                                    Text(
-                                        text = "Saved to your G-Max gamer profile",
-                                        style = MaterialTheme.typography.bodySmall.copy(
-                                            fontSize = 11.scaledSp(scale),
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                    )
-                                }
-                            }
-
-                            OutlinedButton(
-                                onClick = { showDobDialog = true },
-                                shape = RoundedCornerShape(12.scaledDp(scale)),
-                                border = BorderStroke(1.dp, HubBlue.copy(alpha = 0.5f)),
-                                contentPadding = PaddingValues(
-                                    horizontal = 11.scaledDp(scale),
-                                    vertical = 6.scaledDp(scale)
-                                ),
-                                modifier = Modifier.testTag("edit_dob_button")
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Edit,
-                                    contentDescription = "Edit Date of Birth",
-                                    tint = HubBlue,
-                                    modifier = Modifier.size(14.scaledDp(scale))
-                                )
-                                Spacer(modifier = Modifier.width(4.scaledDp(scale)))
-                                Text(
-                                    text = "Edit",
-                                    style = MaterialTheme.typography.labelMedium.copy(
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 12.scaledSp(scale),
-                                        color = HubBlue
-                                    )
-                                )
-                            }
-                        }
-                    }
-                }
-
-                // 9. Account & Cloud Sync Card
+                // 8. Account & Cloud Sync Card
                 item {
                     CyberCard {
                         SectionTitle(
-                            title = "Account & Cloud Sync",
-                            subtitle = "Automatically remembers and restores your previous settings, tags, avatars, and chosen options"
+                            title = com.example.util.tr("Account & Cloud Sync", "Cuenta y Sincronización en la Nube"),
+                            subtitle = com.example.util.tr(
+                                "Automatically remembers and restores your previous settings, tags, avatars, and chosen options",
+                                "Recuerda y restaura automáticamente tus ajustes anteriores, etiquetas, avatares y opciones elegidas"
+                            )
                         )
 
                         Spacer(modifier = Modifier.height(12.scaledDp(scale)))
@@ -1123,8 +1252,14 @@ fun AccountProfileScreen(
                                         )
                                     )
                                     Text(
-                                        text = if (isSignedIn) "Last backup: $lastSyncedFormatted"
-                                        else "Sign in to backup settings, tags, avatar & game playtime",
+                                        text = if (isSignedIn) {
+                                            com.example.util.tr("Last backup: $lastSyncedFormatted", "Último respaldo: $lastSyncedFormatted")
+                                        } else {
+                                            com.example.util.tr(
+                                                "Sign in to backup settings, tags, avatar & game playtime",
+                                                "Inicia sesión para respaldar ajustes, etiquetas, avatar y tiempo de juego"
+                                            )
+                                        },
                                         style = MaterialTheme.typography.bodySmall.copy(
                                             fontSize = 11.scaledSp(scale),
                                             color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -1135,36 +1270,6 @@ fun AccountProfileScreen(
                         }
 
                         Spacer(modifier = Modifier.height(14.scaledDp(scale)))
-
-                        // Synced Categories Checklist
-                        Column(verticalArrangement = Arrangement.spacedBy(8.scaledDp(scale))) {
-                            SyncedCategoryRow(
-                                icon = Icons.Default.Settings,
-                                accent = HubBlue,
-                                label = "Hub Theme & Custom Colors",
-                                currentValue = appTheme.title
-                            )
-                            SyncedCategoryRow(
-                                icon = Icons.Default.RocketLaunch,
-                                accent = LaunchGreen,
-                                label = "Boost Profile & System Optimizers",
-                                currentValue = "${selectedBoostMode.title} Mode"
-                            )
-                            SyncedCategoryRow(
-                                icon = Icons.Default.SportsEsports,
-                                accent = HubBlue,
-                                label = "EFPS HUD & Target Calibration",
-                                currentValue = "${overlayConfig.fpsMode} • Cap: ${overlayConfig.targetCapMode}"
-                            )
-                            SyncedCategoryRow(
-                                icon = Icons.Default.Wallpaper,
-                                accent = SolarGold,
-                                label = "Gamer Avatar & Cyber Banner",
-                                currentValue = "Cloud Backed"
-                            )
-                        }
-
-                        Spacer(modifier = Modifier.height(16.scaledDp(scale)))
 
                         AnimatedVisibility(visible = authError != null) {
                             Text(
@@ -1210,7 +1315,7 @@ fun AccountProfileScreen(
                                     }
                                     Spacer(modifier = Modifier.width(8.dp))
                                     Text(
-                                        text = "Sync Settings Now",
+                                        text = com.example.util.tr("Sync Settings Now", "Sincronizar Ahora"),
                                         fontWeight = FontWeight.ExtraBold,
                                         fontSize = 12.scaledSp(scale),
                                         maxLines = 1,
@@ -1242,7 +1347,7 @@ fun AccountProfileScreen(
                                     )
                                     Spacer(modifier = Modifier.width(6.dp))
                                     Text(
-                                        text = "Sign Out",
+                                        text = com.example.util.tr("Sign Out", "Salir"),
                                         color = RecorderCoral,
                                         fontWeight = FontWeight.Bold,
                                         fontSize = 12.scaledSp(scale)
@@ -1250,226 +1355,71 @@ fun AccountProfileScreen(
                                 }
                             }
 
-                            Spacer(modifier = Modifier.height(14.scaledDp(scale)))
-
-                            // Google Play Console Data Safety: Account Deletion URL Resource
-                            Card(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .testTag("play_account_deletion_link_card"),
-                                shape = RoundedCornerShape(14.dp),
-                                colors = CardDefaults.cardColors(
-                                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
-                                ),
-                                border = BorderStroke(
-                                    1.dp,
-                                    if (customDeletionUrl.isNotBlank()) LaunchGreen.copy(alpha = 0.5f) else HubBlue.copy(alpha = 0.35f)
-                                )
-                            ) {
-                                Column(
-                                    modifier = Modifier.padding(14.dp),
-                                    verticalArrangement = Arrangement.spacedBy(10.dp)
-                                ) {
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.SpaceBetween
-                                    ) {
-                                        Row(
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                        ) {
-                                            Icon(
-                                                imageVector = Icons.Default.Link,
-                                                contentDescription = null,
-                                                tint = if (customDeletionUrl.isNotBlank()) LaunchGreen else HubBlue,
-                                                modifier = Modifier.size(18.dp)
-                                            )
-                                            Text(
-                                                text = "PLAY CONSOLE DATA SAFETY LINK",
-                                                style = MaterialTheme.typography.labelSmall.copy(
-                                                    fontWeight = FontWeight.ExtraBold,
-                                                    color = if (customDeletionUrl.isNotBlank()) LaunchGreen else HubBlue,
-                                                    letterSpacing = 0.6.sp
-                                                )
-                                            )
-                                        }
-
-                                        if (customDeletionUrl.isNotBlank()) {
-                                            Row(
-                                                verticalAlignment = Alignment.CenterVertically,
-                                                modifier = Modifier
-                                                    .clip(RoundedCornerShape(50))
-                                                    .background(LaunchGreen.copy(alpha = 0.15f))
-                                                    .border(1.dp, LaunchGreen.copy(alpha = 0.4f), RoundedCornerShape(50))
-                                                    .padding(horizontal = 8.dp, vertical = 2.dp)
-                                            ) {
-                                                Text(
-                                                    text = "PUBLIC URL READY",
-                                                    style = MaterialTheme.typography.labelSmall.copy(
-                                                        color = LaunchGreen,
-                                                        fontWeight = FontWeight.Bold,
-                                                        fontSize = 10.sp
-                                                    )
-                                                )
+                            if (currentUser == null) {
+                                Spacer(modifier = Modifier.height(10.scaledDp(scale)))
+                                Button(
+                                    onClick = {
+                                        authError = null
+                                        isSigningIn = true
+                                        UserAccountRepository.onGoogleSignInClicked(
+                                            context = context,
+                                            credentialManager = credentialManager,
+                                            onAuthSuccess = {
+                                                isSigningIn = false
+                                                viewModel.onUserSignedInSuccess("Google")
+                                                Toast.makeText(
+                                                    context,
+                                                    com.example.util.AppStrings.trText(
+                                                        "Google Account linked for Cloud Backup!",
+                                                        "¡Cuenta de Google vinculada para respaldo en la nube!"
+                                                    ),
+                                                    Toast.LENGTH_SHORT
+                                                ).show()
+                                            },
+                                            onAuthError = {
+                                                isSigningIn = false
+                                                activeProfileSocialPickerProvider = "Google"
+                                            },
+                                            scope = coroutineScope,
+                                            onAuthCancelled = {
+                                                isSigningIn = false
+                                            },
+                                            onRequireFallbackPicker = {
+                                                isSigningIn = false
+                                                activeProfileSocialPickerProvider = "Google"
                                             }
-                                        }
-                                    }
-
-                                    Text(
-                                        text = "Google Play Console's Data Safety form requires a public, 24/7 web link for account & data deletion requests. Internal AI Studio preview links fail with a 404 error because Google's crawlers cannot pass the container login barrier. Use a free Google Form or public web page.",
-                                        style = MaterialTheme.typography.bodySmall.copy(
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
                                         )
+                                    },
+                                    enabled = !isSigningIn,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(48.dp)
+                                        .testTag("link_real_google_account_button"),
+                                    shape = RoundedCornerShape(14.dp),
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = LaunchGreen,
+                                        contentColor = Color(0xFF081018)
                                     )
-
+                                ) {
                                     Box(
                                         modifier = Modifier
-                                            .fillMaxWidth()
-                                            .clip(RoundedCornerShape(8.dp))
-                                            .background(Color(0xFF090D16))
-                                            .border(
-                                                1.dp,
-                                                if (customDeletionUrl.isNotBlank()) LaunchGreen.copy(alpha = 0.35f) else Color(0xFF1E293B),
-                                                RoundedCornerShape(8.dp)
-                                            )
-                                            .padding(horizontal = 10.dp, vertical = 8.dp)
+                                            .size(20.dp)
+                                            .clip(CircleShape)
+                                            .background(Color.White),
+                                        contentAlignment = Alignment.Center
                                     ) {
                                         Text(
-                                            text = if (customDeletionUrl.isNotBlank()) customDeletionUrl else "No public link configured (Tap 'Configure URL' below)",
-                                            style = MaterialTheme.typography.labelSmall.copy(
-                                                color = if (customDeletionUrl.isNotBlank()) Color(0xFF38BDF8) else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-                                                fontWeight = FontWeight.Medium
-                                            ),
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis
+                                            text = "G",
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.Black,
+                                            color = Color(0xFF4285F4)
                                         )
                                     }
-
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                    ) {
-                                        Button(
-                                            onClick = { showEditDeletionUrlDialog = true },
-                                            modifier = Modifier
-                                                .weight(1f)
-                                                .height(40.dp)
-                                                .testTag("edit_deletion_url_button"),
-                                            shape = RoundedCornerShape(10.dp),
-                                            colors = ButtonDefaults.buttonColors(
-                                                containerColor = HubBlue.copy(alpha = 0.25f),
-                                                contentColor = HubBlue
-                                            ),
-                                            border = BorderStroke(1.dp, HubBlue.copy(alpha = 0.5f))
-                                        ) {
-                                            Icon(
-                                                imageVector = Icons.Default.Edit,
-                                                contentDescription = "Set URL",
-                                                modifier = Modifier.size(15.dp)
-                                            )
-                                            Spacer(modifier = Modifier.width(6.dp))
-                                            Text(
-                                                text = if (customDeletionUrl.isNotBlank()) "Edit URL" else "Configure URL",
-                                                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold)
-                                            )
-                                        }
-
-                                        OutlinedButton(
-                                            onClick = { showGoogleFormHelpDialog = true },
-                                            modifier = Modifier
-                                                .weight(1f)
-                                                .height(40.dp)
-                                                .testTag("google_form_guide_button"),
-                                            shape = RoundedCornerShape(10.dp),
-                                            border = BorderStroke(1.dp, SolarGold.copy(alpha = 0.6f)),
-                                            colors = ButtonDefaults.outlinedButtonColors(
-                                                contentColor = SolarGold
-                                            )
-                                        ) {
-                                            Icon(
-                                                imageVector = Icons.Default.Info,
-                                                contentDescription = "60s Setup Guide",
-                                                tint = SolarGold,
-                                                modifier = Modifier.size(15.dp)
-                                            )
-                                            Spacer(modifier = Modifier.width(6.dp))
-                                            Text(
-                                                text = "Setup Guide",
-                                                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold)
-                                            )
-                                        }
-                                    }
-
-                                    if (customDeletionUrl.isNotBlank()) {
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                        ) {
-                                            Button(
-                                                onClick = {
-                                                    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
-                                                    val clip = ClipData.newPlainText("Account Deletion URL", customDeletionUrl)
-                                                    clipboard?.setPrimaryClip(clip)
-                                                    Toast.makeText(context, "Public deletion link copied!", Toast.LENGTH_SHORT).show()
-                                                },
-                                                modifier = Modifier
-                                                    .weight(1f)
-                                                    .height(38.dp)
-                                                    .testTag("copy_deletion_url_button"),
-                                                shape = RoundedCornerShape(10.dp),
-                                                colors = ButtonDefaults.buttonColors(
-                                                    containerColor = LaunchGreen.copy(alpha = 0.18f),
-                                                    contentColor = LaunchGreen
-                                                ),
-                                                border = BorderStroke(1.dp, LaunchGreen.copy(alpha = 0.4f))
-                                            ) {
-                                                Icon(
-                                                    imageVector = Icons.Default.ContentCopy,
-                                                    contentDescription = "Copy Link",
-                                                    modifier = Modifier.size(14.dp)
-                                                )
-                                                Spacer(modifier = Modifier.width(6.dp))
-                                                Text(
-                                                    text = "Copy Link",
-                                                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold)
-                                                )
-                                            }
-
-                                            OutlinedButton(
-                                                onClick = {
-                                                    try {
-                                                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(customDeletionUrl))
-                                                        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                                        context.startActivity(intent)
-                                                    } catch (_: Exception) {
-                                                        Toast.makeText(context, "No browser found to open link", Toast.LENGTH_SHORT).show()
-                                                    }
-                                                },
-                                                modifier = Modifier
-                                                    .weight(1f)
-                                                    .height(38.dp)
-                                                    .testTag("open_deletion_page_button"),
-                                                shape = RoundedCornerShape(10.dp),
-                                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.4f))
-                                            ) {
-                                                Icon(
-                                                    imageVector = Icons.Default.OpenInNew,
-                                                    contentDescription = "Open Web Page",
-                                                    tint = MaterialTheme.colorScheme.onSurface,
-                                                    modifier = Modifier.size(14.dp)
-                                                )
-                                                Spacer(modifier = Modifier.width(6.dp))
-                                                Text(
-                                                    text = "Test Link",
-                                                    style = MaterialTheme.typography.labelMedium.copy(
-                                                        fontWeight = FontWeight.Bold,
-                                                        color = MaterialTheme.colorScheme.onSurface
-                                                    )
-                                                )
-                                            }
-                                        }
-                                    }
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        text = com.example.util.tr("Link Google Account for Cloud Sync", "Vincular Cuenta de Google para la Nube"),
+                                        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.ExtraBold)
+                                    )
                                 }
                             }
 
@@ -1493,7 +1443,7 @@ fun AccountProfileScreen(
                                 )
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Text(
-                                    text = "Delete Account & Data (In-App)",
+                                    text = com.example.util.tr("Delete Account & Data (In-App)", "Eliminar Cuenta y Datos (En la App)"),
                                     style = MaterialTheme.typography.labelLarge.copy(
                                         color = RecorderCoral,
                                         fontWeight = FontWeight.Bold
@@ -1562,63 +1512,7 @@ fun AccountProfileScreen(
                                     }
                                     Spacer(modifier = Modifier.width(8.dp))
                                     Text(
-                                        text = "Sign In / Create Account with Google",
-                                        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.ExtraBold)
-                                    )
-                                }
-
-                                Button(
-                                    onClick = {
-                                        authError = null
-                                        isSigningIn = true
-                                        UserAccountRepository.onFacebookSignInClicked(
-                                            context = context,
-                                            onAuthSuccess = {
-                                                isSigningIn = false
-                                                viewModel.onUserSignedInSuccess("Facebook")
-                                            },
-                                            onAuthError = {
-                                                isSigningIn = false
-                                                activeProfileSocialPickerProvider = "Facebook"
-                                            },
-                                            scope = coroutineScope,
-                                            onAuthCancelled = {
-                                                isSigningIn = false
-                                            },
-                                            onRequireFallbackPicker = {
-                                                isSigningIn = false
-                                                activeProfileSocialPickerProvider = "Facebook"
-                                            }
-                                        )
-                                    },
-                                    enabled = !isSigningIn,
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .height(52.dp)
-                                        .testTag("profile_facebook_signin_button"),
-                                    shape = RoundedCornerShape(14.dp),
-                                    colors = ButtonDefaults.buttonColors(
-                                        containerColor = Color(0xFF1877F2),
-                                        contentColor = Color.White
-                                    )
-                                ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(22.dp)
-                                            .clip(CircleShape)
-                                            .background(Color.White),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Text(
-                                            text = "f",
-                                            fontSize = 15.sp,
-                                            fontWeight = FontWeight.Black,
-                                            color = Color(0xFF1877F2)
-                                        )
-                                    }
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Text(
-                                        text = "Continue with Facebook",
+                                        text = com.example.util.tr("Sign In / Create Account with Google", "Iniciar Sesión / Crear Cuenta con Google"),
                                         style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.ExtraBold)
                                     )
                                 }
@@ -1628,6 +1522,45 @@ fun AccountProfileScreen(
                 }
             }
         }
+    }
+
+    if (showProfileStreakHubModal) {
+        com.example.ui.components.DailyStreakHubModalDialog(
+            streakState = dailyStreakState,
+            feedbackMessage = streakFeedback,
+            onBuyStreakFreeze = {
+                viewModel.buyStreakFreeze()
+            },
+            onSelectNeonColor = { hexColor ->
+                viewModel.selectStreakHudNeonColor(hexColor)
+            },
+            onOpenRepairModal = {
+                showProfileStreakHubModal = false
+                showProfileStreakLostModal = true
+            },
+            onDismiss = {
+                viewModel.clearStreakFeedbackMessage()
+                showProfileStreakHubModal = false
+            }
+        )
+    }
+
+    if (showProfileStreakLostModal && dailyStreakState.isStreakBrokenRepairable) {
+        com.example.ui.components.StreakLostRepairModalDialog(
+            streakState = dailyStreakState,
+            onRepairViaRewardedAd = {
+                viewModel.repairBrokenStreakAfterRewardedAd()
+                showProfileStreakLostModal = false
+                showProfileStreakHubModal = true
+            },
+            onLetStreakReset = {
+                viewModel.resetBrokenStreakToZero()
+                showProfileStreakLostModal = false
+            },
+            onDismiss = {
+                showProfileStreakLostModal = false
+            }
+        )
     }
 
     activeProfileSocialPickerProvider?.let { provider ->
@@ -1810,24 +1743,6 @@ fun AccountProfileScreen(
                     Text("Cancel")
                 }
             }
-        )
-    }
-
-    if (showEditDeletionUrlDialog) {
-        EditDeletionUrlDialog(
-            initialUrl = customDeletionUrl,
-            onDismiss = { showEditDeletionUrlDialog = false },
-            onSaveUrl = { updatedUrl ->
-                viewModel.setCustomDeletionUrl(updatedUrl)
-                showEditDeletionUrlDialog = false
-                Toast.makeText(context, "Public deletion link saved!", Toast.LENGTH_SHORT).show()
-            }
-        )
-    }
-
-    if (showGoogleFormHelpDialog) {
-        GoogleFormGuideDialog(
-            onDismiss = { showGoogleFormHelpDialog = false }
         )
     }
 }
@@ -2393,452 +2308,7 @@ private fun FloatingStatColumn(
     }
 }
 
-/**
- * Leaderboard section card in the Profile tab. Pressing it carries the user to the Worldwide Leaderboard Tab.
- */
-@Composable
-private fun WorldwideLeaderboardCard(
-    username: String,
-    countryOption: CountryOption,
-    gamerscore: Long,
-    rankPosition: Int,
-    totalCompetitors: Int,
-    scale: Float,
-    onOpenLeaderboard: () -> Unit
-) {
-    CyberCard(
-        borderColor = SolarGold.copy(alpha = 0.65f),
-        modifier = Modifier
-            .clickable { onOpenLeaderboard() }
-            .testTag("profile_leaderboard_section_card")
-    ) {
-        Column(
-            modifier = Modifier.fillMaxWidth(),
-            verticalArrangement = Arrangement.spacedBy(10.scaledDp(scale))
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.weight(1f)
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(46.scaledDp(scale))
-                            .clip(RoundedCornerShape(13.scaledDp(scale)))
-                            .background(SolarGold.copy(alpha = 0.18f))
-                            .border(1.dp, SolarGold.copy(alpha = 0.55f), RoundedCornerShape(13.scaledDp(scale))),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Leaderboard,
-                            contentDescription = "Worldwide Leaderboard",
-                            tint = SolarGold,
-                            modifier = Modifier.size(24.scaledDp(scale))
-                        )
-                    }
 
-                    Spacer(modifier = Modifier.width(12.scaledDp(scale)))
-
-                    Column(modifier = Modifier.weight(1f)) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.scaledDp(scale))
-                        ) {
-                            Text(
-                                text = "WORLDWIDE LEADERBOARD",
-                                style = MaterialTheme.typography.labelSmall.copy(
-                                    fontWeight = FontWeight.ExtraBold,
-                                    color = SolarGold,
-                                    fontSize = 11.scaledSp(scale),
-                                    letterSpacing = 0.8.sp
-                                )
-                            )
-                            Box(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(50))
-                                    .background(SolarGold.copy(alpha = 0.2f))
-                                    .padding(horizontal = 7.scaledDp(scale), vertical = 2.dp)
-                            ) {
-                                Text(
-                                    text = "RANK #$rankPosition",
-                                    style = MaterialTheme.typography.labelSmall.copy(
-                                        fontWeight = FontWeight.ExtraBold,
-                                        color = SolarGold,
-                                        fontSize = 9.scaledSp(scale)
-                                    )
-                                )
-                            }
-                        }
-
-                        Spacer(modifier = Modifier.height(2.scaledDp(scale)))
-
-                        Text(
-                            text = "${countryOption.flagEmoji} @$username • $gamerscore GS",
-                            style = MaterialTheme.typography.titleMedium.copy(
-                                fontWeight = FontWeight.ExtraBold,
-                                fontSize = 15.scaledSp(scale),
-                                color = MaterialTheme.colorScheme.onSurface
-                            ),
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-
-                        Text(
-                            text = "Tap to view global rankings by profile Gamerscore ($totalCompetitors players)",
-                            style = MaterialTheme.typography.bodySmall.copy(
-                                fontSize = 11.scaledSp(scale),
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            ),
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
-                }
-
-                Spacer(modifier = Modifier.width(8.scaledDp(scale)))
-
-                Button(
-                    onClick = onOpenLeaderboard,
-                    shape = RoundedCornerShape(12.scaledDp(scale)),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = SolarGold,
-                        contentColor = Color(0xFF090D16)
-                    ),
-                    contentPadding = PaddingValues(
-                        horizontal = 12.scaledDp(scale),
-                        vertical = 8.scaledDp(scale)
-                    ),
-                    modifier = Modifier.testTag("open_leaderboard_button")
-                ) {
-                    Text(
-                        text = "Rankings",
-                        style = MaterialTheme.typography.labelMedium.copy(
-                            fontWeight = FontWeight.ExtraBold,
-                            fontSize = 12.scaledSp(scale)
-                        )
-                    )
-                    Spacer(modifier = Modifier.width(2.scaledDp(scale)))
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                        contentDescription = "Open Leaderboard",
-                        modifier = Modifier.size(16.scaledDp(scale))
-                    )
-                }
-            }
-        }
-    }
-}
-
-/**
- * Dedicated Worldwide Leaderboard Tab View.
- * Strictly displays ONLY:
- *  - Profile Image (with country flag badge on corner)
- *  - Username (@username)
- *  - Game Score (Gamerscore)
- */
-@Composable
-private fun WorldwideLeaderboardContent(
-    entries: List<LeaderboardEntry>,
-    currentUserUid: String,
-    currentUsername: String,
-    isLoading: Boolean,
-    scale: Float,
-    onBackToProfile: () -> Unit,
-    onEditUsername: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    Column(
-        modifier = modifier
-            .fillMaxSize()
-            .padding(horizontal = 16.scaledDp(scale), vertical = 12.scaledDp(scale))
-            .testTag("worldwide_leaderboard_tab")
-    ) {
-        // Top Bar
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(bottom = 12.scaledDp(scale)),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.weight(1f)
-            ) {
-                IconButton(
-                    onClick = onBackToProfile,
-                    modifier = Modifier
-                        .size(42.scaledDp(scale))
-                        .clip(CircleShape)
-                        .background(MaterialTheme.colorScheme.surfaceVariant)
-                        .testTag("leaderboard_back_button")
-                ) {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                        contentDescription = "Back to Profile",
-                        tint = MaterialTheme.colorScheme.onSurface
-                    )
-                }
-                Spacer(modifier = Modifier.width(12.scaledDp(scale)))
-                Column {
-                    Text(
-                        text = "Worldwide Leaderboard",
-                        style = MaterialTheme.typography.titleLarge.copy(
-                            fontWeight = FontWeight.ExtraBold,
-                            fontSize = 20.scaledSp(scale),
-                            color = MaterialTheme.colorScheme.onBackground
-                        )
-                    )
-                    Text(
-                        text = "Ranked by worldwide profile Gamerscore",
-                        style = MaterialTheme.typography.bodySmall.copy(
-                            fontSize = 11.scaledSp(scale),
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    )
-                }
-            }
-
-            OutlinedButton(
-                onClick = onEditUsername,
-                shape = RoundedCornerShape(12.scaledDp(scale)),
-                border = BorderStroke(1.dp, HubBlue.copy(alpha = 0.6f)),
-                contentPadding = PaddingValues(
-                    horizontal = 10.scaledDp(scale),
-                    vertical = 6.scaledDp(scale)
-                ),
-                modifier = Modifier.testTag("leaderboard_edit_username_button")
-            ) {
-                Icon(
-                    imageVector = Icons.Default.AlternateEmail,
-                    contentDescription = "Edit Username",
-                    tint = HubBlue,
-                    modifier = Modifier.size(14.scaledDp(scale))
-                )
-                Spacer(modifier = Modifier.width(4.scaledDp(scale)))
-                Text(
-                    text = "Username",
-                    style = MaterialTheme.typography.labelMedium.copy(
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 11.scaledSp(scale),
-                        color = HubBlue
-                    )
-                )
-            }
-        }
-
-        if (isLoading && entries.isEmpty()) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f),
-                contentAlignment = Alignment.Center
-            ) {
-                CircularProgressIndicator(color = HubBlue)
-            }
-        } else {
-            LazyColumn(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f),
-                contentPadding = PaddingValues(bottom = 90.dp),
-                verticalArrangement = Arrangement.spacedBy(10.scaledDp(scale))
-            ) {
-                itemsIndexed(
-                    items = entries,
-                    key = { index, item -> "${item.userId}_${item.username}_$index" }
-                ) { index, entry ->
-                    val rank = index + 1
-                    val isCurrentUser = entry.userId == currentUserUid ||
-                        entry.username.equals(currentUsername, ignoreCase = true)
-
-                    WorldwideLeaderboardRow(
-                        rank = rank,
-                        entry = entry,
-                        isCurrentUser = isCurrentUser,
-                        scale = scale
-                    )
-                }
-            }
-        }
-    }
-}
-
-/**
- * Individual row in the Worldwide Leaderboard Tab.
- * Strictly shows ONLY:
- *  - Rank number (#1, #2, #3...)
- *  - Profile picture (with country flag badge on corner)
- *  - Username (@username)
- *  - Game score (Gamerscore)
- */
-@Composable
-private fun WorldwideLeaderboardRow(
-    rank: Int,
-    entry: LeaderboardEntry,
-    isCurrentUser: Boolean,
-    scale: Float
-) {
-    val rankAccent = when (rank) {
-        1 -> DeveloperGold
-        2 -> Color(0xFFE2E8F0)
-        3 -> Color(0xFFF59E0B)
-        else -> if (isCurrentUser) HubBlue else Color(0xFF64748B)
-    }
-
-    val flagEmoji = remember(entry.countryCode) {
-        CountryCatalog.codeToFlagEmoji(entry.countryCode)
-    }
-
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .testTag("leaderboard_row_$rank"),
-        shape = RoundedCornerShape(16.scaledDp(scale)),
-        colors = CardDefaults.cardColors(
-            containerColor = if (isCurrentUser) Color(0xFF112236) else Color(0xFF0E1522)
-        ),
-        border = BorderStroke(
-            width = if (rank <= 3 || isCurrentUser) 1.4.dp else 1.dp,
-            color = when {
-                rank == 1 -> DeveloperGold.copy(alpha = 0.8f)
-                rank == 2 -> Color(0xFFE2E8F0).copy(alpha = 0.65f)
-                rank == 3 -> Color(0xFFF59E0B).copy(alpha = 0.65f)
-                isCurrentUser -> HubBlue.copy(alpha = 0.75f)
-                else -> Color(0xFF1E293B)
-            }
-        )
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(
-                    horizontal = 14.scaledDp(scale),
-                    vertical = 11.scaledDp(scale)
-                ),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.weight(1f)
-            ) {
-                // Rank Pill
-                Box(
-                    modifier = Modifier
-                        .width(36.scaledDp(scale))
-                        .height(28.scaledDp(scale))
-                        .clip(RoundedCornerShape(8.scaledDp(scale)))
-                        .background(rankAccent.copy(alpha = 0.16f))
-                        .border(1.dp, rankAccent.copy(alpha = 0.5f), RoundedCornerShape(8.scaledDp(scale))),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = "#$rank",
-                        style = MaterialTheme.typography.labelMedium.copy(
-                            fontWeight = FontWeight.ExtraBold,
-                            fontSize = 12.scaledSp(scale),
-                            color = rankAccent
-                        )
-                    )
-                }
-
-                Spacer(modifier = Modifier.width(12.scaledDp(scale)))
-
-                // User Profile Image with Country Flag on Corner
-                Box(
-                    modifier = Modifier.size(48.scaledDp(scale)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(44.scaledDp(scale))
-                            .clip(CircleShape)
-                            .background(Color(0xFF0B111A))
-                            .border(1.5.dp, rankAccent, CircleShape),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        if (entry.photoUrl.isNotBlank()) {
-                            AsyncImage(
-                                model = entry.photoUrl,
-                                contentDescription = entry.username,
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .clip(CircleShape),
-                                contentScale = ContentScale.Crop
-                            )
-                        } else {
-                            Icon(
-                                imageVector = Icons.Default.AccountCircle,
-                                contentDescription = entry.username,
-                                tint = rankAccent,
-                                modifier = Modifier.size(32.scaledDp(scale))
-                            )
-                        }
-                    }
-
-                    // Country Flag Badge on Profile Image Corner
-                    Box(
-                        modifier = Modifier
-                            .align(Alignment.BottomEnd)
-                            .size(18.scaledDp(scale))
-                            .clip(CircleShape)
-                            .background(Color(0xFF090D16))
-                            .border(1.dp, rankAccent.copy(alpha = 0.8f), CircleShape),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = flagEmoji,
-                            fontSize = 10.scaledSp(scale)
-                        )
-                    }
-                }
-
-                Spacer(modifier = Modifier.width(12.scaledDp(scale)))
-
-                // Username ONLY
-                Text(
-                    text = "@${entry.username}",
-                    style = MaterialTheme.typography.titleMedium.copy(
-                        fontWeight = FontWeight.ExtraBold,
-                        fontSize = 15.scaledSp(scale),
-                        color = if (rank == 1) DeveloperGold else Color.White
-                    ),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f)
-                )
-            }
-
-            Spacer(modifier = Modifier.width(10.scaledDp(scale)))
-
-            // Game Score ONLY
-            Box(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(10.scaledDp(scale)))
-                    .background(rankAccent.copy(alpha = 0.15f))
-                    .border(1.dp, rankAccent.copy(alpha = 0.45f), RoundedCornerShape(10.scaledDp(scale)))
-                    .padding(
-                        horizontal = 10.scaledDp(scale),
-                        vertical = 6.scaledDp(scale)
-                    )
-            ) {
-                Text(
-                    text = "${entry.gamerscore} GS",
-                    style = MaterialTheme.typography.labelLarge.copy(
-                        fontWeight = FontWeight.ExtraBold,
-                        fontSize = 13.scaledSp(scale),
-                        color = if (rank == 1) DeveloperGold else LaunchGreen
-                    )
-                )
-            }
-        }
-    }
-}
 
 /**
  * Smooth Cubic Bezier Area Chart inspired by IMG_0371.webp ("Performance Overview" chart
@@ -3202,7 +2672,7 @@ private fun EditUsernameDialog(
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 Text(
-                    text = "Your @username appears on your gamer profile and the Worldwide Leaderboard. Usernames are unique worldwide (3–20 letters, numbers, or underscores).",
+                    text = "Your @username appears on your gamer profile and the Worldwide Leaderboard. Usernames are unique worldwide (3 to 20 letters, numbers, or underscores).",
                     style = MaterialTheme.typography.bodySmall.copy(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -3404,178 +2874,6 @@ private fun CountryPickerDialog(
             }
         },
         confirmButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Close")
-            }
-        }
-    )
-}
-
-@Composable
-private fun EditDeletionUrlDialog(
-    initialUrl: String,
-    onDismiss: () -> Unit,
-    onSaveUrl: (String) -> Unit
-) {
-    var urlText by remember { mutableStateOf(initialUrl) }
-    val context = LocalContext.current
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(
-                    imageVector = Icons.Default.Link,
-                    contentDescription = null,
-                    tint = HubBlue,
-                    modifier = Modifier.size(22.dp)
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    text = "Configure Deletion URL",
-                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
-                )
-            }
-        },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text(
-                    text = "Enter your public link for Google Play Console Data Safety (Google Form or hosted page):",
-                    style = MaterialTheme.typography.bodySmall.copy(color = MaterialTheme.colorScheme.onSurfaceVariant)
-                )
-
-                OutlinedTextField(
-                    value = urlText,
-                    onValueChange = { urlText = it },
-                    label = { Text("Public URL") },
-                    placeholder = { Text("https://forms.gle/...") },
-                    singleLine = true,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .testTag("deletion_url_text_field"),
-                    shape = RoundedCornerShape(10.dp)
-                )
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.End
-                ) {
-                    TextButton(
-                        onClick = {
-                            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
-                            val item = clipboard?.primaryClip?.getItemAt(0)
-                            val text = item?.text?.toString()?.trim()
-                            if (!text.isNullOrBlank()) {
-                                urlText = text
-                                Toast.makeText(context, "Pasted from clipboard", Toast.LENGTH_SHORT).show()
-                            }
-                        }
-                    ) {
-                        Icon(imageVector = Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(14.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("Paste Clipboard", style = MaterialTheme.typography.labelSmall)
-                    }
-                }
-            }
-        },
-        confirmButton = {
-            Button(
-                onClick = {
-                    val raw = urlText.trim()
-                    val formatted = if (raw.isNotBlank() && !raw.startsWith("http://") && !raw.startsWith("https://")) {
-                        "https://$raw"
-                    } else raw
-                    onSaveUrl(formatted)
-                },
-                modifier = Modifier.testTag("save_deletion_url_button")
-            ) {
-                Text("Save Link", fontWeight = FontWeight.Bold)
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Cancel")
-            }
-        }
-    )
-}
-
-@Composable
-private fun GoogleFormGuideDialog(
-    onDismiss: () -> Unit
-) {
-    val context = LocalContext.current
-    val templateQuestions = """
-Form Title: TitanBooster Account & Data Deletion Request
-Description: Submit this request to permanently delete your TitanBooster gamer account, Gamerscore, and cloud profile.
-Question 1 (Required): Google Account Email used in TitanBooster
-Question 2 (Required): Request Confirmation - "Please permanently delete my account and associated cloud data."
-    """.trimIndent()
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(
-                    imageVector = Icons.Default.Info,
-                    contentDescription = null,
-                    tint = SolarGold,
-                    modifier = Modifier.size(22.dp)
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    text = "Play Console Data Safety Guide",
-                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
-                )
-            }
-        },
-        text = {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                Text(
-                    text = "Why preview container links returned 404:",
-                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold, color = RecorderCoral)
-                )
-                Text(
-                    text = "Google Play Console's verification crawler checks URLs from outside. AI Studio preview environments have an authentication barrier, so Google Play receives a 404 or redirect. Google Play requires a 24/7 public link.",
-                    style = MaterialTheme.typography.bodySmall.copy(color = MaterialTheme.colorScheme.onSurfaceVariant)
-                )
-
-                Text(
-                    text = "Fastest Fix (Google Forms - 60 seconds):",
-                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold, color = LaunchGreen)
-                )
-                Text(
-                    text = "Google Play officially approves Google Forms for account deletion!\n1. Open forms.google.com and create a new blank form.\n2. Title: 'TitanBooster Account & Data Deletion Request'.\n3. Add 2 fields:\n   • 'Your Google Account Email' (Short answer, Required)\n   • 'Request Confirmation' (Checkbox, Required)\n4. Click 'Send' > Link icon > 'Shorten URL' > Copy link.\n5. Paste that link into Google Play Console and into this app!",
-                    style = MaterialTheme.typography.bodySmall.copy(color = MaterialTheme.colorScheme.onSurfaceVariant)
-                )
-
-                Text(
-                    text = "Alternative: Google Sites / GitHub Pages:",
-                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold, color = HubBlue)
-                )
-                Text(
-                    text = "You can also paste the included delete-account.html template onto Google Sites (sites.google.com) or GitHub Pages for a custom branded page.",
-                    style = MaterialTheme.typography.bodySmall.copy(color = MaterialTheme.colorScheme.onSurfaceVariant)
-                )
-            }
-        },
-        confirmButton = {
-            Button(
-                onClick = {
-                    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
-                    clipboard?.setPrimaryClip(ClipData.newPlainText("Google Form Template", templateQuestions))
-                    Toast.makeText(context, "Form template text copied to clipboard!", Toast.LENGTH_SHORT).show()
-                }
-            ) {
-                Text("Copy Form Template", fontWeight = FontWeight.Bold)
-            }
-        },
-        dismissButton = {
             TextButton(onClick = onDismiss) {
                 Text("Close")
             }

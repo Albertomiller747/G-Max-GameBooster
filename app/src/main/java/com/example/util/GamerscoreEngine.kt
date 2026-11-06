@@ -53,7 +53,7 @@ object GamerscoreEngine {
         CyberBannerPreset(
             id = "obsidian_beast",
             title = "Obsidian Beast",
-            subtitle = "Titan Overclock • Blood Crimson",
+            subtitle = "Beast Overclock • Blood Crimson",
             startColorArgb = 0xFF140707L,
             endColorArgb = 0xFF5C0E14L,
             accentColorArgb = 0xFFFF2A4BL
@@ -88,18 +88,57 @@ object GamerscoreEngine {
      * Calculates an uncapped Gamerscore based on cumulative play minutes, sessions, and milestones.
      * There is NO maximum score cap.
      */
-    fun calculateGamerscore(totalMinutes: Long, totalSessions: Long): GamerscoreData {
+    fun calculateGamerscore(
+        totalMinutes: Long,
+        totalSessions: Long,
+        seasonHalvingCount: Int = 0
+    ): GamerscoreData {
         val safeMinutes = totalMinutes.coerceAtLeast(0L)
         val safeSessions = totalSessions.coerceAtLeast(0L)
 
-        val playTimePoints = safeMinutes * 10L
-        val sessionsPoints = safeSessions * 50L
+        val rawPlayTimePoints = safeMinutes * 10L
+        val rawSessionsPoints = safeSessions * 50L
         val hourMilestones = (safeMinutes / 600L) * 500L // 500 pts per 10 hours
         val sessionMilestones = (safeSessions / 10L) * 250L // 250 pts per 10 sessions
-        val milestoneBonusPoints = hourMilestones + sessionMilestones
+        val rawMilestoneBonusPoints = hourMilestones + sessionMilestones
 
-        val totalScore = playTimePoints + sessionsPoints + milestoneBonusPoints
+        // Starter base score of 1,200 G so every session and minute played always adds to Gamerscore
+        val rawBaseBonus = 1200L
+        val rawTotalScore = rawBaseBonus + rawPlayTimePoints + rawSessionsPoints + rawMilestoneBonusPoints
 
+        val playTimePoints = SeasonLeaderboardEngine.applySeasonHalvingToScore(rawPlayTimePoints, seasonHalvingCount)
+        val sessionsPoints = SeasonLeaderboardEngine.applySeasonHalvingToScore(rawSessionsPoints, seasonHalvingCount)
+        val milestoneBonusPoints = SeasonLeaderboardEngine.applySeasonHalvingToScore(rawMilestoneBonusPoints, seasonHalvingCount)
+        val totalScore = SeasonLeaderboardEngine.applySeasonHalvingToScore(rawTotalScore, seasonHalvingCount)
+
+        return buildGamerscoreData(
+            totalScore = totalScore,
+            playTimePoints = playTimePoints,
+            sessionsPoints = sessionsPoints,
+            milestoneBonusPoints = milestoneBonusPoints
+        )
+    }
+
+    /**
+     * Resolves rank title, tier, and badge metadata directly from a verified Gamerscore total
+     * (used on the External User Profile screen when inspecting a Leaderboard player).
+     */
+    fun calculateGamerscoreFromVerifiedScore(totalScore: Long): GamerscoreData {
+        val safeTotal = totalScore.coerceAtLeast(0L)
+        return buildGamerscoreData(
+            totalScore = safeTotal,
+            playTimePoints = (safeTotal * 0.7f).toLong(),
+            sessionsPoints = (safeTotal * 0.2f).toLong(),
+            milestoneBonusPoints = (safeTotal * 0.1f).toLong()
+        )
+    }
+
+    private fun buildGamerscoreData(
+        totalScore: Long,
+        playTimePoints: Long,
+        sessionsPoints: Long,
+        milestoneBonusPoints: Long
+    ): GamerscoreData {
         val (rankTitle, rankTier, rankBadgeText, colorHex, minScore, nextScore) = when {
             totalScore < 500L -> RankDef("Recruit", "Tier I", "RCT", "#9E9E9E", 0L, 500L)
             totalScore < 1500L -> RankDef("Bronze Striker", "Tier II", "BRZ", "#CD7F32", 500L, 1500L)
@@ -147,7 +186,7 @@ object GamerscoreEngine {
 
     /**
      * Resolves 7-day gaming time breakdown for the profile bar chart.
-     * Combines system usage events (if permission granted) and G-Max hub tracking.
+     * Combines system usage events (if permission granted) and G Max Gaming Hub tracking.
      */
     fun get7DayGamingHistory(context: Context, totalPlayTimeMinutes: Long): List<DailyPlayTime> {
         val daysList = mutableListOf<DailyPlayTime>()
@@ -155,23 +194,29 @@ object GamerscoreEngine {
         val fullDateFormat = SimpleDateFormat("MMM d", Locale.US)
 
         val now = System.currentTimeMillis()
+        val installTimeMs = GamePlayStatsHelper.getInstallTimestampMs(context)
 
-        // Gather real usage stats if possible
+        // Gather real post-install usage stats if possible
         val dailyUsageMap = mutableMapOf<String, Long>()
         try {
             val usm = context.getSystemService(Context.USAGE_STATS_SERVICE) as? UsageStatsManager
             if (usm != null) {
-                val startOfWindow = now - (7L * 24L * 60L * 60L * 1000L)
-                val stats = usm.queryUsageStats(UsageStatsManager.INTERVAL_DAILY, startOfWindow, now)
-                for (stat in stats) {
-                    val dStr = fullDateFormat.format(Date(stat.firstTimeStamp))
-                    val mins = stat.totalTimeInForeground / 60_000L
-                    if (mins > 0) {
-                        dailyUsageMap[dStr] = (dailyUsageMap[dStr] ?: 0L) + mins
+                val startOfWindow = maxOf(installTimeMs, now - (7L * 24L * 60L * 60L * 1000L))
+                if (now > startOfWindow) {
+                    val stats = usm.queryUsageStats(UsageStatsManager.INTERVAL_DAILY, startOfWindow, now)
+                    for (stat in stats) {
+                        if (stat.packageName == context.packageName) continue
+                        val dStr = fullDateFormat.format(Date(stat.lastTimeUsed.coerceAtLeast(stat.firstTimeStamp)))
+                        val mins = (stat.totalTimeInForeground + 59_999L) / 60_000L
+                        if (mins > 0 && stat.totalTimeInForeground > 0L) {
+                            dailyUsageMap[dStr] = (dailyUsageMap[dStr] ?: 0L) + mins
+                        }
                     }
                 }
             }
         } catch (_: Exception) {}
+
+        val sumMappedMins = dailyUsageMap.values.sum()
 
         // Build list for past 6 days + today
         for (i in 6 downTo 0) {
@@ -184,12 +229,9 @@ object GamerscoreEngine {
 
             var dayMins = dailyUsageMap[fullDate] ?: 0L
 
-            // If system usage was empty, distribute user's actual total play time reasonably across recent days
-            if (dailyUsageMap.isEmpty() && totalPlayTimeMinutes > 0L) {
-                // Distribute proportional sample pattern based on day of week
-                val weights = listOf(0.18f, 0.12f, 0.14f, 0.10f, 0.16f, 0.20f, 0.10f)
-                val w = weights[targetCal.get(Calendar.DAY_OF_WEEK) % weights.size]
-                dayMins = (totalPlayTimeMinutes * w).toLong()
+            // Ensure today's bar always reflects local hub play time if system usage stats weren't granted or lagged
+            if (isToday && totalPlayTimeMinutes > sumMappedMins) {
+                dayMins += (totalPlayTimeMinutes - sumMappedMins)
             }
 
             val hrs = dayMins / 60L

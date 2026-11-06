@@ -97,8 +97,8 @@ fun PerformanceTab(
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
                         SectionTitle(
-                            title = "Thermal Throttle Guard",
-                            subtitle = "Real kernel thermal state & SoC throttle defense"
+                            title = com.example.util.tr("Thermal Throttle Guard", "Protección de Estrangulamiento Térmico"),
+                            subtitle = com.example.util.tr("Real kernel thermal state & SoC throttle defense", "Estado térmico real del kernel y defensa del SoC")
                         )
                     }
                     Box(
@@ -111,7 +111,11 @@ fun PerformanceTab(
                             .padding(horizontal = 10.dp, vertical = 4.dp)
                     ) {
                         Text(
-                            text = if (thermalGuardState.isThrottling) "THROTTLING DETECTED" else "OPTIMAL COOLING",
+                            text = if (thermalGuardState.isThrottling) {
+                                com.example.util.tr("THROTTLING DETECTED", "ESTRANGULAMIENTO DETECTADO")
+                            } else {
+                                com.example.util.tr("OPTIMAL COOLING", "ENFRIAMIENTO ÓPTIMO")
+                            },
                             color = if (thermalGuardState.isThrottling) ElectricCrimson else LaunchGreen,
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
@@ -206,11 +210,31 @@ fun PerformanceTab(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        SectionTitle(
-                            title = "Post-Match Performance Recap",
-                            subtitle = "Real FPS, 1% lows, stutters, and thermal curves"
+                    Row(
+                        modifier = Modifier.weight(1f),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        com.example.ui.components.GMaxBrandIcon(
+                            size = 38.dp,
+                            cornerRadius = 10.dp,
+                            showGlowBorder = true,
+                            glowColor = Color(0xFF00E5FF),
+                            contentDescription = "G Max Gaming Hub"
                         )
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = com.example.util.tr("G MAX GAMING HUB • OFFICIAL RECAP", "G MAX GAMING HUB • RESUMEN OFICIAL"),
+                                color = Color(0xFF00E5FF),
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                letterSpacing = 0.8.sp
+                            )
+                            SectionTitle(
+                                title = com.example.util.tr("Post-Match Performance Recap", "Resumen de Rendimiento Post-Partida"),
+                                subtitle = com.example.util.tr("Real FPS, 1% lows, stutters, and thermal curves", "FPS reales, caídas del 1%, tirones y curvas térmicas")
+                            )
+                        }
                     }
                     if (isRecording) {
                         Box(
@@ -328,7 +352,7 @@ fun PerformanceTab(
                         ) {
                             Icon(Icons.Default.Stop, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(6.dp))
-                            Text("FINISH MATCH", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            Text(com.example.util.tr("FINISH MATCH", "FINALIZAR PARTIDA"), fontSize = 12.sp, fontWeight = FontWeight.Bold)
                         }
                     } else {
                         OutlinedButton(
@@ -340,7 +364,7 @@ fun PerformanceTab(
                         ) {
                             Icon(Icons.Default.PlayArrow, contentDescription = null, tint = HubBlue, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(6.dp))
-                            Text("START RECAP", color = MaterialTheme.colorScheme.onSurface, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            Text(com.example.util.tr("START RECAP", "INICIAR RESUMEN"), color = MaterialTheme.colorScheme.onSurface, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                         }
                     }
 
@@ -354,7 +378,7 @@ fun PerformanceTab(
                     ) {
                         Icon(Icons.Default.Share, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text("SHARE CARD", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        Text(com.example.util.tr("SHARE CARD", "COMPARTIR TARJETA"), color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                     }
                 }
             }
@@ -455,7 +479,7 @@ fun PerformanceTab(
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     ExtrasTelemetryRow(
                         icon = Icons.Default.Speed,
-                        label = "In-Game Frame Rate (96%–98% EFPS)",
+                        label = "In-Game Frame Rate (96% to 98% EFPS)",
                         description = "6-Way Hardware Telemetry Fusion (VRR + VSYNC + GPU Swap + Game Cap + CPU/Thermal)",
                         isChecked = overlayConfig.showFps,
                         onCheckedChange = { viewModel.toggleOverlayFps(context, it) },
@@ -482,14 +506,23 @@ fun PerformanceTab(
 
                     ExtrasTelemetryRow(
                         icon = Icons.Default.Timer,
-                        label = "Booster Session Countdown",
-                        description = "Live session timer and RAM maintenance feedback",
+                        label = com.example.util.tr("Booster Session Countdown", "Cuenta Regresiva de Sesión"),
+                        description = com.example.util.tr("Live session timer and RAM maintenance feedback", "Temporizador en vivo y mantenimiento de RAM"),
                         isChecked = overlayConfig.showTimer,
                         onCheckedChange = { viewModel.toggleOverlayTimer(context, it) },
                         accentColor = Color(0xFFA855F7)
                     )
                 }
             }
+        }
+
+        // 4. Native Ad Card embedded in the Performance scrollable list with 32dp top buffer
+        item {
+            com.example.ui.components.GMaxNativeAdCard(
+                placementTag = "performance_bottom",
+                topBuffer = 32.dp,
+                bottomBuffer = 24.dp
+            )
         }
     }
 }

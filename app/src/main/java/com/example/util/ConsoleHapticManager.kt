@@ -67,6 +67,7 @@ object ConsoleHapticManager {
         if (now - lastTickTimeMs < 35L) return
         lastTickTimeMs = now
 
+        ConsoleUiSoundManager.playFocusTick(context)
         try {
             val vibrator = getDeviceVibrator(context)
             if (vibrator?.hasVibrator() == true) {
@@ -83,9 +84,10 @@ object ConsoleHapticManager {
     }
 
     /**
-     * Crisp confirmation click for tile selection, L1/R1 bumper tab switch, or modal toggle.
+     * Crisp confirmation click for tile selection or modal toggle.
      */
     fun playSelectClick(context: Context) {
+        ConsoleUiSoundManager.playSelectClick(context)
         try {
             val vibrator = getDeviceVibrator(context)
             if (vibrator?.hasVibrator() == true) {
@@ -103,9 +105,44 @@ object ConsoleHapticManager {
     }
 
     /**
-     * Energetic double-pulse when launching a game or activating Boost.
+     * Back / Cancel tone & haptic for B / Circle button or closing a modal.
+     */
+    fun playBackTone(context: Context) {
+        ConsoleUiSoundManager.playBackTone(context)
+        try {
+            val vibrator = getDeviceVibrator(context)
+            if (vibrator?.hasVibrator() == true) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    vibrator.vibrate(VibrationEffect.createPredefined(VibrationEffect.EFFECT_TICK))
+                } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    vibrator.vibrate(VibrationEffect.createOneShot(14L, 90))
+                }
+            }
+        } catch (_: Exception) {}
+    }
+
+    /**
+     * Tab switch harmonic glide & haptic for L1/R1 bumpers.
+     */
+    fun playTabSwitch(context: Context) {
+        ConsoleUiSoundManager.playTabSwitch(context)
+        try {
+            val vibrator = getDeviceVibrator(context)
+            if (vibrator?.hasVibrator() == true) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    vibrator.vibrate(VibrationEffect.createPredefined(VibrationEffect.EFFECT_CLICK))
+                } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    vibrator.vibrate(VibrationEffect.createOneShot(16L, 110))
+                }
+            }
+        } catch (_: Exception) {}
+    }
+
+    /**
+     * Energetic double-pulse and ascending console chord when launching a game or activating Boost.
      */
     fun playLaunchPulse(context: Context) {
+        ConsoleUiSoundManager.playLaunchChord(context)
         try {
             val vibrator = getDeviceVibrator(context)
             if (vibrator?.hasVibrator() == true) {

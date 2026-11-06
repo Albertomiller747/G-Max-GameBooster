@@ -52,6 +52,9 @@ class ScreenRecordOverlayService : Service() {
     private var floatingCamIcon: ImageView? = null
     private var floatingMiniDot: View? = null
     private var radialFanContainer: FrameLayout? = null
+    private var centerHubView: FrameLayout? = null
+    private var centerHubIconView: ImageView? = null
+    private val satelliteButtons = ArrayList<FrameLayout>(4)
     private var recordingTimerPill: LinearLayout? = null
     private var timerTextView: TextView? = null
     private var stopLabelView: TextView? = null
@@ -63,7 +66,12 @@ class ScreenRecordOverlayService : Service() {
     private var initialY = 0
     private var initialTouchX = 0f
     private var initialTouchY = 0f
+    private var collapsedBubbleX = 0
+    private var collapsedBubbleY = 0
+    private var currentHubLeftPx = 0
+    private var currentHubTopPx = 0
 
+    private val overshootInterpolator = android.view.animation.OvershootInterpolator(1.28f)
     private val serviceScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
     private val mainHandler = Handler(Looper.getMainLooper())
 
@@ -144,27 +152,38 @@ class ScreenRecordOverlayService : Service() {
         }
 
         val screenWidth = resources.displayMetrics.widthPixels
+        val screenHeight = resources.displayMetrics.heightPixels
         val density = resources.displayMetrics.density
+
+        val savedPos = ScreenRecordingManager.loadBubblePosition(this)
+        val defaultX = (screenWidth - (64 * density)).toInt().coerceAtLeast(16)
+        val defaultY = (260 * density).toInt()
+        collapsedBubbleX = (savedPos?.first ?: defaultX).coerceIn(0, (screenWidth - (48 * density).toInt()).coerceAtLeast(16))
+        collapsedBubbleY = (savedPos?.second ?: defaultY).coerceIn(0, (screenHeight - (48 * density).toInt()).coerceAtLeast(64))
 
         windowParams = WindowManager.LayoutParams(
             WindowManager.LayoutParams.WRAP_CONTENT,
             WindowManager.LayoutParams.WRAP_CONTENT,
             layoutType,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                    WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+                    WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or
+                    WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED,
             PixelFormat.TRANSLUCENT
         ).apply {
             gravity = Gravity.TOP or Gravity.START
-            x = (screenWidth - (64 * density)).toInt().coerceAtLeast(16)
-            y = (260 * density).toInt()
+            x = collapsedBubbleX
+            y = collapsedBubbleY
         }
 
-        rootOverlayLayout = FrameLayout(this)
+        rootOverlayLayout = FrameLayout(this).apply {
+            @Suppress("DEPRECATION")
+            setWillNotCacheDrawing(true)
+        }
 
-        // 1. Docked Coral-Red Camera Bubble (Collapsed State)
+        // 1. Docked Camera Bubble (Collapsed State)
         floatingCircle = createFloatingCircle()
 
-        // 2. Curved Radial Fan Container (Matches reference image #1)
+        // 2. Curved Radial Fan Container
         radialFanContainer = createRadialFanMenu()
         radialFanContainer?.visibility = View.GONE
 
@@ -187,7 +206,7 @@ class ScreenRecordOverlayService : Service() {
     }
 
     /**
-     * Creates the coral-red circular camera bubble matching the reference screenshot
+     * Creates the circular camera bubble
      */
     private fun createFloatingCircle(): FrameLayout {
         val density = resources.displayMetrics.density
@@ -195,7 +214,9 @@ class ScreenRecordOverlayService : Service() {
         val sizePx = (bubbleDp * density).toInt()
 
         return FrameLayout(this).apply {
-            layoutParams = FrameLayout.LayoutParams(sizePx, sizePx, Gravity.CENTER_VERTICAL or Gravity.END)
+            layoutParams = FrameLayout.LayoutParams(sizePx, sizePx, Gravity.TOP or Gravity.START)
+            @Suppress("DEPRECATION")
+            setWillNotCacheDrawing(true)
 
             // Pure circular drawable with zero elevation to eliminate any gray hardware shadow box
             background = GradientDrawable().apply {
@@ -247,7 +268,7 @@ class ScreenRecordOverlayService : Service() {
         circle.layoutParams = (circle.layoutParams as? FrameLayout.LayoutParams)?.apply {
             width = sizePx
             height = sizePx
-        } ?: FrameLayout.LayoutParams(sizePx, sizePx, Gravity.CENTER_VERTICAL or Gravity.END)
+        } ?: FrameLayout.LayoutParams(sizePx, sizePx, Gravity.TOP or Gravity.START)
 
         floatingCamIcon?.let { icon ->
             val iconSize = (sizePx * 0.50f).toInt()
@@ -270,53 +291,59 @@ class ScreenRecordOverlayService : Service() {
     }
 
     /**
-     * Creates the curved radial fan menu matching screenshot #1:
-     * Central coral camera bubble on the right with 4 white circular buttons arranged in a curved arc:
-     * 1. Top: Record / Stop (Coral camera/stop icon)
-     * 2. Upper-Middle: Videos Gallery (4-square coral/amber grid icon)
-     * 3. Lower-Middle: Screenshot Capture (Coral screenshot icon - replacing utility wrench)
-     * 4. Bottom: Exit / Close Overlay (Coral X icon)
+     * Creates the curved radial fan menu:
+     * Central anchor bubble stays at the exact same screen coordinate as the collapsed bubble,
+     * and the 4 circular option buttons fan out in an arc with a smooth pop-out animation.
      */
     private fun createRadialFanMenu(): FrameLayout {
         val density = resources.displayMetrics.density
-        val containerWidth = (176 * density).toInt()
+        val containerWidth = (184 * density).toInt()
         val containerHeight = (264 * density).toInt()
+        val bubbleDp = ScreenRecordingManager.loadSettings(this).bubbleSizeDp.coerceIn(28, 64)
+        val centerHubSize = (bubbleDp * density).toInt()
+
+        satelliteButtons.clear()
 
         return FrameLayout(this).apply {
             layoutParams = FrameLayout.LayoutParams(containerWidth, containerHeight)
+            clipChildren = false
+            clipToPadding = false
+            @Suppress("DEPRECATION")
+            setWillNotCacheDrawing(true)
 
             // Dismiss scrim tap area
             setOnClickListener {
                 toggleExpandedMenu(forceClose = true)
             }
 
-            // Central anchor Cyber Sapphire button on the right side of the arc
-            val centerHubSize = (54 * density).toInt()
+            // Central anchor Cyber Sapphire button
             val centerHub = FrameLayout(context).apply {
                 layoutParams = FrameLayout.LayoutParams(centerHubSize, centerHubSize).apply {
                     gravity = Gravity.TOP or Gravity.START
-                    leftMargin = (114 * density).toInt()
+                    leftMargin = (118 * density).toInt()
                     topMargin = (105 * density).toInt()
                 }
                 background = GradientDrawable().apply {
                     shape = GradientDrawable.OVAL
                     setColor(Color.parseColor("#1E3A8A")) // Dark Sapphire
-                    setStroke((2f * density).toInt(), Color.parseColor("#38BDF8")) // Cyan Glow
+                    setStroke((2f * density).toInt().coerceAtLeast(1), Color.parseColor("#38BDF8")) // Cyan Glow
                 }
                 elevation = 0f
 
                 val hubIcon = ImageView(context).apply {
-                    val s = (26 * density).toInt()
+                    val s = (centerHubSize * 0.50f).toInt()
                     layoutParams = FrameLayout.LayoutParams(s, s, Gravity.CENTER)
                     setImageResource(R.drawable.ic_notif_record)
                     setColorFilter(Color.parseColor("#38BDF8"))
                 }
+                centerHubIconView = hubIcon
                 addView(hubIcon)
 
                 setOnClickListener {
                     toggleExpandedMenu(forceClose = true)
                 }
             }
+            centerHubView = centerHub
             addView(centerHub)
 
             // Satellite 1 (Top of arc): Record / Stop
@@ -330,6 +357,7 @@ class ScreenRecordOverlayService : Service() {
             ) {
                 handleRecordActionClick()
             }
+            satelliteButtons.add(sat1)
             addView(sat1)
 
             // Satellite 2 (Upper-middle of arc): Videos Gallery (4-grid icon)
@@ -347,6 +375,7 @@ class ScreenRecordOverlayService : Service() {
                 }
                 startActivity(intent)
             }
+            satelliteButtons.add(sat2)
             addView(sat2)
 
             // Satellite 3 (Lower-middle of arc): Instant Screenshot Capture
@@ -358,6 +387,7 @@ class ScreenRecordOverlayService : Service() {
             ) {
                 takeQuickScreenshot()
             }
+            satelliteButtons.add(sat3)
             addView(sat3)
 
             // Satellite 4 (Bottom of arc): Exit Overlay
@@ -372,6 +402,7 @@ class ScreenRecordOverlayService : Service() {
                 cancelReadyNotification()
                 stopSelf()
             }
+            satelliteButtons.add(sat4)
             addView(sat4)
         }
     }
@@ -477,27 +508,123 @@ class ScreenRecordOverlayService : Service() {
         }
     }
 
-    private fun toggleExpandedMenu(forceClose: Boolean = false) {
+    /**
+     * Aligns the radial fan container so that [centerHubView] stays at the exact same screen
+     * coordinates ([collapsedBubbleX], [collapsedBubbleY]) as [floatingCircle], and fans the
+     * 4 satellite options outward with a staggered pop-out animation.
+     */
+    private fun layoutAndAnimateRadialMenu() {
         val density = resources.displayMetrics.density
         val screenWidth = resources.displayMetrics.widthPixels
+        val bubbleDp = ScreenRecordingManager.loadSettings(this).bubbleSizeDp.coerceIn(28, 64)
+        val bubbleSizePx = (bubbleDp * density).toInt()
 
+        val bubbleCenterX = collapsedBubbleX + bubbleSizePx / 2
+        val openToRight = bubbleCenterX < (screenWidth / 2)
+
+        val hubLeftDp = if (openToRight) 8 else 118
+        val hubTopDp = 105
+        currentHubLeftPx = (hubLeftDp * density).toInt()
+        currentHubTopPx = (hubTopDp * density).toInt()
+
+        centerHubView?.let { hub ->
+            hub.layoutParams = (hub.layoutParams as? FrameLayout.LayoutParams)?.apply {
+                width = bubbleSizePx
+                height = bubbleSizePx
+                leftMargin = currentHubLeftPx
+                topMargin = currentHubTopPx
+            }
+            centerHubIconView?.layoutParams = FrameLayout.LayoutParams(
+                (bubbleSizePx * 0.50f).toInt(),
+                (bubbleSizePx * 0.50f).toInt(),
+                Gravity.CENTER
+            )
+            hub.scaleX = 0.82f
+            hub.scaleY = 0.82f
+            hub.animate()
+                .scaleX(1f)
+                .scaleY(1f)
+                .setDuration(180L)
+                .setInterpolator(overshootInterpolator)
+                .start()
+        }
+
+        // Arc coordinates for the 4 satellites relative to the fan container
+        val satCoordsDp = if (openToRight) {
+            listOf(
+                62 to 12,
+                112 to 68,
+                112 to 138,
+                62 to 194
+            )
+        } else {
+            listOf(
+                68 to 12,
+                18 to 68,
+                18 to 138,
+                68 to 194
+            )
+        }
+
+        satelliteButtons.forEachIndexed { index, satView ->
+            val (satLeftDp, satTopDp) = satCoordsDp.getOrElse(index) { 68 to 12 }
+            val satLeftPx = (satLeftDp * density).toInt()
+            val satTopPx = (satTopDp * density).toInt()
+
+            satView.layoutParams = (satView.layoutParams as? FrameLayout.LayoutParams)?.apply {
+                leftMargin = satLeftPx
+                topMargin = satTopPx
+            }
+
+            // Start each satellite inside the center hub and animate outward
+            satView.animate().cancel()
+            satView.translationX = (currentHubLeftPx - satLeftPx).toFloat()
+            satView.translationY = (currentHubTopPx - satTopPx).toFloat()
+            satView.scaleX = 0.2f
+            satView.scaleY = 0.2f
+            satView.alpha = 0f
+            satView.animate()
+                .translationX(0f)
+                .translationY(0f)
+                .scaleX(1f)
+                .scaleY(1f)
+                .alpha(1f)
+                .setStartDelay(index * 22L)
+                .setDuration(220L)
+                .setInterpolator(overshootInterpolator)
+                .start()
+        }
+    }
+
+    private fun toggleExpandedMenu(forceClose: Boolean = false) {
         if (isExpanded || forceClose) {
+            val wasExpanded = isExpanded
             isExpanded = false
+            satelliteButtons.forEach { it.animate().cancel() }
             radialFanContainer?.visibility = View.GONE
-            // Snap back near right edge if it was shifted for radial fan
-            windowParams?.x = (screenWidth - (60 * density)).toInt().coerceAtLeast(16)
+            if (wasExpanded) {
+                // Restore the exact collapsed bubble coordinates so the bubble never shifts
+                windowParams?.x = collapsedBubbleX
+                windowParams?.y = collapsedBubbleY
+            }
             try {
                 windowManager?.updateViewLayout(rootOverlayLayout, windowParams)
             } catch (_: Exception) {}
             updateDisplayState()
         } else {
+            // Lock the bubble's exact current coordinates before expanding the radial fan
+            collapsedBubbleX = windowParams?.x ?: collapsedBubbleX
+            collapsedBubbleY = windowParams?.y ?: collapsedBubbleY
             isExpanded = true
             val recording = ScreenRecordingService.isRecording.value
             recordSatelliteIcon?.setImageResource(
                 if (recording) R.drawable.ic_notif_stop else R.drawable.ic_notif_record
             )
-            // Shift left enough so the radial arc fits nicely on screen
-            windowParams?.x = (screenWidth - (180 * density)).toInt().coerceAtLeast(8)
+            layoutAndAnimateRadialMenu()
+            // Offset windowParams so centerHub inside radialFanContainer lands on the exact same
+            // pixel coordinates (collapsedBubbleX, collapsedBubbleY) as floatingCircle!
+            windowParams?.x = collapsedBubbleX - currentHubLeftPx
+            windowParams?.y = collapsedBubbleY - currentHubTopPx
             radialFanContainer?.visibility = View.VISIBLE
             floatingCircle?.visibility = View.GONE
             recordingTimerPill?.visibility = View.GONE
@@ -568,12 +695,19 @@ class ScreenRecordOverlayService : Service() {
         }
 
         if (recording) {
-            // Always show the compact stop pill during active recording so the user can stop in-game;
-            // only show the elapsed timer digits if showTimerHud is enabled.
-            recordingTimerPill?.visibility = View.VISIBLE
-            timerTextView?.visibility = if (showTimer) View.VISIBLE else View.GONE
+            if (showTimer) {
+                rootOverlayLayout?.visibility = View.VISIBLE
+                recordingTimerPill?.visibility = View.VISIBLE
+                timerTextView?.visibility = View.VISIBLE
+            } else {
+                // Hide overlay completely during recording when On-Screen Timer Pill is off
+                // so no dark box or icon is ever baked into the corner of the recorded video.
+                recordingTimerPill?.visibility = View.GONE
+                rootOverlayLayout?.visibility = View.GONE
+            }
             floatingCircle?.visibility = View.GONE
         } else {
+            rootOverlayLayout?.visibility = View.VISIBLE
             recordingTimerPill?.visibility = View.GONE
             floatingCircle?.visibility = View.VISIBLE
         }
@@ -605,7 +739,13 @@ class ScreenRecordOverlayService : Service() {
                     true
                 }
                 MotionEvent.ACTION_UP -> {
-                    if (!isDragging) {
+                    if (isDragging) {
+                        if (!isExpanded) {
+                            collapsedBubbleX = windowParams?.x ?: collapsedBubbleX
+                            collapsedBubbleY = windowParams?.y ?: collapsedBubbleY
+                            ScreenRecordingManager.saveBubblePosition(this, collapsedBubbleX, collapsedBubbleY)
+                        }
+                    } else {
                         view.performClick()
                     }
                     true
@@ -615,9 +755,25 @@ class ScreenRecordOverlayService : Service() {
         }
     }
 
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        if (isExpanded && level >= TRIM_MEMORY_RUNNING_CRITICAL) {
+            toggleExpandedMenu(forceClose = true)
+        }
+    }
+
+    override fun onLowMemory() {
+        super.onLowMemory()
+        if (isExpanded) {
+            toggleExpandedMenu(forceClose = true)
+        }
+    }
+
     override fun onDestroy() {
         super.onDestroy()
         cancelReadyNotification()
+        satelliteButtons.forEach { it.animate().cancel() }
+        satelliteButtons.clear()
         serviceScope.cancel()
         try {
             if (rootOverlayLayout != null) {

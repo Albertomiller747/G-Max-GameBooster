@@ -19,6 +19,8 @@ class ThermalMonitor(private val context: Context) {
 
     private val powerManager = context.getSystemService(Context.POWER_SERVICE) as? PowerManager
 
+    private var isRegistered = false
+
     private val batteryReceiver = object : BroadcastReceiver() {
         override fun onReceive(c: Context?, intent: Intent?) {
             if (intent?.action == Intent.ACTION_BATTERY_CHANGED) {
@@ -28,18 +30,22 @@ class ThermalMonitor(private val context: Context) {
     }
 
     fun start() {
+        if (isRegistered) return
+        isRegistered = true
         try {
             val filter = IntentFilter(Intent.ACTION_BATTERY_CHANGED)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            val sticky = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                 context.registerReceiver(batteryReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
             } else {
                 context.registerReceiver(batteryReceiver, filter)
             }
+            updateBatteryAndThermal(sticky)
         } catch (_: Exception) {}
-        refresh()
     }
 
     fun stop() {
+        if (!isRegistered) return
+        isRegistered = false
         try {
             context.unregisterReceiver(batteryReceiver)
         } catch (_: Exception) {}

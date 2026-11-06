@@ -1,0 +1,67 @@
+<resources>
+    <string name="app_name">G Max Gaming Hub</string>
+    <string name="tagline">Mesin Performa Game</string>
+    <string name="version_label">Versi 1.0</string>
+
+    <!-- Navigation -->
+    <string name="nav_launcher">Peluncur</string>
+    <string name="nav_recorder">Perekam</string>
+    <string name="nav_leaderboard">Papan Skor</string>
+    <string name="nav_extras">Ekstra</string>
+    <string name="nav_settings">Pengaturan</string>
+    <string name="nav_profile">Profil</string>
+
+    <!-- Extras Sub-Tabs -->
+    <string name="tab_tweaks">Tweak Pro</string>
+    <string name="tab_performance">Performa</string>
+    <string name="tab_touch">Sentuhan</string>
+    <string name="tab_controller">Stik Kontrol</string>
+    <string name="tab_specs">Spesifikasi</string>
+
+    <!-- Splash & Console Startup -->
+    <string name="splash_press_home">Tekan tombol Home pada stik Anda, atau ketuk di bawah untuk masuk</string>
+    <string name="splash_log_in_console">Masuk ke Konsol</string>
+    <string name="splash_entering_hub">Memasuki G Max Gaming Hub...</string>
+    <string name="splash_welcome_back">Selamat Datang Kembali</string>
+    <string name="splash_ready_launch">Siap dimainkan</string>
+
+    <!-- Offline / Online Gate -->
+    <string name="offline_gate_title">Koneksi Internet Diperlukan</string>
+    <string name="offline_gate_subtitle">Peluncur Game dan Boost Normal berfungsi offline. Hubungkan ke Wi-Fi atau data seluler untuk mengakses Perekam, Papan Skor, Ekstra, Boost Buas, dan Akun.</string>
+    <string name="offline_gate_retry">Coba Lagi</string>
+    <string name="offline_gate_back_launcher">Ke Peluncur Offline</string>
+    <string name="offline_mode_badge">Mode Offline: Peluncur &amp; Boost Normal Aktif</string>
+
+    <!-- Launcher & Boost -->
+    <string name="launcher_normal_boost">Boost Normal</string>
+    <string name="launcher_beast_boost">Boost Buas</string>
+    <string name="launcher_boost_memory">Optimalkan RAM</string>
+    <string name="launcher_launch_game">Mainkan</string>
+    <string name="launcher_add_games">Tambah Game</string>
+    <string name="launcher_search_games">Cari game...</string>
+
+    <!-- Recorder -->
+    <string name="recorder_tab_videos">Video &amp; Galeri</string>
+    <string name="recorder_tab_settings">Pengaturan</string>
+    <string name="recorder_no_videos">Belum ada video yang direkam</string>
+    <string name="recorder_start">Rekam</string>
+    <string name="recorder_stop">Berhenti</string>
+
+    <!-- Leaderboard -->
+    <string name="leaderboard_title">Papan Skor Musim</string>
+    <string name="leaderboard_tab_rankings">Peringkat Top 100</string>
+    <string name="leaderboard_tab_rules">Aturan Turnamen</string>
+    <string name="leaderboard_empty_title">Belum Ada Pemain Terverifikasi</string>
+    <string name="leaderboard_empty_subtitle">Masuk dengan Google atau Facebook untuk klaim peringkat di Top 100.</string>
+
+    <!-- AdMob Labels -->
+    <string name="ad_badge_label">Iklan</string>
+    <string name="ad_sponsored_label">Disponsori</string>
+    <string name="ad_reward_unlock_title">Buka RGB &amp; Overlay Kustom (24j)</string>
+    <string name="ad_reward_unlock_cta">Tonton iklan singkat untuk membuka RGB &amp; Overlay selama 24 jam</string>
+    <string name="ad_reward_unlocked_active">RGB &amp; Overlay Stik Pro Aktif</string>
+
+    <!-- Real-Time Controller Input Pass-Through Service -->
+    <string name="controller_passthrough_service_label">Overlay Stik G Max</string>
+    <string name="controller_passthrough_service_desc">Memungkinkan overlay stik melayang G Max Gaming Hub menyorot tombol dan pemicu stik Anda secara real-time saat bermain game tanpa menghalangi input game.</string>
+</resources>

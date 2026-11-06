@@ -45,6 +45,9 @@ class GamepadDetector(private val context: Context) {
         override fun onInputDeviceRemoved(deviceId: Int) {
             val cachedName = knownGamepadMap.remove(deviceId)
             if (cachedName != null) {
+                if (!ControllerHealthManager.isWiredControllerConnected(context)) {
+                    com.example.service.ControllerOverlayService.disableIfNotWired(context)
+                }
                 _connectionAlerts.tryEmit(
                     ControllerConnectionAlert(
                         isConnected = false,
@@ -56,7 +59,9 @@ class GamepadDetector(private val context: Context) {
         }
 
         override fun onInputDeviceChanged(deviceId: Int) {
-            // No action needed
+            if (!ControllerHealthManager.isWiredControllerConnected(context)) {
+                com.example.service.ControllerOverlayService.disableIfNotWired(context)
+            }
         }
     }
 
@@ -77,6 +82,7 @@ class GamepadDetector(private val context: Context) {
         for (id in deviceIds) {
             val device = InputDevice.getDevice(id) ?: continue
             if (isGamepadOrJoystick(device) && !device.isVirtual) {
+                val wired = ControllerHealthManager.isDeviceWiredUsb(context, device)
                 connected.add(
                     GamepadDevice(
                         id = device.id,
@@ -84,7 +90,9 @@ class GamepadDetector(private val context: Context) {
                         vendorId = device.vendorId,
                         productId = device.productId,
                         hasVibrator = device.vibrator.hasVibrator(),
-                        isConnected = true
+                        isConnected = true,
+                        isWiredUsb = wired,
+                        connectionTypeLabel = if (wired) "Wired USB" else "Bluetooth / Wireless"
                     )
                 )
             }
@@ -93,9 +101,7 @@ class GamepadDetector(private val context: Context) {
     }
 
     private fun isGamepadOrJoystick(device: InputDevice): Boolean {
-        val sources = device.sources
-        return (sources and InputDevice.SOURCE_GAMEPAD) == InputDevice.SOURCE_GAMEPAD ||
-                (sources and InputDevice.SOURCE_JOYSTICK) == InputDevice.SOURCE_JOYSTICK
+        return ControllerHealthManager.isActualGamepadInputDevice(device)
     }
 
     fun destroy() {

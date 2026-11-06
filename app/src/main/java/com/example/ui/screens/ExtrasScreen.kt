@@ -77,6 +77,7 @@ import java.util.Locale
 @Composable
 fun ExtrasScreen(
     viewModel: GameBoosterViewModel,
+    initialSubTab: Int = 0,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -88,7 +89,7 @@ fun ExtrasScreen(
     val overlayConfig by viewModel.overlayConfig.collectAsState()
     val efpsTelemetry by viewModel.efpsTelemetry.collectAsState()
 
-    var selectedSubTab by remember { mutableIntStateOf(0) }
+    var selectedSubTab by remember(initialSubTab) { mutableIntStateOf(initialSubTab.coerceIn(0, 5)) }
 
     val canDrawOverlay = remember(context) {
         SystemSettingsHelper.canDrawOverlays(context)
@@ -107,12 +108,12 @@ fun ExtrasScreen(
                 .horizontalScroll(rememberScrollState()),
             horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            ExtrasSubTabPill("Tweaks", selectedSubTab == 0, "extras_tab_tweaks") { selectedSubTab = 0 }
-            ExtrasSubTabPill("Performance", selectedSubTab == 1, "extras_tab_performance") { selectedSubTab = 1 }
-            ExtrasSubTabPill("Touch", selectedSubTab == 2, "extras_tab_touch") { selectedSubTab = 2 }
-            ExtrasSubTabPill("Controller", selectedSubTab == 3, "extras_tab_controller") { selectedSubTab = 3 }
-            ExtrasSubTabPill("Specs", selectedSubTab == 4, "extras_tab_specs") { selectedSubTab = 4 }
-            ExtrasSubTabPill("FPS & Diag", selectedSubTab == 5, "extras_tab_diagnostics") { selectedSubTab = 5 }
+            ExtrasSubTabPill(com.example.util.tr("Tweaks", "Ajustes Pro"), selectedSubTab == 0, "extras_tab_tweaks") { selectedSubTab = 0 }
+            ExtrasSubTabPill(com.example.util.tr("Performance", "Rendimiento"), selectedSubTab == 1, "extras_tab_performance") { selectedSubTab = 1 }
+            ExtrasSubTabPill(com.example.util.tr("Touch", "Táctil"), selectedSubTab == 2, "extras_tab_touch") { selectedSubTab = 2 }
+            ExtrasSubTabPill(com.example.util.tr("Controller", "Mando"), selectedSubTab == 3, "extras_tab_controller") { selectedSubTab = 3 }
+            ExtrasSubTabPill(com.example.util.tr("Specs", "Especificaciones"), selectedSubTab == 4, "extras_tab_specs") { selectedSubTab = 4 }
+            ExtrasSubTabPill(com.example.util.tr("FPS & Diag", "FPS y Diag."), selectedSubTab == 5, "extras_tab_diagnostics") { selectedSubTab = 5 }
         }
 
         when (selectedSubTab) {
@@ -129,149 +130,109 @@ fun ExtrasScreen(
                 ControllerTab(viewModel = viewModel)
             }
             4 -> {
-                // Specs: Phone hardware specs, accurate battery thermals, display refresh rate
-                LazyColumn(
-                    modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 100.dp),
-                    verticalArrangement = Arrangement.spacedBy(16.dp)
-                ) {
-                    // 1. Device Readiness Score Banner
-                    item {
-                        val scoreColor = when {
-                            readiness.score >= 85 -> LaunchGreen
-                            readiness.score >= 65 -> SolarGold
-                            else -> ElectricCrimson
-                        }
-
-                        CyberCard(borderColor = scoreColor.copy(alpha = 0.5f)) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Box(
-                                    contentAlignment = Alignment.Center,
-                                    modifier = Modifier.size(72.dp)
+                // Specs: Phone hardware specs (read-only screen with zero sliders or floating buttons)
+                // Includes a Native Ad directly beneath the Device & Operating System card and an Anchored Adaptive Banner pinned to the bottom.
+                Column(modifier = Modifier.fillMaxSize()) {
+                    LazyColumn(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxWidth(),
+                        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 32.dp),
+                        verticalArrangement = Arrangement.spacedBy(16.dp)
+                    ) {
+                        // 1. Section: Phone Hardware Specifications
+                        item {
+                            CyberCard(borderColor = HubBlue.copy(alpha = 0.5f)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
                                 ) {
-                                    CircularProgressIndicator(
-                                        progress = { readiness.score / 100f },
-                                        color = scoreColor,
-                                        trackColor = MaterialTheme.colorScheme.surfaceVariant,
-                                        strokeWidth = 7.dp,
-                                        modifier = Modifier.fillMaxSize()
+                                    SectionTitle(
+                                        title = com.example.util.tr("Phone Hardware Specifications", "Especificaciones de Hardware del Teléfono"),
+                                        subtitle = com.example.util.tr("Genuine detected hardware parameters", "Parámetros de hardware genuinos detectados"),
+                                        modifier = Modifier.weight(1f)
                                     )
-                                    Text(
-                                        text = "${readiness.score}",
-                                        style = MaterialTheme.typography.titleLarge.copy(
-                                            fontWeight = FontWeight.Black,
-                                            color = MaterialTheme.colorScheme.onSurface
+                                    IconButton(onClick = { viewModel.loadHardwareSpecs() }) {
+                                        Icon(
+                                            imageVector = Icons.Default.Refresh,
+                                            contentDescription = "Refresh Specs",
+                                            tint = HubBlue
                                         )
-                                    )
+                                    }
                                 }
 
-                                Spacer(modifier = Modifier.width(16.dp))
+                                Spacer(modifier = Modifier.height(12.dp))
 
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        text = "Device Gaming Readiness",
-                                        style = MaterialTheme.typography.titleMedium.copy(
-                                            fontWeight = FontWeight.Bold,
-                                            color = MaterialTheme.colorScheme.onSurface
-                                        )
+                                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    HardwareSpecRowItem(
+                                        icon = Icons.Default.DeveloperBoard,
+                                        label = com.example.util.tr("Processor / SoC", "Procesador / SoC"),
+                                        value = "${hardwareSpecs.socModel} (${hardwareSpecs.cpuCores} ${com.example.util.tr("Cores", "Núcleos")} • ${hardwareSpecs.cpuAbi})",
+                                        accent = HubBlue
                                     )
-                                    Text(
-                                        text = readiness.status,
-                                        style = MaterialTheme.typography.bodySmall.copy(
-                                            color = scoreColor,
-                                            fontWeight = FontWeight.SemiBold
-                                        )
+
+                                    HardwareSpecRowItem(
+                                        icon = Icons.Default.Speed,
+                                        label = com.example.util.tr("Graphics & 3D Engine", "Motor Gráfico y 3D"),
+                                        value = "${hardwareSpecs.gpuRenderer} • ${hardwareSpecs.openGlVersion}",
+                                        accent = SolarGold
                                     )
-                                    Spacer(modifier = Modifier.height(2.dp))
-                                    Text(
-                                        text = if (readiness.warnings.isNotEmpty()) readiness.warnings.first() else "Hardware headroom is primed for smooth competitive play.",
-                                        style = MaterialTheme.typography.labelSmall.copy(
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
+
+                                    HardwareSpecRowItem(
+                                        icon = Icons.Default.Thermostat,
+                                        label = com.example.util.tr("Hardware Battery Thermals", "Temperatura de Batería de Hardware"),
+                                        value = "${String.format(Locale.US, "%.1f°C", thermalInfo.batteryTempC)} (${thermalInfo.batteryHealth} • ${thermalInfo.batteryLevel}% ${com.example.util.tr("Level", "Nivel")})",
+                                        accent = if (thermalInfo.batteryTempC < 38f) LaunchGreen else SolarGold
+                                    )
+
+                                    HardwareSpecRowItem(
+                                        icon = Icons.Default.Memory,
+                                        label = com.example.util.tr("System RAM Headroom", "Memoria RAM del Sistema"),
+                                        value = "${hardwareSpecs.availRamMb} MB ${com.example.util.tr("Available of", "Disponibles de")} ${hardwareSpecs.totalRamMb} MB",
+                                        accent = LaunchGreen
+                                    )
+
+                                    HardwareSpecRowItem(
+                                        icon = Icons.Default.Storage,
+                                        label = com.example.util.tr("Internal Flash Storage", "Almacenamiento Flash Interno"),
+                                        value = "${String.format(Locale.US, "%.1f", hardwareSpecs.freeStorageGb)} GB ${com.example.util.tr("Free of", "Libres de")} ${String.format(Locale.US, "%.1f", hardwareSpecs.totalStorageGb)} GB ${com.example.util.tr("Total", "Total")}",
+                                        accent = Color(0xFFA855F7)
+                                    )
+
+                                    HardwareSpecRowItem(
+                                        icon = Icons.Default.Tv,
+                                        label = com.example.util.tr("Display & Refresh Rate", "Pantalla y Tasa de Refresco"),
+                                        value = "${hardwareSpecs.displayResolution} @ ${hardwareSpecs.refreshRateHz} Hz (${hardwareSpecs.screenDensityDpi} DPI)",
+                                        accent = Color(0xFF0EA5E9)
+                                    )
+
+                                    HardwareSpecRowItem(
+                                        icon = Icons.Default.Devices,
+                                        label = com.example.util.tr("Device & Operating System", "Dispositivo y Sistema Operativo"),
+                                        value = "${hardwareSpecs.deviceName} • Android ${hardwareSpecs.androidVersion} (API ${hardwareSpecs.apiLevel})",
+                                        accent = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
                                 }
                             }
                         }
-                    }
 
-                    // 2. Section: Phone Hardware Specifications
-                    item {
-                        CyberCard(borderColor = HubBlue.copy(alpha = 0.5f)) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.SpaceBetween
-                            ) {
-                                SectionTitle(
-                                    title = "Phone Hardware Specifications",
-                                    subtitle = "Genuine detected hardware parameters"
-                                )
-                                IconButton(onClick = { viewModel.loadHardwareSpecs() }) {
-                                    Icon(
-                                        imageVector = Icons.Default.Refresh,
-                                        contentDescription = "Refresh Specs",
-                                        tint = HubBlue
-                                    )
-                                }
-                            }
-
-                            Spacer(modifier = Modifier.height(12.dp))
-
-                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                HardwareSpecRowItem(
-                                    icon = Icons.Default.DeveloperBoard,
-                                    label = "Processor / SoC",
-                                    value = "${hardwareSpecs.socModel} (${hardwareSpecs.cpuCores} Cores • ${hardwareSpecs.cpuAbi})",
-                                    accent = HubBlue
-                                )
-
-                                HardwareSpecRowItem(
-                                    icon = Icons.Default.Speed,
-                                    label = "Graphics & 3D Engine",
-                                    value = "${hardwareSpecs.gpuRenderer} • ${hardwareSpecs.openGlVersion}",
-                                    accent = SolarGold
-                                )
-
-                                HardwareSpecRowItem(
-                                    icon = Icons.Default.Thermostat,
-                                    label = "Hardware Battery Thermals",
-                                    value = "${String.format(Locale.US, "%.1f°C", thermalInfo.batteryTempC)} (${thermalInfo.batteryHealth} • ${thermalInfo.batteryLevel}% Level)",
-                                    accent = if (thermalInfo.batteryTempC < 38f) LaunchGreen else SolarGold
-                                )
-
-                                HardwareSpecRowItem(
-                                    icon = Icons.Default.Memory,
-                                    label = "System RAM Headroom",
-                                    value = "${hardwareSpecs.availRamMb} MB Available of ${hardwareSpecs.totalRamMb} MB",
-                                    accent = LaunchGreen
-                                )
-
-                                HardwareSpecRowItem(
-                                    icon = Icons.Default.Storage,
-                                    label = "Internal Flash Storage",
-                                    value = "${String.format(Locale.US, "%.1f", hardwareSpecs.freeStorageGb)} GB Free of ${String.format(Locale.US, "%.1f", hardwareSpecs.totalStorageGb)} GB Total",
-                                    accent = Color(0xFFA855F7)
-                                )
-
-                                HardwareSpecRowItem(
-                                    icon = Icons.Default.Tv,
-                                    label = "Display & Refresh Rate",
-                                    value = "${hardwareSpecs.displayResolution} @ ${hardwareSpecs.refreshRateHz} Hz (${hardwareSpecs.screenDensityDpi} DPI)",
-                                    accent = Color(0xFF0EA5E9)
-                                )
-
-                                HardwareSpecRowItem(
-                                    icon = Icons.Default.Devices,
-                                    label = "Device & Operating System",
-                                    value = "${hardwareSpecs.deviceName} • Android ${hardwareSpecs.androidVersion} (API ${hardwareSpecs.apiLevel})",
-                                    accent = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
+                        // Native Ad directly beneath the Device & Operating System card
+                        item {
+                            com.example.ui.components.GMaxNativeAdCard(
+                                placementTag = "specs_device_os_below",
+                                topBuffer = 24.dp,
+                                bottomBuffer = 16.dp
+                            )
                         }
                     }
+
+                    // Anchored Adaptive Banner pinned to the very bottom of the Specs screen
+                    com.example.ui.components.GMaxAnchoredAdaptiveBanner(
+                        placementTag = "specs_anchored_bottom",
+                        topBuffer = 16.dp,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                    )
                 }
             }
             5 -> {
@@ -285,8 +246,22 @@ fun ExtrasScreen(
                     item {
                         CyberCard(borderColor = if (overlayConfig.isEnabled) LaunchGreen else MaterialTheme.colorScheme.outline) {
                             SectionTitle(
-                                title = "Screen Overlay HUD Controls",
-                                subtitle = "Real-time floating metrics for FPS, battery, and thermals"
+                                title = com.example.util.tr(
+                                    "Screen Overlay HUD Controls",
+                                    "Controles del HUD en Pantalla",
+                                    "Controles do HUD na Tela",
+                                    "Kontrol HUD Overlay Layar",
+                                    "Điều khiển HUD trên màn hình",
+                                    "Mga Kontrol ng Screen Overlay HUD"
+                                ),
+                                subtitle = com.example.util.tr(
+                                    "Real-time floating metrics for FPS, battery, and thermals",
+                                    "Métricas flotantes en tiempo real de FPS, batería y temperatura",
+                                    "Métricas flutuantes em tempo real de FPS, bateria e temperatura",
+                                    "Metrik melayang real-time untuk FPS, baterai, dan suhu",
+                                    "Chỉ số nổi theo thời gian thực cho FPS, pin và nhiệt độ",
+                                    "Real-time floating metrics para sa FPS, baterya, at temperatura"
+                                )
                             )
 
                             Spacer(modifier = Modifier.height(10.dp))
@@ -304,7 +279,14 @@ fun ExtrasScreen(
                                         Icon(Icons.Default.Warning, contentDescription = null, tint = SolarGold, modifier = Modifier.size(18.dp))
                                         Spacer(modifier = Modifier.width(8.dp))
                                         Text(
-                                            text = "Requires 'Display over other apps' permission to stay visible over games.",
+                                            text = com.example.util.tr(
+                                                "Requires 'Display over other apps' permission to stay visible over games.",
+                                                "Requiere permiso 'Mostrar sobre otras apps' para verse en los juegos.",
+                                                "Requer permissão 'Sobrepor a outros apps' para ficar visível nos jogos.",
+                                                "Memerlukan izin 'Tampilkan di atas aplikasi lain' agar terlihat di game.",
+                                                "Cần quyền 'Hiển thị trên ứng dụng khác' để hiện trên trò chơi.",
+                                                "Kailangan ng 'Display over other apps' permission para makita sa laro."
+                                            ),
                                             style = MaterialTheme.typography.bodySmall.copy(color = SolarGold, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
                                         )
                                     }
@@ -333,14 +315,39 @@ fun ExtrasScreen(
                                     Spacer(modifier = Modifier.width(10.dp))
                                     Column {
                                         Text(
-                                            text = "Floating Screen Overlay",
+                                            text = com.example.util.tr(
+                                                "Floating Screen Overlay",
+                                                "Superposición Flotante en Pantalla",
+                                                "Sobreposição Flutuante na Tela",
+                                                "Overlay Layar Melayang",
+                                                "Lớp phủ màn hình nổi",
+                                                "Floating Screen Overlay"
+                                            ),
                                             style = MaterialTheme.typography.titleSmall.copy(
                                                 fontWeight = FontWeight.Bold,
                                                 color = MaterialTheme.colorScheme.onSurface
                                             )
                                         )
                                         Text(
-                                            text = if (overlayConfig.isEnabled) "HUD is active and draggable on screen" else "Currently inactive",
+                                            text = if (overlayConfig.isEnabled) {
+                                                com.example.util.tr(
+                                                    "HUD is active and draggable on screen",
+                                                    "El HUD está activo y se puede arrastrar",
+                                                    "HUD ativo e arrastável na tela",
+                                                    "HUD aktif dan dapat digeser di layar",
+                                                    "HUD đang bật và có thể kéo trên màn hình",
+                                                    "Aktibo ang HUD at puwedeng i-drag sa screen"
+                                                )
+                                            } else {
+                                                com.example.util.tr(
+                                                    "Currently inactive",
+                                                    "Actualmente inactivo",
+                                                    "Atualmente inativo",
+                                                    "Saat ini tidak aktif",
+                                                    "Hiện đang tắt",
+                                                    "Kasalukuyang hindi aktibo"
+                                                )
+                                            },
                                             style = MaterialTheme.typography.bodySmall.copy(
                                                 color = if (overlayConfig.isEnabled) LaunchGreen else MaterialTheme.colorScheme.onSurfaceVariant,
                                                 fontSize = 11.sp
@@ -348,6 +355,8 @@ fun ExtrasScreen(
                                         )
                                     }
                                 }
+
+                                Spacer(modifier = Modifier.width(8.dp))
 
                                 Switch(
                                     checked = overlayConfig.isEnabled,
@@ -365,7 +374,14 @@ fun ExtrasScreen(
                             Spacer(modifier = Modifier.height(12.dp))
 
                             Text(
-                                text = "Overlay Telemetry Metrics:",
+                                text = com.example.util.tr(
+                                    "Overlay Telemetry Metrics:",
+                                    "Métricas de Telemetría en Pantalla:",
+                                    "Métricas de Telemetria na Sobreposição:",
+                                    "Metrik Telemetri Overlay:",
+                                    "Chỉ số телеметрия trên lớp phủ:",
+                                    "Mga Sukatan ng Overlay Telemetry:"
+                                ),
                                 style = MaterialTheme.typography.labelSmall.copy(
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     fontWeight = FontWeight.Bold
@@ -376,8 +392,22 @@ fun ExtrasScreen(
                             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                 ExtrasTelemetryRow(
                                     icon = Icons.Default.Speed,
-                                    label = "Ultra-Precision EFPS Counter (96%–98% Accuracy)",
-                                    description = "Compact HUD readout powered by 6-way hardware sensor fusion",
+                                    label = com.example.util.tr(
+                                        "Ultra-Precision EFPS Counter (96% to 98% Accuracy)",
+                                        "Contador EFPS de Ultra Precisión (96% a 98%)",
+                                        "Contador EFPS de Ultra Precisão (96% a 98%)",
+                                        "Penghitung EFPS Presisi Tinggi (Akurasi 96%-98%)",
+                                        "Bộ đếm EFPS siêu chính xác (Độ chính xác 96%-98%)",
+                                        "Ultra-Precision EFPS Counter (96% hanggang 98% Accuracy)"
+                                    ),
+                                    description = com.example.util.tr(
+                                        "Compact HUD readout powered by 6-way hardware sensor fusion",
+                                        "Lectura compacta impulsada por fusión de sensores de 6 vías",
+                                        "Leitura compacta com fusão de sensores de hardware de 6 vias",
+                                        "Tampilan HUD ringkas dengan fusi sensor perangkat keras 6 arah",
+                                        "Hiển thị HUD gọn nhẹ với cảm biến phần cứng 6 chiều",
+                                        "Compact HUD readout mula sa 6-way hardware sensor fusion"
+                                    ),
                                     isChecked = overlayConfig.showFps,
                                     onCheckedChange = { viewModel.toggleOverlayFps(context, it) },
                                     accentColor = HubBlue
@@ -385,8 +415,22 @@ fun ExtrasScreen(
 
                                 ExtrasTelemetryRow(
                                     icon = Icons.Default.Memory,
-                                    label = "RAM Usage Percentage",
-                                    description = "Display live system RAM utilization (%) on floating HUD",
+                                    label = com.example.util.tr(
+                                        "RAM Usage Percentage",
+                                        "Porcentaje de Uso de RAM",
+                                        "Porcentagem de Uso de RAM",
+                                        "Persentase Penggunaan RAM",
+                                        "Phần trăm sử dụng RAM",
+                                        "Porsyento ng Paggamit ng RAM"
+                                    ),
+                                    description = com.example.util.tr(
+                                        "Display live system RAM utilization (%) on floating HUD",
+                                        "Muestra el uso de RAM (%) en vivo en el HUD flotante",
+                                        "Exibe o uso de RAM do sistema (%) ao vivo no HUD flutuante",
+                                        "Tampilkan penggunaan RAM sistem (%) langsung di HUD",
+                                        "Hiển thị mức dùng RAM hệ thống (%) trực tiếp trên HUD",
+                                        "Ipakita ang live na paggamit ng RAM (%) sa floating HUD"
+                                    ),
                                     isChecked = overlayConfig.showRamPct,
                                     onCheckedChange = { viewModel.toggleOverlayRamPct(context, it) },
                                     accentColor = Color(0xFFA855F7)
@@ -394,8 +438,22 @@ fun ExtrasScreen(
 
                                 ExtrasTelemetryRow(
                                     icon = Icons.Default.Thermostat,
-                                    label = "Battery & Thermal Sensor",
-                                    description = "Monitor live battery temperature (°C)",
+                                    label = com.example.util.tr(
+                                        "Battery & Thermal Sensor",
+                                        "Sensor de Batería y Temperatura",
+                                        "Sensor de Bateria e Temperatura",
+                                        "Sensor Baterai & Suhu",
+                                        "Cảm biến Pin & Nhiệt độ",
+                                        "Sensor ng Baterya at Temperatura"
+                                    ),
+                                    description = com.example.util.tr(
+                                        "Monitor live battery temperature (°C)",
+                                        "Monitorea la temperatura de la batería en vivo (°C)",
+                                        "Monitore a temperatura da bateria ao vivo (°C)",
+                                        "Pantau suhu baterai secara langsung (°C)",
+                                        "Theo dõi nhiệt độ pin trực tiếp (°C)",
+                                        "Bantayan ang live na temperatura ng baterya (°C)"
+                                    ),
                                     isChecked = overlayConfig.showTemp,
                                     onCheckedChange = { viewModel.toggleOverlayTemp(context, it) },
                                     accentColor = SolarGold
@@ -403,8 +461,22 @@ fun ExtrasScreen(
 
                                 ExtrasTelemetryRow(
                                     icon = Icons.Default.BatteryChargingFull,
-                                    label = "Battery Fuel Gauge",
-                                    description = "Display live battery percentage",
+                                    label = com.example.util.tr(
+                                        "Battery Fuel Gauge",
+                                        "Indicador de Nivel de Batería",
+                                        "Indicador de Nível da Bateria",
+                                        "Indikator Daya Baterai",
+                                        "Chỉ báo dung lượng pin",
+                                        "Sukatan ng Baterya"
+                                    ),
+                                    description = com.example.util.tr(
+                                        "Display live battery percentage",
+                                        "Muestra el porcentaje de batería en vivo",
+                                        "Exibe a porcentagem da bateria ao vivo",
+                                        "Tampilkan persentase baterai secara langsung",
+                                        "Hiển thị phần trăm pin trực tiếp",
+                                        "Ipakita ang live na porsyento ng baterya"
+                                    ),
                                     isChecked = overlayConfig.showBattery,
                                     onCheckedChange = { viewModel.toggleOverlayBattery(context, it) },
                                     accentColor = LaunchGreen
@@ -412,8 +484,22 @@ fun ExtrasScreen(
 
                                 ExtrasTelemetryRow(
                                     icon = Icons.Default.Timer,
-                                    label = "Time of Day Clock",
-                                    description = "Display live current time of day (e.g. 2:45 PM) on HUD",
+                                    label = com.example.util.tr(
+                                        "Time of Day Clock",
+                                        "Reloj de Hora Actual",
+                                        "Relógio na Sobreposição",
+                                        "Jam Waktu Nyata (Clock Overlay)",
+                                        "Đồng hồ thời gian thực",
+                                        "Orasan sa Overlay (Clock)"
+                                    ),
+                                    description = com.example.util.tr(
+                                        "Display live current time of day (e.g. 2:45 PM) on HUD",
+                                        "Muestra la hora actual en vivo (ej. 2:45 PM) en el HUD",
+                                        "Exibe a hora atual ao vivo (ex. 14:45) no HUD para não perder a hora",
+                                        "Tampilkan waktu saat ini (mis. 14:45) di HUD",
+                                        "Hiển thị giờ hiện tại trực tiếp trên HUD",
+                                        "Ipakita ang kasalukuyang oras sa HUD"
+                                    ),
                                     isChecked = overlayConfig.showClock,
                                     onCheckedChange = { viewModel.toggleOverlayClock(context, it) },
                                     accentColor = HubBlue
@@ -421,8 +507,22 @@ fun ExtrasScreen(
 
                                 ExtrasTelemetryRow(
                                     icon = Icons.Default.Timer,
-                                    label = "Match Session Stopwatch",
-                                    description = "On-screen active gaming timer",
+                                    label = com.example.util.tr(
+                                        "Match Session Stopwatch",
+                                        "Cronómetro de Sesión de Juego",
+                                        "Cronômetro da Sessão de Jogo",
+                                        "Stopwatch Sesi Permainan",
+                                        "Đồng hồ bấm giờ phiên chơi",
+                                        "Stopwatch ng Gaming Session"
+                                    ),
+                                    description = com.example.util.tr(
+                                        "On-screen active gaming timer",
+                                        "Temporizador de sesión activa en pantalla",
+                                        "Cronômetro de tempo de jogo ativo na tela",
+                                        "Timer sesi bermain aktif di layar",
+                                        "Bộ đếm thời gian chơi trên màn hình",
+                                        "Timer ng aktibong laro sa screen"
+                                    ),
                                     isChecked = overlayConfig.showTimer,
                                     onCheckedChange = { viewModel.toggleOverlayTimer(context, it) },
                                     accentColor = Color(0xFF0EA5E9)
@@ -430,8 +530,22 @@ fun ExtrasScreen(
 
                                 ExtrasTelemetryRow(
                                     icon = Icons.Default.Layers,
-                                    label = "Auto-Scale for Smaller Phone Screens",
-                                    description = "Automatically shrinks HUD text & spacing so all 6 metrics fit on 1 row",
+                                    label = com.example.util.tr(
+                                        "Auto-Scale for Smaller Phone Screens",
+                                        "Ajuste Automático para Pantallas Pequeñas",
+                                        "Ajuste Automático para Telas Menores",
+                                        "Skala Otomatis untuk Layar Kecil",
+                                        "Tự động thu phóng cho màn hình nhỏ",
+                                        "Auto-Scale para sa Maliit na Screen"
+                                    ),
+                                    description = com.example.util.tr(
+                                        "Automatically shrinks HUD text & spacing so all 6 metrics fit on 1 row",
+                                        "Reduce texto y espacio del HUD para que las 6 métricas quepan en 1 fila",
+                                        "Ajusta texto e espaçamento do HUD para caber todas as 6 métricas em 1 linha",
+                                        "Mengecilkan teks & jarak HUD otomatis agar 6 metrik muat 1 baris",
+                                        "Tự thu nhỏ chữ & khoảng cách HUD để cả 6 chỉ số vừa 1 hàng",
+                                        "Awtomatikong pinapaliit ang HUD text para magkasya sa 1 row"
+                                    ),
                                     isChecked = overlayConfig.autoScaleSmallScreens,
                                     onCheckedChange = { viewModel.toggleOverlayAutoScale(context, it) },
                                     accentColor = LaunchGreen
@@ -769,7 +883,7 @@ fun ExtrasScreen(
                             Spacer(modifier = Modifier.height(12.dp))
 
                             Text(
-                                text = "HOW 6-WAY SENSOR FUSION REACHES 96%–98% ACCURACY",
+                                text = "HOW 6-WAY SENSOR FUSION REACHES 96% TO 98% ACCURACY",
                                 style = MaterialTheme.typography.labelSmall.copy(
                                     fontWeight = FontWeight.Bold,
                                     color = HubBlue,
@@ -914,7 +1028,7 @@ private fun ExtrasSubTabPill(
                 RoundedCornerShape(10.dp)
             )
             .clickable(onClick = onClick)
-            .padding(horizontal = 14.dp, vertical = 8.dp)
+            .padding(horizontal = 12.dp, vertical = 8.dp)
             .testTag(tag),
         contentAlignment = Alignment.Center
     ) {
@@ -923,8 +1037,11 @@ private fun ExtrasSubTabPill(
             style = MaterialTheme.typography.labelMedium.copy(
                 fontWeight = FontWeight.Bold,
                 color = if (isSelected) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
-                fontSize = 12.sp
-            )
+                fontSize = 11.5.sp
+            ),
+            maxLines = 1,
+            softWrap = false,
+            overflow = TextOverflow.Ellipsis
         )
     }
 }
@@ -1002,7 +1119,7 @@ fun ExtrasTelemetryRow(
                 modifier = Modifier.size(18.dp)
             )
             Spacer(modifier = Modifier.width(10.dp))
-            Column {
+            Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = label,
                     style = MaterialTheme.typography.bodySmall.copy(
@@ -1019,6 +1136,8 @@ fun ExtrasTelemetryRow(
                 )
             }
         }
+
+        Spacer(modifier = Modifier.width(8.dp))
 
         Switch(
             checked = isChecked,

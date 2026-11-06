@@ -133,7 +133,7 @@ class CrosshairOverlayService : Service() {
         stopCrosshair()
 
         val density = resources.displayMetrics.density
-        val sizePx = (sizeDp * density).toInt()
+        val sizePx = (sizeDp * density).toInt().coerceAtLeast(24)
 
         val layoutType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
@@ -143,27 +143,37 @@ class CrosshairOverlayService : Service() {
         }
 
         val newView = CrosshairView(this).apply {
+            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
+            isClickable = false
+            isFocusable = false
+            isFocusableInTouchMode = false
+            setWillNotCacheDrawing(true)
             updateConfig(style, colorLong, sizePx.toFloat(), alpha)
         }
         crosshairView = newView
         activeViewInstance = newView
 
         val params = WindowManager.LayoutParams(
-            sizePx * 2, // Allow ample canvas bounds for tick marks and rings
-            sizePx * 2,
+            sizePx, // Tight exact reticle bounds so no oversized overlay region exists
+            sizePx,
             layoutType,
             WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
                     WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                    WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
                     WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
                     WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or
+                    WindowManager.LayoutParams.FLAG_SPLIT_TOUCH or
                     WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED,
             PixelFormat.TRANSLUCENT
         ).apply {
             gravity = Gravity.CENTER
             x = 0
             y = 0
+            title = "SurfaceView"
+            packageName = this@CrosshairOverlayService.packageName
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
+                layoutInDisplayCutoutMode =
+                    WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
             }
         }
 
@@ -181,16 +191,14 @@ class CrosshairOverlayService : Service() {
 
     private fun updateCrosshair(style: Int, colorLong: Long, sizeDp: Int, alpha: Float) {
         val density = resources.displayMetrics.density
-        val sizePx = (sizeDp * density).toInt()
+        val sizePx = (sizeDp * density).toInt().coerceAtLeast(24)
 
         (crosshairView ?: activeViewInstance)?.updateConfig(style, colorLong, sizePx.toFloat(), alpha)
 
         windowParams?.let { params ->
-            params.width = sizePx * 2
-            params.height = sizePx * 2
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                params.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
-            }
+            params.width = sizePx
+            params.height = sizePx
+            params.title = "SurfaceView"
             try {
                 windowManager?.updateViewLayout(crosshairView ?: activeViewInstance, params)
             } catch (_: Exception) {}
@@ -214,6 +222,16 @@ class CrosshairOverlayService : Service() {
             activeViewInstance = null
         }
         isRunning = false
+    }
+
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        crosshairView?.destroyDrawingCache()
+    }
+
+    override fun onLowMemory() {
+        super.onLowMemory()
+        crosshairView?.destroyDrawingCache()
     }
 
     override fun onDestroy() {
@@ -250,6 +268,8 @@ class CrosshairOverlayService : Service() {
             style = Paint.Style.FILL
             color = Color.argb(160, 0, 0, 0)
         }
+
+        private val reusablePath = Path()
 
         fun updateConfig(newStyle: Int, colorLong: Long, newSizePx: Float, newAlpha: Float) {
             style = newStyle
@@ -339,14 +359,13 @@ class CrosshairOverlayService : Service() {
 
         // Style 3: Tactical Chevron (^)
         private fun drawTacticalChevron(canvas: Canvas, cx: Float, cy: Float, r: Float, sw: Float) {
-            val path = Path().apply {
-                moveTo(cx - r * 0.65f, cy + r * 0.40f)
-                lineTo(cx, cy - r * 0.55f)
-                lineTo(cx + r * 0.65f, cy + r * 0.40f)
-            }
+            reusablePath.reset()
+            reusablePath.moveTo(cx - r * 0.65f, cy + r * 0.40f)
+            reusablePath.lineTo(cx, cy - r * 0.55f)
+            reusablePath.lineTo(cx + r * 0.65f, cy + r * 0.40f)
 
-            canvas.drawPath(path, shadowPaint)
-            canvas.drawPath(path, corePaint)
+            canvas.drawPath(reusablePath, shadowPaint)
+            canvas.drawPath(reusablePath, corePaint)
 
             // Small vertical drop post
             canvas.drawLine(cx, cy + r * 0.15f, cx, cy + r * 0.70f, shadowPaint)
@@ -409,16 +428,15 @@ class CrosshairOverlayService : Service() {
         // Style 6: Diamond Box (◇)
         private fun drawDiamondBox(canvas: Canvas, cx: Float, cy: Float, r: Float, sw: Float) {
             val d = r * 0.65f
-            val path = Path().apply {
-                moveTo(cx, cy - d)
-                lineTo(cx + d, cy)
-                lineTo(cx, cy + d)
-                lineTo(cx - d, cy)
-                close()
-            }
+            reusablePath.reset()
+            reusablePath.moveTo(cx, cy - d)
+            reusablePath.lineTo(cx + d, cy)
+            reusablePath.lineTo(cx, cy + d)
+            reusablePath.lineTo(cx - d, cy)
+            reusablePath.close()
 
-            canvas.drawPath(path, shadowPaint)
-            canvas.drawPath(path, corePaint)
+            canvas.drawPath(reusablePath, shadowPaint)
+            canvas.drawPath(reusablePath, corePaint)
 
             // Micro Center Dot
             canvas.drawCircle(cx, cy, sw * 0.8f, shadowFillPaint)

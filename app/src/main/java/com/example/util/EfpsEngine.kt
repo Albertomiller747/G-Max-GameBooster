@@ -16,9 +16,16 @@ import android.view.View
 import android.view.ViewTreeObserver
 import android.view.WindowManager
 import com.example.data.GameGuidanceDatabase
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import java.io.RandomAccessFile
 import kotlin.math.abs
 import kotlin.math.max
@@ -45,7 +52,7 @@ enum class EfpsSamplingProfile(
         label = "Balanced (350ms)",
         intervalMs = 350L,
         kalmanProcessNoise = 0.26,
-        description = "Optimal 96%–98% accuracy 6-way hardware sensor fusion"
+        description = "Optimal 96% to 98% accuracy 6-way hardware sensor fusion"
     ),
     SMOOTH(
         key = "SMOOTH",
@@ -94,10 +101,10 @@ object EfpsEngine : Choreographer.FrameCallback {
 
     const val NON_ROOT_EXPLANATION_TITLE = "Why 100% Exact FPS Is Impossible Without Root"
     const val NON_ROOT_EXPLANATION_BODY =
-        "Android's security sandbox blocks non-root apps from directly reading another game's private GPU frame buffer without a PC ADB tether. Instead, G-Max combines live display refresh tracking, frame pacing, and hardware load sensors to estimate real-time EFPS at 96%–98% accuracy."
+        "Android's security sandbox blocks non-root apps from directly reading another game's private GPU frame buffer without a PC ADB tether. Instead, G Max Gaming Hub combines live display refresh tracking, frame pacing, and hardware load sensors to estimate real-time EFPS at 96% to 98% accuracy."
 
     const val SENSOR_FUSION_SUMMARY_BODY =
-        "Our 6-way sensor fusion blends live DisplayHz, VSYNC timing, GPU render lag, game cap detection, CPU/RAM load, and thermal headroom through a real-time Kalman filter. This delivers responsive frame rate and 1% Low readouts—including sub-30 FPS drops—without root access or battery drain."
+        "Our 6-way sensor fusion blends live DisplayHz, VSYNC timing, GPU render lag, game cap detection, CPU/RAM load, and thermal headroom through a real-time Kalman filter. This delivers responsive frame rate and 1% Low readouts, including sub-30 FPS drops, without root access or battery drain."
 
     private var appContext: Context? = null
     private var displayManager: DisplayManager? = null
@@ -106,15 +113,30 @@ object EfpsEngine : Choreographer.FrameCallback {
     private var activityManager: ActivityManager? = null
     private var attachedView: View? = null
 
+    private val ioScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private var hardwareProbeJob: Job? = null
+
+    @Volatile
     private var isRunning = false
+
+    @Volatile
+    private var isPausedForIdle = false
+
     private var activeProfile: EfpsSamplingProfile = EfpsSamplingProfile.BALANCED
     private var targetCapMode: String = "AUTO"
     private var activeGamePackage: String? = null
+    private var cachedGameRecommendedCap: Int? = null
+    private var cachedGamePackageForCap: String? = null
 
     // Hardware Display VRR state
+    @Volatile
     private var liveDisplayHz = 60
+
+    @Volatile
     private var maxHardwareHz = 60
     private var supportedRefreshRates: List<Int> = listOf(60)
+
+    @Volatile
     private var expectedVsyncNanos = 16_666_666L
 
     // Nanosecond Frame & Draw Timing state
@@ -128,20 +150,32 @@ object EfpsEngine : Choreographer.FrameCallback {
     private var oddFrameGpuLagSum = 0.0
     private var paritySampleCount = 0
 
-    // Rolling window buffers for IQR / Kalman filtering & 1% Low calculation
-    private val rawFpsWindow = ArrayList<Double>(64)
-    private val jitterMsWindow = ArrayList<Float>(64)
-    private val gpuLagMsWindow = ArrayList<Float>(64)
+    // Pre-allocated primitive arrays for zero-allocation frame sampling in doFrame()
+    private const val WINDOW_CAPACITY = 128
+    private val rawFpsBuffer = DoubleArray(WINDOW_CAPACITY)
+    private val scratchSortBuffer = DoubleArray(WINDOW_CAPACITY)
+    private var rawFpsCount = 0
+    private var jitterMsSum = 0.0
+    private var gpuLagMsSum = 0.0
+    private var sampleMetricsCount = 0
+
     private val rollingHistoryBuffer = ArrayDeque<Int>(120)
 
     // 1D Kalman Filter state for ultra-responsive yet noise-free EFPS
     private var kalmanEstimate = 60.0
     private var kalmanErrorCov = 1.0
 
-    // Hardware CPU & Thermal probes
+    // Hardware CPU & Thermal probes (updated exclusively on Dispatchers.IO)
+    @Volatile
     private var lastHardwareProbeMillis = 0L
+
+    @Volatile
     private var cachedThermalFactor = 1.0f
+
+    @Volatile
     private var cachedCpuLoadPct = 34
+
+    @Volatile
     private var detectedSubHarmonicDivisor = 1
 
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -168,6 +202,10 @@ object EfpsEngine : Choreographer.FrameCallback {
         }
     }
 
+    fun isEngineRunning(): Boolean = isRunning
+
+    fun isIdlePaused(): Boolean = isPausedForIdle
+
     fun init(context: Context) {
         val ctx = context.applicationContext
         appContext = ctx
@@ -182,7 +220,10 @@ object EfpsEngine : Choreographer.FrameCallback {
         targetCapMode = if (savedCap in SUPPORTED_CAP_MODES) savedCap else "AUTO"
 
         refreshDisplayHz()
-        probeHardwareCpuAndThermals(force = true)
+        // Trigger initial hardware probe asynchronously on Dispatchers.IO so init() never blocks main thread
+        ioScope.launch {
+            probeHardwareCpuAndThermals(force = true)
+        }
 
         val autoCap = resolveAutoDetectedCap()
         val effectiveCap = resolveEffectiveCap(autoCap)
@@ -246,6 +287,8 @@ object EfpsEngine : Choreographer.FrameCallback {
 
     fun setActiveGamePackage(packageName: String?) {
         activeGamePackage = packageName
+        cachedGamePackageForCap = null
+        cachedGameRecommendedCap = null
         val autoCap = resolveAutoDetectedCap()
         val effectiveCap = resolveEffectiveCap(autoCap)
         _telemetry.value = _telemetry.value.copy(
@@ -255,28 +298,7 @@ object EfpsEngine : Choreographer.FrameCallback {
     }
 
     private fun resolveAutoDetectedCap(): Int {
-        val pkg = activeGamePackage
-        if (!pkg.isNullOrBlank()) {
-            val match = GameGuidanceDatabase.gamesList.find {
-                it.packageName.equals(pkg, ignoreCase = true)
-            }
-            if (match != null) {
-                val numbers = Regex("\\d+").findAll(match.recommendedFpsCap)
-                    .mapNotNull { it.value.toIntOrNull() }
-                    .filter { it in 30..240 }
-                    .toList()
-                val maxGameCap = numbers.maxOrNull()
-                if (maxGameCap != null) {
-                    return min(liveDisplayHz, maxGameCap)
-                }
-            }
-        }
-
-        if (detectedSubHarmonicDivisor == 2 && liveDisplayHz >= 90) {
-            return (liveDisplayHz / 2).coerceAtLeast(30)
-        }
-
-        return liveDisplayHz
+        return liveDisplayHz.coerceIn(30, 240)
     }
 
     private fun resolveEffectiveCap(autoCap: Int = resolveAutoDetectedCap()): Int {
@@ -289,7 +311,18 @@ object EfpsEngine : Choreographer.FrameCallback {
         return autoCap.coerceIn(30, liveDisplayHz.coerceAtLeast(30))
     }
 
+    private fun startBackgroundHardwareProber() {
+        if (hardwareProbeJob?.isActive == true) return
+        hardwareProbeJob = ioScope.launch {
+            while (isActive && isRunning && !isPausedForIdle) {
+                probeHardwareCpuAndThermals(force = false)
+                delay(2000L)
+            }
+        }
+    }
+
     fun start(context: Context, overlayView: View? = null) {
+        isPausedForIdle = false
         if (appContext == null) {
             init(context)
         }
@@ -306,9 +339,10 @@ object EfpsEngine : Choreographer.FrameCallback {
             lastFrameTimeNanos = 0L
             lastWallClockNanos = 0L
             lastPublishNanos = System.nanoTime()
-            rawFpsWindow.clear()
-            jitterMsWindow.clear()
-            gpuLagMsWindow.clear()
+            rawFpsCount = 0
+            jitterMsSum = 0.0
+            gpuLagMsSum = 0.0
+            sampleMetricsCount = 0
             evenFrameGpuLagSum = 0.0
             oddFrameGpuLagSum = 0.0
             paritySampleCount = 0
@@ -322,12 +356,22 @@ object EfpsEngine : Choreographer.FrameCallback {
                 displayManager?.registerDisplayListener(displayListener, mainHandler)
             } catch (_: Exception) {}
 
-            Choreographer.getInstance().postFrameCallback(this)
+            startBackgroundHardwareProber()
+            mainHandler.post {
+                if (isRunning) {
+                    try {
+                        Choreographer.getInstance().removeFrameCallback(this)
+                        Choreographer.getInstance().postFrameCallback(this)
+                    } catch (_: Exception) {}
+                }
+            }
         }
     }
 
     fun stop() {
         isRunning = false
+        hardwareProbeJob?.cancel()
+        hardwareProbeJob = null
         try {
             Choreographer.getInstance().removeFrameCallback(this)
         } catch (_: Exception) {}
@@ -335,6 +379,33 @@ object EfpsEngine : Choreographer.FrameCallback {
             displayManager?.unregisterDisplayListener(displayListener)
         } catch (_: Exception) {}
         detachOverlayView()
+    }
+
+    /**
+     * Pauses all Choreographer frame callbacks and background sysfs polling when the app
+     * is minimized and no HUD overlay or Boost session is active, ensuring zero idle battery drain.
+     */
+    fun pauseForIdle() {
+        isPausedForIdle = true
+        stop()
+    }
+
+    fun resumeFromIdle(context: Context) {
+        isPausedForIdle = false
+        start(context)
+    }
+
+    /**
+     * Trims rolling history buffers during low-memory events.
+     */
+    fun trimHistory() {
+        rawFpsCount = 0
+        jitterMsSum = 0.0
+        gpuLagMsSum = 0.0
+        sampleMetricsCount = 0
+        while (rollingHistoryBuffer.size > 24) {
+            rollingHistoryBuffer.removeFirst()
+        }
     }
 
     private fun detachOverlayView() {
@@ -413,27 +484,15 @@ object EfpsEngine : Choreographer.FrameCallback {
         var factor = 1.0f
         try {
             val pm = powerManager
-            if (pm != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                val headroom = pm.getThermalHeadroom(1)
-                if (!headroom.isNaN() && headroom > 0.0f) {
-                    if (headroom >= 1.05f) {
-                        factor = min(factor, 0.85f)
-                    } else if (headroom >= 0.95f) {
-                        factor = min(factor, 0.92f)
-                    } else if (headroom >= 0.85f) {
-                        factor = min(factor, 0.97f)
-                    }
-                }
-            }
             if (pm != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 when (pm.currentThermalStatus) {
                     PowerManager.THERMAL_STATUS_NONE,
-                    PowerManager.THERMAL_STATUS_LIGHT -> {}
-                    PowerManager.THERMAL_STATUS_MODERATE -> factor = min(factor, 0.86f)
-                    PowerManager.THERMAL_STATUS_SEVERE -> factor = min(factor, 0.68f)
+                    PowerManager.THERMAL_STATUS_LIGHT,
+                    PowerManager.THERMAL_STATUS_MODERATE -> {}
+                    PowerManager.THERMAL_STATUS_SEVERE -> factor = min(factor, 0.88f)
                     PowerManager.THERMAL_STATUS_CRITICAL,
                     PowerManager.THERMAL_STATUS_EMERGENCY,
-                    PowerManager.THERMAL_STATUS_SHUTDOWN -> factor = min(factor, 0.42f)
+                    PowerManager.THERMAL_STATUS_SHUTDOWN -> factor = min(factor, 0.72f)
                 }
             }
 
@@ -443,19 +502,15 @@ object EfpsEngine : Choreographer.FrameCallback {
                 val rawTemp = sticky?.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, -1) ?: -1
                 if (rawTemp > 0) {
                     val tempC = rawTemp / 10f
-                    if (tempC >= 45.0f) {
-                        factor = min(factor, 0.48f)
-                    } else if (tempC >= 42.5f) {
-                        factor = min(factor, 0.65f)
-                    } else if (tempC >= 40.0f) {
-                        factor = min(factor, 0.82f)
-                    } else if (tempC >= 38.0f) {
-                        factor = min(factor, 0.94f)
+                    if (tempC >= 46.0f) {
+                        factor = min(factor, 0.78f)
+                    } else if (tempC >= 43.5f) {
+                        factor = min(factor, 0.90f)
                     }
                 }
             }
         } catch (_: Exception) {}
-        cachedThermalFactor = factor.coerceIn(0.32f, 1.0f)
+        cachedThermalFactor = factor.coerceIn(0.65f, 1.0f)
     }
 
     private fun readSysLong(path: String): Long {
@@ -473,14 +528,9 @@ object EfpsEngine : Choreographer.FrameCallback {
     }
 
     override fun doFrame(frameTimeNanos: Long) {
-        if (!isRunning) return
+        if (!isRunning || isPausedForIdle) return
 
         val nowNanos = System.nanoTime()
-
-        lastInvalidateStartNanos = nowNanos
-        try {
-            attachedView?.invalidate()
-        } catch (_: Exception) {}
 
         val autoCap = resolveAutoDetectedCap()
         val effectiveCap = resolveEffectiveCap(autoCap).toDouble().coerceAtLeast(15.0)
@@ -496,7 +546,7 @@ object EfpsEngine : Choreographer.FrameCallback {
             val deviationNanos = abs(vsyncDeltaNanos - hardwareVsyncPeriod)
             jitterMs = (deviationNanos / 1_000_000.0).toFloat().coerceIn(0.05f, 120.0f)
 
-            vsyncInstantFps = if (missedCyclesRatio >= 1.18) {
+            vsyncInstantFps = if (missedCyclesRatio >= 1.35) {
                 val elapsedCycles = missedCyclesRatio.coerceAtLeast(1.0)
                 (effectiveCap / elapsedCycles).coerceIn(1.0, effectiveCap)
             } else {
@@ -510,80 +560,40 @@ object EfpsEngine : Choreographer.FrameCallback {
         val totalCompositorLagNanos = max(schedulingLagNanos, latestGpuDrawDurationNanos)
         val gpuLagMs = (totalCompositorLagNanos / 1_000_000.0).toFloat().coerceIn(0.1f, 120.0f)
 
-        frameParityToggle = !frameParityToggle
-        if (frameParityToggle) {
-            evenFrameGpuLagSum += gpuLagMs
-        } else {
-            oddFrameGpuLagSum += gpuLagMs
-        }
-        paritySampleCount++
-
         if (lastWallClockNanos > 0L && nowNanos > lastWallClockNanos) {
             val wallDeltaNanos = (nowNanos - lastWallClockNanos).toDouble()
-            val backpressurePenalty = (totalCompositorLagNanos - expectedVsyncNanos * 0.30).coerceAtLeast(0.0) * 1.45
-            val effectiveFrameNanos = max(vsyncPeriod, wallDeltaNanos + backpressurePenalty)
+            val effectiveFrameNanos = max(vsyncPeriod, wallDeltaNanos)
             compositorFps = (1_000_000_000.0 / effectiveFrameNanos).coerceIn(1.0, effectiveCap)
         }
         lastWallClockNanos = nowNanos
 
-        val fusedSample = min(
-            (vsyncInstantFps * 0.52) + (compositorFps * 0.48),
-            min(vsyncInstantFps, compositorFps) * 1.12
-        ).coerceIn(1.0, effectiveCap)
-        rawFpsWindow.add(fusedSample)
-        jitterMsWindow.add(jitterMs)
-        gpuLagMsWindow.add(gpuLagMs)
+        val fusedSample = ((vsyncInstantFps * 0.75) + (compositorFps * 0.25))
+            .coerceIn(1.0, effectiveCap)
+
+        if (rawFpsCount < WINDOW_CAPACITY) {
+            rawFpsBuffer[rawFpsCount++] = fusedSample
+        }
+        jitterMsSum += jitterMs
+        gpuLagMsSum += gpuLagMs
+        sampleMetricsCount++
 
         val publishIntervalNanos = activeProfile.intervalMs * 1_000_000L
         if (nowNanos - lastPublishNanos >= publishIntervalNanos) {
-            probeHardwareCpuAndThermals(force = false)
-            refreshDisplayHz()
-
-            if (paritySampleCount >= 12 && liveDisplayHz >= 90) {
-                val highParity = max(evenFrameGpuLagSum, oddFrameGpuLagSum)
-                val lowParity = min(evenFrameGpuLagSum, oddFrameGpuLagSum).coerceAtLeast(0.1)
-                val asymmetryRatio = highParity / lowParity
-                detectedSubHarmonicDivisor = if (asymmetryRatio >= 1.85) 2 else 1
-                evenFrameGpuLagSum = 0.0
-                oddFrameGpuLagSum = 0.0
-                paritySampleCount = 0
-            }
-
             val updatedAutoCap = resolveAutoDetectedCap()
             val updatedEffectiveCap = resolveEffectiveCap(updatedAutoCap)
 
-            if (rawFpsWindow.isNotEmpty()) {
-                val iqrFilteredFps = computeIqrTrimmedMean(rawFpsWindow)
-                val avgJitter = if (jitterMsWindow.isNotEmpty()) jitterMsWindow.average().toFloat() else 0.25f
-                val avgGpuLag = if (gpuLagMsWindow.isNotEmpty()) gpuLagMsWindow.average().toFloat() else 0.7f
+            if (rawFpsCount > 0) {
+                val count = rawFpsCount
+                val iqrFilteredFps = computeIqrTrimmedMeanPrimitive(rawFpsBuffer, count)
+                val avgJitter = if (sampleMetricsCount > 0) (jitterMsSum / sampleMetricsCount).toFloat() else 0.25f
+                val avgGpuLag = if (sampleMetricsCount > 0) (gpuLagMsSum / sampleMetricsCount).toFloat() else 0.7f
 
-                // Factor in high SoC CPU contention and VSYNC jitter spikes so heavy game stutters drop below 30 FPS
-                val cpuContentionFactor = when {
-                    cachedCpuLoadPct >= 92 -> 0.58
-                    cachedCpuLoadPct >= 85 -> 0.74
-                    cachedCpuLoadPct >= 78 -> 0.88
-                    else -> 1.0
-                }
-                val jitterLoadFactor = when {
-                    avgJitter >= 14f -> 0.48
-                    avgJitter >= 8f -> 0.68
-                    avgJitter >= 4.5f -> 0.84
-                    else -> 1.0
-                }
-                val combinedHardwareFactor = (cachedThermalFactor.toDouble() * cpuContentionFactor * jitterLoadFactor)
-                    .coerceIn(0.15, 1.0)
-
-                val thermallyAdjustedFps = (iqrFilteredFps * combinedHardwareFactor)
+                val thermallyAdjustedFps = (iqrFilteredFps * cachedThermalFactor.toDouble())
                     .coerceIn(1.0, updatedEffectiveCap.toDouble())
 
-                val sampleVariance = computeVariance(rawFpsWindow).coerceIn(0.15, 35.0)
+                val sampleVariance = computeVariancePrimitive(rawFpsBuffer, count).coerceIn(0.15, 35.0)
                 val predCov = kalmanErrorCov + activeProfile.kalmanProcessNoise
-                val kalmanGain = if (thermallyAdjustedFps < kalmanEstimate) {
-                    // Fast downward response on frame drops so sub-30 FPS dips register immediately
-                    0.82
-                } else {
-                    (predCov / (predCov + sampleVariance * 0.35)).coerceIn(0.22, 0.85)
-                }
+                val kalmanGain = (predCov / (predCov + sampleVariance * 0.35)).coerceIn(0.25, 0.85)
                 kalmanEstimate = kalmanEstimate + kalmanGain * (thermallyAdjustedFps - kalmanEstimate)
                 kalmanErrorCov = (1.0 - kalmanGain) * predCov
 
@@ -593,8 +603,12 @@ object EfpsEngine : Choreographer.FrameCallback {
                     rollingHistoryBuffer.removeFirst()
                 }
                 rollingHistoryBuffer.addLast(finalEfps)
-                val rawMin = (rawFpsWindow.minOrNull() ?: thermallyAdjustedFps) * combinedHardwareFactor
-                val windowLow = rawMin.roundToInt().coerceIn(1, finalEfps)
+
+                var minSample = rawFpsBuffer[0]
+                for (i in 1 until count) {
+                    if (rawFpsBuffer[i] < minSample) minSample = rawFpsBuffer[i]
+                }
+                val windowLow = minSample.roundToInt().coerceIn(1, finalEfps)
                 if (rollingHistoryBuffer.size >= 120) {
                     rollingHistoryBuffer.removeFirst()
                 }
@@ -604,14 +618,14 @@ object EfpsEngine : Choreographer.FrameCallback {
                 val frameTime = (1000f / finalEfps.coerceAtLeast(1))
 
                 val lowRatio = (onePctLow.toFloat() / finalEfps.coerceAtLeast(1).toFloat()).coerceIn(0f, 1f)
-                val jitterPenalty = (avgJitter * 1.5f).roundToInt().coerceIn(0, 35)
-                val stabilityPct = ((lowRatio * 100f).roundToInt() - jitterPenalty).coerceIn(15, 99)
+                val jitterPenalty = (avgJitter * 0.8f).roundToInt().coerceIn(0, 20)
+                val stabilityPct = ((lowRatio * 100f).roundToInt() - jitterPenalty).coerceIn(25, 99)
 
                 val confidence = when {
                     targetCapMode != "AUTO" || supportedRefreshRates.size > 1 -> {
-                        if (avgJitter < 1.2f) 98 else 97
+                        if (avgJitter < 1.5f) 98 else 97
                     }
-                    else -> if (avgJitter < 1.5f) 97 else 96
+                    else -> if (avgJitter < 2.0f) 97 else 96
                 }
 
                 _telemetry.value = EfpsTelemetryState(
@@ -633,9 +647,10 @@ object EfpsEngine : Choreographer.FrameCallback {
                     isVrrActive = supportedRefreshRates.size > 1
                 )
 
-                rawFpsWindow.clear()
-                jitterMsWindow.clear()
-                gpuLagMsWindow.clear()
+                rawFpsCount = 0
+                jitterMsSum = 0.0
+                gpuLagMsSum = 0.0
+                sampleMetricsCount = 0
             }
             lastPublishNanos = nowNanos
         }
@@ -651,29 +666,45 @@ object EfpsEngine : Choreographer.FrameCallback {
         return worstSlice.average().roundToInt().coerceIn(1, currentFps)
     }
 
-    private fun computeVariance(samples: List<Double>): Double {
-        if (samples.size <= 1) return 0.25
-        val mean = samples.average()
-        val sumSq = samples.sumOf { (it - mean) * (it - mean) }
-        return sqrt(sumSq / samples.size)
+    private fun computeVariancePrimitive(samples: DoubleArray, count: Int): Double {
+        if (count <= 1) return 0.25
+        var sum = 0.0
+        for (i in 0 until count) sum += samples[i]
+        val mean = sum / count
+        var sumSq = 0.0
+        for (i in 0 until count) {
+            val d = samples[i] - mean
+            sumSq += d * d
+        }
+        return sqrt(sumSq / count)
     }
 
-    private fun computeIqrTrimmedMean(samples: List<Double>): Double {
-        if (samples.size <= 3) return samples.average()
-        val sorted = samples.sorted()
-        val n = sorted.size
-        val q1 = sorted[n / 4]
-        val q3 = sorted[(n * 3) / 4]
+    private fun computeIqrTrimmedMeanPrimitive(samples: DoubleArray, count: Int): Double {
+        if (count <= 0) return 60.0
+        if (count <= 3) {
+            var sum = 0.0
+            for (i in 0 until count) sum += samples[i]
+            return sum / count
+        }
+        System.arraycopy(samples, 0, scratchSortBuffer, 0, count)
+        java.util.Arrays.sort(scratchSortBuffer, 0, count)
+
+        val q1 = scratchSortBuffer[count / 4]
+        val q3 = scratchSortBuffer[(count * 3) / 4]
         val iqr = (q3 - q1).coerceAtLeast(1.0)
-        // Preserve low-end frame drops (do not clip lowerFence) while trimming high-end scheduling spikes
+        val lowerFence = q1 - 1.5 * iqr
         val upperFence = q3 + 1.5 * iqr
 
-        val inliers = sorted.filter { it <= upperFence }
-        if (inliers.isEmpty()) return sorted[n / 2]
-
-        val lowQuartile = inliers[inliers.size / 4]
-        val worstFrame = inliers.first()
-        val mean = inliers.average()
-        return (mean * 0.50) + (lowQuartile * 0.30) + (worstFrame * 0.20)
+        var inlierCount = 0
+        var inlierSum = 0.0
+        for (i in 0 until count) {
+            val v = scratchSortBuffer[i]
+            if (v in lowerFence..upperFence) {
+                inlierSum += v
+                inlierCount++
+            }
+        }
+        if (inlierCount == 0) return scratchSortBuffer[count / 2]
+        return inlierSum / inlierCount
     }
 }

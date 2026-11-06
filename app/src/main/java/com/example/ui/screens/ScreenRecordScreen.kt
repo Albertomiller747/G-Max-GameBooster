@@ -140,9 +140,24 @@ fun ScreenRecordScreen(
     val context = LocalContext.current
     val gamepads by viewModel.gamepads.collectAsState()
     val isControllerConnected = gamepads.isNotEmpty()
+    val isDeviceOnline by com.example.util.rememberIsDeviceOnline()
 
     var selectedTab by remember(initialSubTab) { mutableIntStateOf(initialSubTab.coerceIn(0, 2)) }
     var settings by remember { mutableStateOf(ScreenRecordingManager.loadSettings(context)) }
+
+    LaunchedEffect(isDeviceOnline) {
+        settings = if (!isDeviceOnline) {
+            settings.copy(
+                resolutionLabel = "720p",
+                width = 1280,
+                height = 720,
+                fps = 60,
+                bitrateMbps = 8
+            )
+        } else {
+            ScreenRecordingManager.loadSettings(context)
+        }
+    }
     var recordings by remember { mutableStateOf(emptyList<RecordedVideo>()) }
     var screenshots by remember { mutableStateOf(emptyList<CapturedScreenshot>()) }
 
@@ -171,9 +186,30 @@ fun ScreenRecordScreen(
     var isOverlayBubbleEnabled by remember {
         mutableStateOf(settings.isOverlayEnabled)
     }
+    var isInAppRecorderEnabled by remember {
+        mutableStateOf(ScreenRecordingManager.isInAppRecorderEnabled(context))
+    }
 
     var pendingAudioMode by remember { mutableStateOf<AudioSourceMode?>(null) }
     var pendingRecordLaunchAfterPerm by remember { mutableStateOf(false) }
+
+    fun refreshMediaLists() {
+        recordings = ScreenRecordingManager.queryRecordedVideos(context)
+        screenshots = ScreenRecordingManager.queryCapturedScreenshots(context)
+    }
+
+    val restoreCapturesLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenMultipleDocuments()
+    ) { uris ->
+        if (uris.isNotEmpty()) {
+            val (restoredVids, restoredShots) = ScreenRecordingManager.importPreviousCaptures(context, uris)
+            refreshMediaLists()
+            userMessage = com.example.util.AppStrings.trText(
+                "Restored $restoredVids video(s) and $restoredShots screenshot(s) into GMax library",
+                "Restaurados $restoredVids video(s) y $restoredShots captura(s) en la biblioteca GMax"
+            )
+        }
+    }
 
     val audioPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
@@ -191,7 +227,7 @@ fun ScreenRecordScreen(
             viewModel.scheduleCloudSettingsSync()
             userMessage = "Audio capture enabled: ${targetMode.label}"
         } else {
-            userMessage = "Audio permission denied — recording will continue without sound"
+            userMessage = "Audio permission denied, recording will continue without sound"
         }
         pendingAudioMode = null
         if (pendingRecordLaunchAfterPerm) {
@@ -200,16 +236,15 @@ fun ScreenRecordScreen(
         }
     }
 
-    fun refreshMediaLists() {
-        recordings = ScreenRecordingManager.queryRecordedVideos(context)
-        screenshots = ScreenRecordingManager.queryCapturedScreenshots(context)
-    }
-
     LaunchedEffect(Unit, isRecording, lastSavedUri, lastScreenshotUri) {
         refreshMediaLists()
     }
 
-    val tabTitles = listOf("Videos", "Screenshots", "Settings")
+    val tabTitles = listOf(
+        com.example.util.tr("Videos", "Videos"),
+        com.example.util.tr("Screenshots", "Capturas"),
+        com.example.util.tr("Settings", "Ajustes")
+    )
 
     Box(
         modifier = modifier
@@ -257,19 +292,24 @@ fun ScreenRecordScreen(
                     }
                 }
 
-                // Right side quick actions: Refresh & Floating Coral Bubble toggle
+                // Right side quick actions: Restore Previous Captures + Floating Bubble toggle
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     IconButton(
-                        onClick = { refreshMediaLists() },
-                        modifier = Modifier.size(36.dp)
+                        onClick = {
+                            restoreCapturesLauncher.launch(arrayOf("video/*", "image/*"))
+                        },
+                        modifier = Modifier
+                            .size(36.dp)
+                            .testTag("recorder_restore_captures_header_button")
                     ) {
                         Icon(
                             imageVector = Icons.Default.Refresh,
-                            contentDescription = "Refresh media",
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            contentDescription = "Restore Previous Captures",
+                            tint = HubBlue,
+                            modifier = Modifier.size(20.dp)
                         )
                     }
 
@@ -299,7 +339,7 @@ fun ScreenRecordScreen(
                                 }
                                 context.startService(svcIntent)
                                 userMessage = if (newState) {
-                                    "Floating recorder bubble & notification bar enabled"
+                                    "Floating recorder bubble enabled"
                                 } else {
                                     "Floating recorder bubble disabled"
                                 }
@@ -329,6 +369,28 @@ fun ScreenRecordScreen(
                 color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f),
                 thickness = 1.dp
             )
+
+            if (!isDeviceOnline) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(HubBlue.copy(alpha = 0.14f))
+                        .padding(horizontal = 16.dp, vertical = 8.dp)
+                        .testTag("offline_recording_cap_banner"),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        text = com.example.util.tr(
+                            "Offline Mode: Screen Recording locked to 720p • 60 FPS • 8 Mbps",
+                            "Modo sin conexión: Grabación fijada en 720p • 60 FPS • 8 Mbps"
+                        ),
+                        color = HubBlue,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
 
             // Optional Toast / Status Banner
             userMessage?.let { msg ->
@@ -374,9 +436,22 @@ fun ScreenRecordScreen(
                         onSaveToGallery = { video ->
                             val saved = ScreenRecordingManager.saveVideoToGallery(context, video)
                             userMessage = if (saved) {
-                                "Saved '${video.title}' to Movies/GMaxRecordings"
+                                com.example.util.AppStrings.trText(
+                                    "Saved '${video.title}' to Movies/GMaxRecordings",
+                                    "Guardado '${video.title}' en Movies/GMaxRecordings"
+                                )
                             } else {
-                                "Could not export video"
+                                com.example.util.AppStrings.trText(
+                                    "Could not export video",
+                                    "No se pudo exportar el video"
+                                )
+                            }
+                            if (saved) {
+                                com.example.util.AdMobManager.maybeTriggerPostActionAd(
+                                    context = context,
+                                    actionLabelEn = "Video Saved",
+                                    actionLabelEs = "Video Guardado"
+                                )
                             }
                         },
                         onShareVideo = { video ->
@@ -390,7 +465,10 @@ fun ScreenRecordScreen(
                                 context.startActivity(Intent.createChooser(shareIntent, "Share Gameplay Clip"))
                             }
                         },
-                        onDeleteVideo = { videoToDelete = it }
+                        onDeleteVideo = { videoToDelete = it },
+                        onRestorePreviousVideos = {
+                            restoreCapturesLauncher.launch(arrayOf("video/*"))
+                        }
                     )
 
                     1 -> ScreenshotsTabContent(
@@ -418,18 +496,51 @@ fun ScreenRecordScreen(
                                 context.startActivity(Intent.createChooser(shareIntent, "Share Screenshot"))
                             }
                         },
-                        onDeleteScreenshot = { screenshotToDelete = it }
+                        onDeleteScreenshot = { screenshotToDelete = it },
+                        onRestorePreviousScreenshots = {
+                            restoreCapturesLauncher.launch(arrayOf("image/*"))
+                        }
                     )
 
                     2 -> RecorderSettingsTabContent(
                         settings = settings,
                         supportedResolutions = supportedResolutions,
                         supportedFps = supportedFps,
+                        isInAppRecorderEnabled = isInAppRecorderEnabled,
                         isOverlayBubbleEnabled = isOverlayBubbleEnabled,
+                        isDeviceOnline = isDeviceOnline,
+                        onToggleInAppRecorder = { enable ->
+                            isInAppRecorderEnabled = enable
+                            ScreenRecordingManager.setInAppRecorderEnabled(context, enable)
+                            userMessage = if (enable) {
+                                com.example.util.AppStrings.trText(
+                                    "In-app screen recorder controls enabled",
+                                    "Controles de grabación en la app activados"
+                                )
+                            } else {
+                                com.example.util.AppStrings.trText(
+                                    "In-app Record button hidden (Floating Bubble can still be used independently)",
+                                    "Botón Grabar oculto (la Burbuja Flotante sigue independiente)"
+                                )
+                            }
+                        },
                         onUpdateSettings = { updated ->
-                            settings = updated
-                            ScreenRecordingManager.saveSettings(context, updated)
-                            viewModel.scheduleCloudSettingsSync()
+                            val effective = if (!isDeviceOnline) {
+                                updated.copy(
+                                    resolutionLabel = "720p",
+                                    width = 1280,
+                                    height = 720,
+                                    fps = 60,
+                                    bitrateMbps = 8
+                                )
+                            } else {
+                                updated
+                            }
+                            settings = effective
+                            if (isDeviceOnline) {
+                                ScreenRecordingManager.saveSettings(context, effective)
+                                viewModel.scheduleCloudSettingsSync()
+                            }
                         },
                         onRequestAudioPermissionForMode = { desiredMode ->
                             pendingAudioMode = desiredMode
@@ -448,6 +559,7 @@ fun ScreenRecordScreen(
                                 } catch (_: Exception) {}
                             } else {
                                 isOverlayBubbleEnabled = enable
+                                settings = settings.copy(isOverlayEnabled = enable)
                                 ScreenRecordingManager.setOverlayEnabled(context, enable)
                                 viewModel.scheduleCloudSettingsSync()
                                 val svcIntent = Intent(context, ScreenRecordOverlayService::class.java).apply {
@@ -460,8 +572,30 @@ fun ScreenRecordScreen(
                                 context.startService(svcIntent)
                             }
                         },
+                        onResetBubblePosition = {
+                            ScreenRecordingManager.resetBubblePosition(context)
+                            if (isOverlayBubbleEnabled && Settings.canDrawOverlays(context)) {
+                                try {
+                                    context.startService(
+                                        Intent(context, ScreenRecordOverlayService::class.java).apply {
+                                            action = ScreenRecordOverlayService.ACTION_STOP
+                                        }
+                                    )
+                                    context.startService(
+                                        Intent(context, ScreenRecordOverlayService::class.java).apply {
+                                            action = ScreenRecordOverlayService.ACTION_START
+                                        }
+                                    )
+                                } catch (_: Exception) {}
+                            }
+                            userMessage = com.example.util.AppStrings.trText(
+                                "Floating bubble position reset to default",
+                                "Posición de la burbuja flotante restablecida"
+                            )
+                        },
                         onAutoConfigure = {
                             val optimal = ScreenRecordingManager.getAutoConfiguredIdealSettings(context)
+                                .copy(isOverlayEnabled = isOverlayBubbleEnabled)
                             settings = optimal
                             ScreenRecordingManager.saveSettings(context, optimal)
                             viewModel.scheduleCloudSettingsSync()
@@ -470,79 +604,76 @@ fun ScreenRecordScreen(
                     )
                 }
 
-                // Floating Coral-Red "[ 🎥 Record ]" Pill Button in bottom-right (matching screenshot #2)
-                var recordFabFocused by remember { mutableStateOf(false) }
-                Button(
-                    onClick = {
-                        if (isRecording) {
-                            val stopIntent = Intent(context, ScreenRecordingService::class.java).apply {
-                                action = ScreenRecordingService.ACTION_STOP
-                            }
-                            context.startService(stopIntent)
-                            userMessage = "Gameplay recording saved to Videos!"
-                        } else {
-                            val needsAudioPerm = settings.audioSourceMode != AudioSourceMode.MUTE &&
-                                ContextCompat.checkSelfPermission(
-                                    context,
-                                    Manifest.permission.RECORD_AUDIO
-                                ) != PackageManager.PERMISSION_GRANTED
-                            if (needsAudioPerm) {
-                                pendingAudioMode = settings.audioSourceMode
-                                pendingRecordLaunchAfterPerm = true
-                                audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                // Floating Coral-Red "[ 🎥 Record ]" Pill Button in bottom-right (independent of Floating Bubble)
+                if (isInAppRecorderEnabled || isRecording) {
+                    var recordFabFocused by remember { mutableStateOf(false) }
+                    Button(
+                        onClick = {
+                            if (isRecording) {
+                                val stopIntent = Intent(context, ScreenRecordingService::class.java).apply {
+                                    action = ScreenRecordingService.ACTION_STOP
+                                }
+                                context.startService(stopIntent)
+                                userMessage = com.example.util.AppStrings.trText(
+                                    "Gameplay recording saved to Videos!",
+                                    "¡Grabación de partida guardada en Videos!"
+                                )
+                                com.example.util.AdMobManager.maybeTriggerPostActionAd(
+                                    context = context,
+                                    actionLabelEn = "Screen Recording",
+                                    actionLabelEs = "Grabación de Pantalla"
+                                )
                             } else {
-                                onRequestMediaProjection()
+                                val needsAudioPerm = settings.audioSourceMode != AudioSourceMode.MUTE &&
+                                    ContextCompat.checkSelfPermission(
+                                        context,
+                                        Manifest.permission.RECORD_AUDIO
+                                    ) != PackageManager.PERMISSION_GRANTED
+                                if (needsAudioPerm) {
+                                    pendingAudioMode = settings.audioSourceMode
+                                    pendingRecordLaunchAfterPerm = true
+                                    audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                                } else {
+                                    onRequestMediaProjection()
+                                }
                             }
-                        }
-                    },
-                    shape = RoundedCornerShape(50),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = RecorderCoral,
-                        contentColor = Color.White
-                    ),
-                    elevation = ButtonDefaults.buttonElevation(
-                        defaultElevation = 8.dp,
-                        pressedElevation = 12.dp
-                    ),
-                    contentPadding = PaddingValues(horizontal = 24.dp, vertical = 14.dp),
-                    modifier = Modifier
-                        .align(Alignment.BottomEnd)
-                        .padding(end = 20.dp, bottom = 16.dp)
-                        .onFocusChanged { recordFabFocused = it.isFocused }
-                        .border(
-                            width = if (recordFabFocused) 3.dp else 0.dp,
-                            color = if (recordFabFocused) Color.White else Color.Transparent,
-                            shape = RoundedCornerShape(50)
-                        )
-                        .testTag("recorder_floating_record_button")
-                ) {
-                    Icon(
-                        imageVector = if (isRecording) Icons.Default.Stop else Icons.Default.Videocam,
-                        contentDescription = if (isRecording) "Stop Recording" else "Start Recording",
-                        modifier = Modifier.size(22.dp)
-                    )
-                    Spacer(modifier = Modifier.width(10.dp))
-                    Text(
-                        text = if (isRecording) "Stop" else "Record",
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                    if (isControllerConnected) {
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Box(
-                            modifier = Modifier
-                                .size(21.dp)
-                                .clip(CircleShape)
-                                .background(Color.White),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = "Y",
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Black,
-                                color = RecorderCoral
+                        },
+                        shape = RoundedCornerShape(50),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = RecorderCoral,
+                            contentColor = Color.White
+                        ),
+                        elevation = ButtonDefaults.buttonElevation(
+                            defaultElevation = 8.dp,
+                            pressedElevation = 12.dp
+                        ),
+                        contentPadding = PaddingValues(horizontal = 24.dp, vertical = 14.dp),
+                        modifier = Modifier
+                            .align(Alignment.BottomEnd)
+                            .padding(end = 20.dp, bottom = 16.dp)
+                            .onFocusChanged { recordFabFocused = it.isFocused }
+                            .border(
+                                width = if (recordFabFocused) 3.dp else 0.dp,
+                                color = if (recordFabFocused) Color.White else Color.Transparent,
+                                shape = RoundedCornerShape(50)
                             )
-                        }
+                            .testTag("recorder_floating_record_button")
+                    ) {
+                        Icon(
+                            imageVector = if (isRecording) Icons.Default.Stop else Icons.Default.Videocam,
+                            contentDescription = if (isRecording) "Stop Recording" else "Start Recording",
+                            modifier = Modifier.size(22.dp)
+                        )
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Text(
+                            text = if (isRecording) {
+                                com.example.util.tr("Stop", "Detener")
+                            } else {
+                                com.example.util.tr("Record", "Grabar")
+                            },
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold
+                        )
                     }
                 }
             }
@@ -600,7 +731,14 @@ fun ScreenRecordScreen(
     selectedVideoForPlayback?.let { video ->
         VideoPlayerModalDialog(
             video = video,
-            onDismiss = { selectedVideoForPlayback = null }
+            onDismiss = {
+                selectedVideoForPlayback = null
+                com.example.util.AdMobManager.maybeTriggerPostActionAd(
+                    context = context,
+                    actionLabelEn = "Video Preview",
+                    actionLabelEs = "Vista Previa de Video"
+                )
+            }
         )
     }
 
@@ -608,8 +746,8 @@ fun ScreenRecordScreen(
     videoToDelete?.let { video ->
         AlertDialog(
             onDismissRequest = { videoToDelete = null },
-            title = { Text("Delete Recording?") },
-            text = { Text("Delete '${video.title}' permanently from your device?") },
+            title = { Text(com.example.util.tr("Delete Recording?", "¿Eliminar Grabación?")) },
+            text = { Text(com.example.util.tr("Delete '${video.title}' permanently from your device?", "¿Eliminar '${video.title}' permanentemente de tu dispositivo?")) },
             confirmButton = {
                 TextButton(
                     onClick = {
@@ -618,12 +756,12 @@ fun ScreenRecordScreen(
                         refreshMediaLists()
                     }
                 ) {
-                    Text("Delete", color = RecorderCoral, fontWeight = FontWeight.Bold)
+                    Text(com.example.util.tr("Delete", "Eliminar"), color = RecorderCoral, fontWeight = FontWeight.Bold)
                 }
             },
             dismissButton = {
                 TextButton(onClick = { videoToDelete = null }) {
-                    Text("Cancel")
+                    Text(com.example.util.tr("Cancel", "Cancelar"))
                 }
             }
         )
@@ -733,7 +871,8 @@ private fun VideosTabContent(
     onPlayVideo: (RecordedVideo) -> Unit,
     onSaveToGallery: (RecordedVideo) -> Unit,
     onShareVideo: (RecordedVideo) -> Unit,
-    onDeleteVideo: (RecordedVideo) -> Unit
+    onDeleteVideo: (RecordedVideo) -> Unit,
+    onRestorePreviousVideos: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val groupedVideos = remember(recordings) {
@@ -754,32 +893,71 @@ private fun VideosTabContent(
     }
 
     if (recordings.isEmpty()) {
-        Box(
+        LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(32.dp),
-            contentAlignment = Alignment.Center
+                .padding(horizontal = 20.dp),
+            contentPadding = PaddingValues(top = 36.dp, bottom = 110.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Icon(
-                    imageVector = Icons.Default.Slideshow,
-                    contentDescription = null,
-                    tint = RecorderCoral.copy(alpha = 0.35f),
-                    modifier = Modifier.size(64.dp)
-                )
-                Spacer(modifier = Modifier.height(12.dp))
-                Text(
-                    text = "No videos have been recorded",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = "Tap the coral Record button below or use the floating bubble during gameplay. Videos are automatically grouped by game.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    textAlign = TextAlign.Center
+            item {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    modifier = Modifier.padding(horizontal = 12.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Slideshow,
+                        contentDescription = null,
+                        tint = RecorderCoral.copy(alpha = 0.35f),
+                        modifier = Modifier.size(64.dp)
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text(
+                        text = com.example.util.tr("No videos have been recorded", "No se han grabado videos"),
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = com.example.util.tr(
+                            "Tap the coral Record button below or use the floating bubble during gameplay. Reinstalled GMax? Restore previous recordings below.",
+                            "Toca el botón coral Grabar abajo o usa la burbuja flotante. ¿Reinstalaste GMax? Restaura grabaciones previas abajo."
+                        ),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.Center
+                    )
+                    Spacer(modifier = Modifier.height(14.dp))
+                    OutlinedButton(
+                        onClick = onRestorePreviousVideos,
+                        shape = RoundedCornerShape(12.dp),
+                        border = BorderStroke(1.dp, HubBlue.copy(alpha = 0.6f)),
+                        modifier = Modifier.testTag("restore_previous_videos_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Refresh,
+                            contentDescription = null,
+                            tint = HubBlue,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = com.example.util.tr("Restore Previous Recordings", "Restaurar Grabaciones Previas"),
+                            color = HubBlue,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 12.sp
+                        )
+                    }
+                }
+            }
+
+            // Medium Native Ad placed right below the empty-state text (no bottom banner near the floating Record button)
+            item {
+                com.example.ui.components.GMaxNativeAdCard(
+                    placementTag = "recorder_videos_empty",
+                    topBuffer = 28.dp,
+                    bottomBuffer = 36.dp
                 )
             }
         }
@@ -788,7 +966,7 @@ private fun VideosTabContent(
             modifier = Modifier
                 .fillMaxSize()
                 .testTag("videos_grouped_gallery"),
-            contentPadding = PaddingValues(top = 12.dp, bottom = 96.dp, start = 16.dp, end = 16.dp),
+            contentPadding = PaddingValues(top = 12.dp, bottom = 112.dp, start = 16.dp, end = 16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             // Game Filter Chip Bar
@@ -804,35 +982,65 @@ private fun VideosTabContent(
                 )
             }
 
+            var cumulativeVideoCount = 0
             visibleGroups.forEach { group ->
                 item(key = "video_group_header_${group.gameName}") {
                     GameMediaGroupHeader(
                         gameName = group.gameName,
                         gamePackage = group.gamePackage,
                         itemCount = group.items.size,
-                        unitLabel = if (group.items.size == 1) "clip" else "clips"
+                        unitLabel = if (group.items.size == 1) {
+                            com.example.util.tr("clip", "clip")
+                        } else {
+                            com.example.util.tr("clips", "clips")
+                        }
                     )
                 }
 
-                items(group.items, key = { it.id }) { video ->
-                    RecordedVideoItemCard(
-                        video = video,
-                        onPlay = {
-                            ConsoleHapticManager.playSelectClick(context)
-                            onPlayVideo(video)
-                        },
-                        onSaveToGallery = {
-                            ConsoleHapticManager.playSelectClick(context)
-                            onSaveToGallery(video)
-                        },
-                        onShare = {
-                            ConsoleHapticManager.playSelectClick(context)
-                            onShareVideo(video)
-                        },
-                        onDelete = {
-                            ConsoleHapticManager.playSelectClick(context)
-                            onDeleteVideo(video)
+                group.items.forEach { video ->
+                    cumulativeVideoCount++
+                    val currentIndex = cumulativeVideoCount
+                    item(key = "video_item_${video.id}") {
+                        RecordedVideoItemCard(
+                            video = video,
+                            onPlay = {
+                                ConsoleHapticManager.playSelectClick(context)
+                                onPlayVideo(video)
+                            },
+                            onSaveToGallery = {
+                                ConsoleHapticManager.playSelectClick(context)
+                                onSaveToGallery(video)
+                            },
+                            onShare = {
+                                ConsoleHapticManager.playSelectClick(context)
+                                onShareVideo(video)
+                            },
+                            onDelete = {
+                                ConsoleHapticManager.playSelectClick(context)
+                                onDeleteVideo(video)
+                            }
+                        )
+                    }
+
+                    // Insert a Medium Native Ad card after every 3 to 4 recorded video cards
+                    if (currentIndex % 4 == 0) {
+                        item(key = "recorder_native_ad_$currentIndex") {
+                            com.example.ui.components.GMaxNativeAdCard(
+                                placementTag = "recorder_videos_feed_$currentIndex",
+                                topBuffer = 24.dp,
+                                bottomBuffer = 24.dp
+                            )
                         }
+                    }
+                }
+            }
+
+            if (cumulativeVideoCount in 1..3) {
+                item(key = "recorder_native_ad_tail") {
+                    com.example.ui.components.GMaxNativeAdCard(
+                        placementTag = "recorder_videos_tail",
+                        topBuffer = 28.dp,
+                        bottomBuffer = 32.dp
                     )
                 }
             }
@@ -862,7 +1070,7 @@ private fun GameMediaFilterBar(
                 onClick = { onSelectGame(null) },
                 label = {
                     Text(
-                        text = "All Games ($totalCount)",
+                        text = com.example.util.tr("All Games ($totalCount)", "Todos los Juegos ($totalCount)"),
                         fontWeight = FontWeight.Bold,
                         fontSize = 12.sp
                     )
@@ -997,7 +1205,7 @@ private fun RecordedVideoItemCard(
     onDelete: () -> Unit
 ) {
     val context = LocalContext.current
-    val thumbnail = remember(video.filePath) {
+    val thumbnail = remember(video.filePath, video.uriString) {
         try {
             val f = File(video.filePath)
             if (f.exists()) {
@@ -1010,7 +1218,11 @@ private fun RecordedVideoItemCard(
                         MediaStore.Images.Thumbnails.MINI_KIND
                     )
                 }
-            } else null
+            } else if (video.uriString.startsWith("content://") && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                context.contentResolver.loadThumbnail(Uri.parse(video.uriString), Size(320, 180), null)
+            } else {
+                null
+            }
         } catch (_: Exception) {
             null
         }
@@ -1140,7 +1352,8 @@ private fun ScreenshotsTabContent(
     onCaptureScreenshot: () -> Unit,
     onPreviewScreenshot: (CapturedScreenshot) -> Unit,
     onShareScreenshot: (CapturedScreenshot) -> Unit,
-    onDeleteScreenshot: (CapturedScreenshot) -> Unit
+    onDeleteScreenshot: (CapturedScreenshot) -> Unit,
+    onRestorePreviousScreenshots: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val groupedScreenshots = remember(screenshots) {
@@ -1180,13 +1393,16 @@ private fun ScreenshotsTabContent(
             ) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = "Real Screen Capture",
+                        text = com.example.util.tr("Real Screen Capture", "Captura de Pantalla Real"),
                         style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onSurface
                     )
                     Text(
-                        text = "Capture lossless PNG frames automatically grouped by active game",
+                        text = com.example.util.tr(
+                            "Capture lossless PNG frames automatically grouped by active game",
+                            "Captura cuadros PNG sin pérdida agrupados automáticamente por juego activo"
+                        ),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -1212,7 +1428,7 @@ private fun ScreenshotsTabContent(
                         modifier = Modifier.size(18.dp)
                     )
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text("Capture", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                    Text(com.example.util.tr("Capture", "Capturar"), fontWeight = FontWeight.Bold, fontSize = 13.sp)
                 }
             }
         }
@@ -1235,18 +1451,42 @@ private fun ScreenshotsTabContent(
                     )
                     Spacer(modifier = Modifier.height(10.dp))
                     Text(
-                        text = "No screenshots captured yet",
+                        text = com.example.util.tr("No screenshots captured yet", "Aún no se han tomado capturas"),
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.SemiBold,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        text = "Tap Capture above or use the Shots button in the notification bar.",
+                        text = com.example.util.tr(
+                            "Tap Capture above or restore previous GMax screenshots below.",
+                            "Toca Capturar arriba o restaura capturas previas de GMax abajo."
+                        ),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         textAlign = TextAlign.Center
                     )
+                    Spacer(modifier = Modifier.height(14.dp))
+                    OutlinedButton(
+                        onClick = onRestorePreviousScreenshots,
+                        shape = RoundedCornerShape(12.dp),
+                        border = BorderStroke(1.dp, HubBlue.copy(alpha = 0.6f)),
+                        modifier = Modifier.testTag("restore_previous_screenshots_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Refresh,
+                            contentDescription = null,
+                            tint = HubBlue,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = com.example.util.tr("Restore Previous Screenshots", "Restaurar Capturas Previas"),
+                            color = HubBlue,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 12.sp
+                        )
+                    }
                 }
             }
         } else {
@@ -1281,9 +1521,18 @@ private fun ScreenshotsTabContent(
                     }
 
                     items(group.items, key = { it.id }) { shot ->
-                        val bmp = remember(shot.filePath) {
+                        val bmp = remember(shot.filePath, shot.uriString) {
                             try {
-                                BitmapFactory.decodeFile(shot.filePath)
+                                val f = File(shot.filePath)
+                                if (f.exists()) {
+                                    BitmapFactory.decodeFile(shot.filePath)
+                                } else if (shot.uriString.startsWith("content://")) {
+                                    context.contentResolver.openInputStream(Uri.parse(shot.uriString))?.use {
+                                        BitmapFactory.decodeStream(it)
+                                    }
+                                } else {
+                                    null
+                                }
                             } catch (_: Exception) {
                                 null
                             }
@@ -1407,10 +1656,14 @@ private fun RecorderSettingsTabContent(
     settings: VideoQualitySettings,
     supportedResolutions: List<ResolutionPreset>,
     supportedFps: List<Int>,
+    isInAppRecorderEnabled: Boolean,
     isOverlayBubbleEnabled: Boolean,
+    isDeviceOnline: Boolean = true,
+    onToggleInAppRecorder: (Boolean) -> Unit,
     onUpdateSettings: (VideoQualitySettings) -> Unit,
     onRequestAudioPermissionForMode: (AudioSourceMode) -> Unit,
     onToggleOverlayBubble: (Boolean) -> Unit,
+    onResetBubblePosition: () -> Unit,
     onAutoConfigure: () -> Unit
 ) {
     val context = LocalContext.current
@@ -1437,13 +1690,23 @@ private fun RecorderSettingsTabContent(
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = "Smart Encoder Auto-Tune",
+                            text = com.example.util.tr("Smart Encoder Auto-Tune", "Auto-Ajuste Inteligente del Codificador"),
                             style = MaterialTheme.typography.titleSmall,
                             fontWeight = FontWeight.Bold,
                             color = MaterialTheme.colorScheme.onSurface
                         )
                         Text(
-                            text = "Automatically match resolution, FPS, and bitrate to your hardware",
+                            text = if (isDeviceOnline) {
+                                com.example.util.tr(
+                                    "Automatically match resolution, FPS, and bitrate to your hardware",
+                                    "Ajusta automáticamente resolución, FPS y tasa de bits a tu hardware"
+                                )
+                            } else {
+                                com.example.util.tr(
+                                    "Offline Mode active: Locked to 720p • 60 FPS • 8 Mbps",
+                                    "Modo sin conexión activo: Fijado en 720p • 60 FPS • 8 Mbps"
+                                )
+                            },
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -1451,6 +1714,7 @@ private fun RecorderSettingsTabContent(
                     Spacer(modifier = Modifier.width(12.dp))
                     Button(
                         onClick = onAutoConfigure,
+                        enabled = isDeviceOnline,
                         colors = ButtonDefaults.buttonColors(
                             containerColor = RecorderCoral,
                             contentColor = Color.White
@@ -1459,7 +1723,7 @@ private fun RecorderSettingsTabContent(
                     ) {
                         Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text("Auto-Tune", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                        Text(com.example.util.tr("Auto-Tune", "Auto-Ajustar"), fontWeight = FontWeight.Bold, fontSize = 12.sp)
                     }
                 }
             }
@@ -1475,7 +1739,7 @@ private fun RecorderSettingsTabContent(
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
                     Text(
-                        text = "Video Resolution",
+                        text = com.example.util.tr("Video Resolution", "Resolución de Video"),
                         style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onSurface
@@ -1486,14 +1750,17 @@ private fun RecorderSettingsTabContent(
                             val isSelected = settings.resolutionLabel == preset.label
                             FilterChip(
                                 selected = isSelected,
+                                enabled = isDeviceOnline || preset.label == "720p",
                                 onClick = {
-                                    onUpdateSettings(
-                                        settings.copy(
-                                            resolutionLabel = preset.label,
-                                            width = preset.width,
-                                            height = preset.height
+                                    if (isDeviceOnline) {
+                                        onUpdateSettings(
+                                            settings.copy(
+                                                resolutionLabel = preset.label,
+                                                width = preset.width,
+                                                height = preset.height
+                                            )
                                         )
-                                    )
+                                    }
                                 },
                                 label = { Text("${preset.label} (${preset.width}x${preset.height})") },
                                 colors = FilterChipDefaults.filterChipColors(
@@ -1517,7 +1784,7 @@ private fun RecorderSettingsTabContent(
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
                     Text(
-                        text = "Frame Rate (FPS)",
+                        text = com.example.util.tr("Frame Rate (FPS)", "Cuadros por Segundo (FPS)"),
                         style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onSurface
@@ -1528,7 +1795,12 @@ private fun RecorderSettingsTabContent(
                             val isSelected = settings.fps == fps
                             FilterChip(
                                 selected = isSelected,
-                                onClick = { onUpdateSettings(settings.copy(fps = fps)) },
+                                enabled = isDeviceOnline || fps == 60,
+                                onClick = {
+                                    if (isDeviceOnline) {
+                                        onUpdateSettings(settings.copy(fps = fps))
+                                    }
+                                },
                                 label = { Text("$fps FPS") },
                                 colors = FilterChipDefaults.filterChipColors(
                                     selectedContainerColor = RecorderCoral.copy(alpha = 0.18f),
@@ -1545,7 +1817,7 @@ private fun RecorderSettingsTabContent(
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                         Text(
-                            text = "Video Bitrate",
+                            text = com.example.util.tr("Video Bitrate", "Tasa de Bits de Video"),
                             style = MaterialTheme.typography.titleSmall,
                             fontWeight = FontWeight.Bold,
                             color = MaterialTheme.colorScheme.onSurface
@@ -1560,7 +1832,12 @@ private fun RecorderSettingsTabContent(
 
                     Slider(
                         value = settings.bitrateMbps.toFloat(),
-                        onValueChange = { onUpdateSettings(settings.copy(bitrateMbps = it.toInt())) },
+                        onValueChange = {
+                            if (isDeviceOnline) {
+                                onUpdateSettings(settings.copy(bitrateMbps = it.toInt()))
+                            }
+                        },
+                        enabled = isDeviceOnline,
                         valueRange = 4f..24f,
                         steps = 9,
                         colors = SliderDefaults.colors(
@@ -1572,18 +1849,63 @@ private fun RecorderSettingsTabContent(
             }
         }
 
-        // 4. Audio Source, Floating Radial Bubble, & Timer HUD Toggles
+        // 4A. Dedicated Screen Recording Settings Card (Independent of Floating Bubble)
         item {
             Card(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("recorder_screen_recording_settings_card"),
                 shape = RoundedCornerShape(16.dp),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.25f))
+                border = BorderStroke(1.dp, RecorderCoral.copy(alpha = 0.35f))
             ) {
                 Column(
                     modifier = Modifier.padding(16.dp),
                     verticalArrangement = Arrangement.spacedBy(14.dp)
                 ) {
+                    Text(
+                        text = com.example.util.tr("SCREEN RECORDING SETTINGS", "AJUSTES DE GRABACIÓN DE PANTALLA"),
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = RecorderCoral,
+                        letterSpacing = 0.8.sp
+                    )
+
+                    // Independent In-App Recorder Controls Toggle
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                            Icon(Icons.Default.Videocam, contentDescription = null, tint = RecorderCoral)
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column {
+                                Text(
+                                    text = com.example.util.tr("In-App Screen Recorder Controls", "Controles de Grabación en la App"),
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Text(
+                                    text = com.example.util.tr(
+                                        "Show the Record action button inside Recorder tab (independent of Floating Bubble)",
+                                        "Mostrar el botón Grabar en la pestaña Grabador (independiente de la Burbuja Flotante)"
+                                    ),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                        Switch(
+                            checked = isInAppRecorderEnabled,
+                            onCheckedChange = onToggleInAppRecorder,
+                            colors = SwitchDefaults.colors(checkedTrackColor = RecorderCoral),
+                            modifier = Modifier.testTag("recorder_in_app_toggle")
+                        )
+                    }
+
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.15f))
+
                     // Selectable Audio Capture Source (Internal Audio, Internal + Mic, Mic Only, Mute)
                     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1599,7 +1921,7 @@ private fun RecorderSettingsTabContent(
                             Spacer(modifier = Modifier.width(12.dp))
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(
-                                    text = "Audio Capture Source",
+                                    text = com.example.util.tr("Audio Capture Source", "Fuente de Captura de Audio"),
                                     fontWeight = FontWeight.Bold,
                                     color = MaterialTheme.colorScheme.onSurface
                                 )
@@ -1675,6 +1997,63 @@ private fun RecorderSettingsTabContent(
 
                     HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.15f))
 
+                    // Timer HUD on Screen
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                            Icon(Icons.Default.Timer, contentDescription = null, tint = RecorderCoral)
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column {
+                                Text(
+                                    text = com.example.util.tr("On-Screen Timer Pill", "Temporizador en Pantalla"),
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Text(
+                                    text = com.example.util.tr(
+                                        "Show compact elapsed time pill during active recording",
+                                        "Mostrar píldora de tiempo transcurrido durante la grabación"
+                                    ),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                        Switch(
+                            checked = settings.showTimerHud,
+                            onCheckedChange = { onUpdateSettings(settings.copy(showTimerHud = it)) },
+                            colors = SwitchDefaults.colors(checkedTrackColor = RecorderCoral)
+                        )
+                    }
+                }
+            }
+        }
+
+        // 4B. Dedicated Floating Bubble Settings Card (Independent of Screen Recording)
+        item {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("recorder_floating_bubble_settings_card"),
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                border = BorderStroke(1.dp, HubBlue.copy(alpha = 0.35f))
+            ) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(14.dp)
+                ) {
+                    Text(
+                        text = com.example.util.tr("FLOATING BUBBLE SETTINGS", "AJUSTES DE BURBUJA FLOTANTE"),
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = HubBlue,
+                        letterSpacing = 0.8.sp
+                    )
+
                     // Floating Radial Bubble & Notification Bar
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -1682,16 +2061,19 @@ private fun RecorderSettingsTabContent(
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
-                            Icon(Icons.Default.Layers, contentDescription = null, tint = RecorderCoral)
+                            Icon(Icons.Default.Layers, contentDescription = null, tint = HubBlue)
                             Spacer(modifier = Modifier.width(12.dp))
                             Column {
                                 Text(
-                                    text = "Floating Radial Bubble & Notification",
+                                    text = com.example.util.tr("Floating Radial Bubble Overlay", "Superposición de Burbuja Radial Flotante"),
                                     fontWeight = FontWeight.Bold,
                                     color = MaterialTheme.colorScheme.onSurface
                                 )
                                 Text(
-                                    text = "Show edge bubble & 'Recorder is ready' notification bar",
+                                    text = com.example.util.tr(
+                                        "Enable or remove the floating bubble independently of screen recording",
+                                        "Activa o elimina la burbuja flotante independientemente de la grabación"
+                                    ),
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
@@ -1700,9 +2082,12 @@ private fun RecorderSettingsTabContent(
                         Switch(
                             checked = isOverlayBubbleEnabled,
                             onCheckedChange = onToggleOverlayBubble,
-                            colors = SwitchDefaults.colors(checkedTrackColor = RecorderCoral)
+                            colors = SwitchDefaults.colors(checkedTrackColor = HubBlue),
+                            modifier = Modifier.testTag("recorder_floating_bubble_toggle")
                         )
                     }
+
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.15f))
 
                     // Floating Bubble Size Adjuster (28dp to 64dp with live preview)
                     Column(
@@ -1717,14 +2102,14 @@ private fun RecorderSettingsTabContent(
                         ) {
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(
-                                    text = "Floating Bubble Size",
+                                    text = com.example.util.tr("Floating Bubble Size", "Tamaño de Burbuja Flotante"),
                                     fontWeight = FontWeight.Bold,
                                     color = MaterialTheme.colorScheme.onSurface
                                 )
                                 Text(
-                                    text = "${settings.bubbleSizeDp} dp (Compact 28dp – Large 64dp)",
+                                    text = "${settings.bubbleSizeDp} dp (${com.example.util.tr("Compact 28dp to Large 64dp", "Compacta 28dp a Grande 64dp")})",
                                     style = MaterialTheme.typography.labelSmall,
-                                    color = RecorderCoral,
+                                    color = HubBlue,
                                     fontWeight = FontWeight.Bold
                                 )
                             }
@@ -1762,42 +2147,30 @@ private fun RecorderSettingsTabContent(
                             },
                             valueRange = 28f..64f,
                             colors = SliderDefaults.colors(
-                                thumbColor = RecorderCoral,
-                                activeTrackColor = RecorderCoral
+                                thumbColor = HubBlue,
+                                activeTrackColor = HubBlue
                             ),
                             modifier = Modifier.testTag("floating_bubble_size_slider")
                         )
                     }
 
-                    HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.15f))
-
-                    // Timer HUD on Screen
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
+                        horizontalArrangement = Arrangement.End
                     ) {
-                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
-                            Icon(Icons.Default.Timer, contentDescription = null, tint = RecorderCoral)
-                            Spacer(modifier = Modifier.width(12.dp))
-                            Column {
-                                Text(
-                                    text = "On-Screen Timer Pill",
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.onSurface
-                                )
-                                Text(
-                                    text = "Show compact elapsed time pill during active recording",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
+                        OutlinedButton(
+                            onClick = onResetBubblePosition,
+                            shape = RoundedCornerShape(10.dp),
+                            border = BorderStroke(1.dp, HubBlue.copy(alpha = 0.5f)),
+                            modifier = Modifier.testTag("reset_bubble_position_button")
+                        ) {
+                            Text(
+                                text = com.example.util.tr("Reset Bubble Position", "Restablecer Posición de Burbuja"),
+                                color = HubBlue,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 12.sp
+                            )
                         }
-                        Switch(
-                            checked = settings.showTimerHud,
-                            onCheckedChange = { onUpdateSettings(settings.copy(showTimerHud = it)) },
-                            colors = SwitchDefaults.colors(checkedTrackColor = RecorderCoral)
-                        )
                     }
                 }
             }
@@ -1810,9 +2183,19 @@ private fun ScreenshotPreviewDialog(
     screenshot: CapturedScreenshot,
     onDismiss: () -> Unit
 ) {
-    val bmp = remember(screenshot.filePath) {
+    val context = LocalContext.current
+    val bmp = remember(screenshot.filePath, screenshot.uriString) {
         try {
-            BitmapFactory.decodeFile(screenshot.filePath)
+            val f = File(screenshot.filePath)
+            if (f.exists()) {
+                BitmapFactory.decodeFile(screenshot.filePath)
+            } else if (screenshot.uriString.startsWith("content://")) {
+                context.contentResolver.openInputStream(Uri.parse(screenshot.uriString))?.use {
+                    BitmapFactory.decodeStream(it)
+                }
+            } else {
+                null
+            }
         } catch (_: Exception) {
             null
         }
@@ -1872,7 +2255,10 @@ private fun ScreenshotPreviewDialog(
 }
 
 /**
- * In-app Video Player Dialog with Fullscreen expansion and Portrait / Landscape / Auto-Rotate controls
+ * Enhanced In-App Video Player Dialog using hardware-accelerated TextureView + MediaPlayer.
+ * Dynamically adapts to Portrait (9:16 / 9:20) and Landscape (16:9 / 20:9) video dimensions
+ * with zero black corner artifacts, interactive scrubbing seek bar, -10s/+10s skip,
+ * playback speed control (0.5x, 1.0x, 1.5x, 2.0x), audio mute toggle, and Fit/Fill scaling.
  */
 @Composable
 fun VideoPlayerModalDialog(
@@ -1880,82 +2266,165 @@ fun VideoPlayerModalDialog(
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
-    val activity = context as? Activity
     var isFullscreen by remember { mutableStateOf(false) }
+    var isPlaying by remember { mutableStateOf(true) }
+    var isMuted by remember { mutableStateOf(false) }
+    var isFillCrop by remember { mutableStateOf(false) }
+    var playbackSpeed by remember { mutableStateOf(1.0f) }
+    var currentPosMs by remember { mutableIntStateOf(0) }
+    var durationMs by remember { mutableIntStateOf((video.durationMs.toInt()).coerceAtLeast(1000)) }
+    var isUserScrubbing by remember { mutableStateOf(false) }
+    var scrubPositionMs by remember { mutableStateOf(0f) }
+    var videoWidth by remember { mutableIntStateOf(1920) }
+    var videoHeight by remember { mutableIntStateOf(1080) }
+
+    val mediaPlayerRef = remember { mutableStateOf<android.media.MediaPlayer?>(null) }
+    val textureViewRef = remember { mutableStateOf<android.view.TextureView?>(null) }
+
+    fun applyTextureTransform(tv: android.view.TextureView?, vw: Int, vh: Int, fillCrop: Boolean) {
+        if (tv == null || vw <= 0 || vh <= 0 || tv.width <= 0 || tv.height <= 0) return
+        val viewW = tv.width.toFloat()
+        val viewH = tv.height.toFloat()
+        val videoAspect = vw.toFloat() / vh.toFloat()
+        val viewAspect = viewW / viewH
+
+        var scaleX = 1f
+        var scaleY = 1f
+        if (fillCrop) {
+            if (videoAspect > viewAspect) {
+                scaleX = videoAspect / viewAspect
+            } else {
+                scaleY = viewAspect / videoAspect
+            }
+        } else {
+            if (videoAspect > viewAspect) {
+                scaleY = viewAspect / videoAspect
+            } else {
+                scaleX = videoAspect / viewAspect
+            }
+        }
+        val matrix = android.graphics.Matrix()
+        matrix.setScale(scaleX, scaleY, viewW / 2f, viewH / 2f)
+        tv.setTransform(matrix)
+        tv.invalidate()
+    }
+
+    fun formatTimeMs(ms: Int): String {
+        val totalSeconds = (ms / 1000).coerceAtLeast(0)
+        val minutes = totalSeconds / 60
+        val seconds = totalSeconds % 60
+        return String.format(Locale.US, "%02d:%02d", minutes, seconds)
+    }
+
+    LaunchedEffect(isPlaying, isUserScrubbing) {
+        while (isPlaying) {
+            val mp = mediaPlayerRef.value
+            if (mp != null && !isUserScrubbing) {
+                try {
+                    if (mp.isPlaying) {
+                        currentPosMs = mp.currentPosition.coerceAtLeast(0)
+                        val dur = mp.duration
+                        if (dur > 0) durationMs = dur
+                    }
+                } catch (_: Exception) {}
+            }
+            kotlinx.coroutines.delay(100L)
+        }
+    }
+
+    androidx.compose.runtime.DisposableEffect(Unit) {
+        onDispose {
+            try {
+                mediaPlayerRef.value?.stop()
+            } catch (_: Exception) {}
+            try {
+                mediaPlayerRef.value?.release()
+            } catch (_: Exception) {}
+            mediaPlayerRef.value = null
+        }
+    }
 
     val closePlayer: () -> Unit = {
-        activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+        try {
+            mediaPlayerRef.value?.pause()
+        } catch (_: Exception) {}
         onDismiss()
+    }
+
+    val isPortraitVideo = videoHeight > videoWidth
+    val dynamicAspectRatio = remember(videoWidth, videoHeight) {
+        if (videoWidth > 0 && videoHeight > 0) {
+            (videoWidth.toFloat() / videoHeight.toFloat()).coerceIn(0.45f, 2.4f)
+        } else {
+            16f / 9f
+        }
     }
 
     Dialog(
         onDismissRequest = closePlayer,
         properties = DialogProperties(
-            usePlatformDefaultWidth = !isFullscreen
+            usePlatformDefaultWidth = false
         )
     ) {
         Surface(
-            shape = if (isFullscreen) RoundedCornerShape(0.dp) else RoundedCornerShape(18.dp),
+            shape = if (isFullscreen) RoundedCornerShape(0.dp) else RoundedCornerShape(20.dp),
             color = MaterialTheme.colorScheme.surface,
             border = if (isFullscreen) null else BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)),
-            modifier = if (isFullscreen) Modifier.fillMaxSize() else Modifier.fillMaxWidth().padding(vertical = 12.dp)
+            modifier = if (isFullscreen) {
+                Modifier.fillMaxSize()
+            } else {
+                Modifier
+                    .fillMaxWidth(0.95f)
+                    .padding(vertical = 12.dp)
+            }
         ) {
             Column(
                 modifier = Modifier
-                    .fillMaxSize()
-                    .padding(if (isFullscreen) 8.dp else 14.dp)
+                    .fillMaxWidth()
+                    .padding(if (isFullscreen) 10.dp else 16.dp)
             ) {
+                // Header Row
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(
-                        text = video.title,
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onSurface,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f)
-                    )
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = video.title,
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Text(
+                            text = "${videoWidth}×${videoHeight} • ${if (isPortraitVideo) "Portrait" else "Landscape"} • ${video.formattedSize}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
 
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        IconButton(
+                        TextButton(
                             onClick = {
-                                activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+                                isFillCrop = !isFillCrop
+                                applyTextureTransform(textureViewRef.value, videoWidth, videoHeight, isFillCrop)
                             },
-                            modifier = Modifier.size(32.dp)
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                            modifier = Modifier.testTag("video_player_fit_fill_toggle")
                         ) {
-                            Text("P", fontWeight = FontWeight.Bold, color = HubBlue, fontSize = 12.sp)
-                        }
-
-                        IconButton(
-                            onClick = {
-                                activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
-                            },
-                            modifier = Modifier.size(32.dp)
-                        ) {
-                            Text("L", fontWeight = FontWeight.Bold, color = HubBlue, fontSize = 12.sp)
-                        }
-
-                        IconButton(
-                            onClick = {
-                                activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR
-                            },
-                            modifier = Modifier.size(32.dp)
-                        ) {
-                            Icon(
-                                Icons.Default.ScreenRotation,
-                                contentDescription = "Auto Rotate",
-                                tint = MaterialTheme.colorScheme.onSurface,
-                                modifier = Modifier.size(18.dp)
+                            Text(
+                                text = if (isFillCrop) "FILL" else "FIT",
+                                color = HubBlue,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.ExtraBold
                             )
                         }
 
                         IconButton(
                             onClick = { isFullscreen = !isFullscreen },
-                            modifier = Modifier.size(32.dp)
+                            modifier = Modifier.size(34.dp).testTag("video_player_fullscreen_toggle")
                         ) {
                             Icon(
                                 imageVector = if (isFullscreen) Icons.Default.FullscreenExit else Icons.Default.Fullscreen,
@@ -1965,7 +2434,10 @@ fun VideoPlayerModalDialog(
                             )
                         }
 
-                        IconButton(onClick = closePlayer, modifier = Modifier.size(32.dp)) {
+                        IconButton(
+                            onClick = closePlayer,
+                            modifier = Modifier.size(34.dp).testTag("video_player_close_button")
+                        ) {
                             Icon(
                                 Icons.Default.Close,
                                 contentDescription = "Close",
@@ -1977,71 +2449,294 @@ fun VideoPlayerModalDialog(
 
                 Spacer(modifier = Modifier.height(8.dp))
 
+                // Video Viewport (TextureView avoids SurfaceView corner punching / black corner bugs)
                 Box(
                     modifier = if (isFullscreen) {
                         Modifier
                             .weight(1f)
                             .fillMaxWidth()
-                            .clip(RoundedCornerShape(8.dp))
+                            .clip(RoundedCornerShape(12.dp))
                             .background(Color.Black)
                     } else {
                         Modifier
                             .fillMaxWidth()
-                            .aspectRatio(16f / 9f)
-                            .clip(RoundedCornerShape(12.dp))
+                            .height(if (isPortraitVideo) 400.dp else 230.dp)
+                            .clip(RoundedCornerShape(14.dp))
                             .background(Color.Black)
                     },
                     contentAlignment = Alignment.Center
                 ) {
                     AndroidView(
                         factory = { ctx ->
-                            VideoView(ctx).apply {
-                                val mc = MediaController(ctx)
-                                mc.setAnchorView(this)
-                                setMediaController(mc)
-                                val uri = if (video.uriString.startsWith("content://")) {
-                                    Uri.parse(video.uriString)
-                                } else {
-                                    val f = File(video.filePath)
-                                    if (f.exists()) {
-                                        androidx.core.content.FileProvider.getUriForFile(
-                                            ctx,
-                                            "${ctx.packageName}.fileprovider",
-                                            f
-                                        )
-                                    } else {
-                                        Uri.parse(video.uriString)
+                            android.view.TextureView(ctx).apply {
+                                isOpaque = false
+                                textureViewRef.value = this
+                                surfaceTextureListener = object : android.view.TextureView.SurfaceTextureListener {
+                                    override fun onSurfaceTextureAvailable(
+                                        surfaceTexture: android.graphics.SurfaceTexture,
+                                        width: Int,
+                                        height: Int
+                                    ) {
+                                        val surface = android.view.Surface(surfaceTexture)
+                                        val mp = android.media.MediaPlayer()
+                                        mediaPlayerRef.value = mp
+                                        try {
+                                            val f = File(video.filePath)
+                                            if (f.exists()) {
+                                                mp.setDataSource(f.absolutePath)
+                                            } else {
+                                                mp.setDataSource(ctx, Uri.parse(video.uriString))
+                                            }
+                                            mp.setSurface(surface)
+                                            mp.isLooping = true
+                                            mp.setOnVideoSizeChangedListener { _, vw, vh ->
+                                                if (vw > 0 && vh > 0) {
+                                                    videoWidth = vw
+                                                    videoHeight = vh
+                                                    applyTextureTransform(this@apply, vw, vh, isFillCrop)
+                                                }
+                                            }
+                                            mp.setOnPreparedListener { preparedMp ->
+                                                durationMs = preparedMp.duration.coerceAtLeast(1000)
+                                                if (preparedMp.videoWidth > 0 && preparedMp.videoHeight > 0) {
+                                                    videoWidth = preparedMp.videoWidth
+                                                    videoHeight = preparedMp.videoHeight
+                                                }
+                                                applyTextureTransform(
+                                                    this@apply,
+                                                    videoWidth,
+                                                    videoHeight,
+                                                    isFillCrop
+                                                )
+                                                preparedMp.start()
+                                                isPlaying = true
+                                            }
+                                            mp.prepareAsync()
+                                        } catch (_: Exception) {}
                                     }
-                                }
-                                setVideoURI(uri)
-                                setOnPreparedListener { mp ->
-                                    mp.isLooping = true
-                                    start()
+
+                                    override fun onSurfaceTextureSizeChanged(
+                                        surfaceTexture: android.graphics.SurfaceTexture,
+                                        width: Int,
+                                        height: Int
+                                    ) {
+                                        applyTextureTransform(this@apply, videoWidth, videoHeight, isFillCrop)
+                                    }
+
+                                    override fun onSurfaceTextureDestroyed(
+                                        surfaceTexture: android.graphics.SurfaceTexture
+                                    ): Boolean {
+                                        try {
+                                            mediaPlayerRef.value?.release()
+                                        } catch (_: Exception) {}
+                                        mediaPlayerRef.value = null
+                                        return true
+                                    }
+
+                                    override fun onSurfaceTextureUpdated(
+                                        surfaceTexture: android.graphics.SurfaceTexture
+                                    ) {}
                                 }
                             }
                         },
-                        modifier = Modifier.fillMaxSize()
+                        update = { tv ->
+                            applyTextureTransform(tv, videoWidth, videoHeight, isFillCrop)
+                        },
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .clickable {
+                                val mp = mediaPlayerRef.value ?: return@clickable
+                                try {
+                                    if (mp.isPlaying) {
+                                        mp.pause()
+                                        isPlaying = false
+                                    } else {
+                                        mp.start()
+                                        isPlaying = true
+                                    }
+                                } catch (_: Exception) {}
+                            }
                     )
                 }
 
-                if (!isFullscreen) {
-                    Spacer(modifier = Modifier.height(10.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
+                Spacer(modifier = Modifier.height(10.dp))
+
+                // Interactive Scrubbing Seek Bar + Time Readout
+                val sliderValue = if (isUserScrubbing) {
+                    scrubPositionMs
+                } else {
+                    currentPosMs.toFloat().coerceIn(0f, durationMs.toFloat())
+                }
+                Slider(
+                    value = sliderValue,
+                    onValueChange = { newVal ->
+                        isUserScrubbing = true
+                        scrubPositionMs = newVal
+                    },
+                    onValueChangeFinished = {
+                        val targetMs = scrubPositionMs.toInt().coerceIn(0, durationMs)
+                        currentPosMs = targetMs
+                        try {
+                            val mp = mediaPlayerRef.value
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                                mp?.seekTo(targetMs.toLong(), android.media.MediaPlayer.SEEK_CLOSEST)
+                            } else {
+                                mp?.seekTo(targetMs)
+                            }
+                        } catch (_: Exception) {}
+                        isUserScrubbing = false
+                    },
+                    valueRange = 0f..durationMs.toFloat().coerceAtLeast(1f),
+                    colors = SliderDefaults.colors(
+                        thumbColor = RecorderCoral,
+                        activeTrackColor = RecorderCoral
+                    ),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(26.dp)
+                        .testTag("video_player_seek_slider")
+                )
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = formatTimeMs(if (isUserScrubbing) scrubPositionMs.toInt() else currentPosMs),
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Text(
+                        text = formatTimeMs(durationMs),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // Transport & Speed Controls Row: Mute | -10s | Play/Pause | +10s | Speed
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    // Mute / Unmute
+                    IconButton(
+                        onClick = {
+                            isMuted = !isMuted
+                            val vol = if (isMuted) 0f else 1f
+                            try {
+                                mediaPlayerRef.value?.setVolume(vol, vol)
+                            } catch (_: Exception) {}
+                        },
+                        modifier = Modifier.size(38.dp).testTag("video_player_mute_toggle")
+                    ) {
+                        Icon(
+                            imageVector = if (isMuted) Icons.AutoMirrored.Filled.VolumeOff else Icons.AutoMirrored.Filled.VolumeUp,
+                            contentDescription = if (isMuted) "Unmute" else "Mute",
+                            tint = if (isMuted) RecorderCoral else MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+
+                    // -10s Skip Back
+                    OutlinedButton(
+                        onClick = {
+                            val mp = mediaPlayerRef.value ?: return@OutlinedButton
+                            try {
+                                val nextPos = (mp.currentPosition - 10_000).coerceAtLeast(0)
+                                mp.seekTo(nextPos)
+                                currentPosMs = nextPos
+                            } catch (_: Exception) {}
+                        },
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+                        modifier = Modifier.height(34.dp).testTag("video_player_skip_back_10s")
+                    ) {
+                        Text("-10s", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    }
+
+                    // Play / Pause Primary Button
+                    Button(
+                        onClick = {
+                            val mp = mediaPlayerRef.value ?: return@Button
+                            try {
+                                if (mp.isPlaying) {
+                                    mp.pause()
+                                    isPlaying = false
+                                } else {
+                                    mp.start()
+                                    isPlaying = true
+                                }
+                            } catch (_: Exception) {}
+                        },
+                        shape = CircleShape,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = RecorderCoral,
+                            contentColor = Color.White
+                        ),
+                        contentPadding = PaddingValues(0.dp),
+                        modifier = Modifier.size(44.dp).testTag("video_player_play_pause_button")
+                    ) {
+                        Icon(
+                            imageVector = if (isPlaying) Icons.Default.Stop else Icons.Default.PlayArrow,
+                            contentDescription = if (isPlaying) "Pause" else "Play"
+                        )
+                    }
+
+                    // +10s Skip Forward
+                    OutlinedButton(
+                        onClick = {
+                            val mp = mediaPlayerRef.value ?: return@OutlinedButton
+                            try {
+                                val nextPos = (mp.currentPosition + 10_000).coerceAtMost(durationMs)
+                                mp.seekTo(nextPos)
+                                currentPosMs = nextPos
+                            } catch (_: Exception) {}
+                        },
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+                        modifier = Modifier.height(34.dp).testTag("video_player_skip_forward_10s")
+                    ) {
+                        Text("+10s", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    }
+
+                    // Playback Speed Cycle (0.5x -> 1.0x -> 1.5x -> 2.0x)
+                    TextButton(
+                        onClick = {
+                            val nextSpeed = when (playbackSpeed) {
+                                0.5f -> 1.0f
+                                1.0f -> 1.5f
+                                1.5f -> 2.0f
+                                else -> 0.5f
+                            }
+                            playbackSpeed = nextSpeed
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                                try {
+                                    val mp = mediaPlayerRef.value
+                                    if (mp != null) {
+                                        val wasPlaying = mp.isPlaying
+                                        mp.playbackParams = mp.playbackParams.setSpeed(nextSpeed)
+                                        if (!wasPlaying) {
+                                            mp.pause()
+                                        }
+                                    }
+                                } catch (_: Exception) {}
+                            }
+                        },
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                        modifier = Modifier.testTag("video_player_speed_button")
                     ) {
                         Text(
-                            text = "${video.formattedDuration} • ${video.resolution}",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                            text = "${playbackSpeed}x",
+                            color = HubBlue,
+                            fontWeight = FontWeight.ExtraBold,
+                            fontSize = 13.sp
                         )
-                        TextButton(onClick = closePlayer) {
-                            Text("Close Player", color = HubBlue)
-                        }
                     }
                 }
             }
         }
     }
 }
+

@@ -182,6 +182,14 @@ object SystemSettingsHelper {
         safeStart(context, intent, "Android Game Dashboard")
     }
 
+    fun isControllerPassThroughEnabled(context: Context): Boolean {
+        return canDrawOverlays(context)
+    }
+
+    fun openControllerPassThroughSettings(context: Context) {
+        openOverlayPermissionSettings(context)
+    }
+
     private fun safeStart(context: Context, intent: Intent, title: String) {
         try {
             context.startActivity(intent)

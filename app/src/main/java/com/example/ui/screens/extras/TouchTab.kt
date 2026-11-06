@@ -74,11 +74,24 @@ fun TouchTab(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    val hostView = androidx.compose.ui.platform.LocalView.current
 
-    // Priority DND state
+    // Priority DND state (automatically refreshes when returning from system permission settings)
     var isDndActive by remember { mutableStateOf(viewModel.isPriorityDndActive()) }
-    val isDndGranted = remember(isDndActive) { viewModel.isPriorityDndGranted() }
-    val savedFilterDesc = remember(isDndActive) { viewModel.getSavedDndFilterDescription() }
+    var isDndGranted by remember { mutableStateOf(viewModel.isPriorityDndGranted()) }
+    val savedFilterDesc = remember(isDndActive, isDndGranted) { viewModel.getSavedDndFilterDescription() }
+
+    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    androidx.compose.runtime.DisposableEffect(lifecycleOwner) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
+                isDndGranted = viewModel.isPriorityDndGranted()
+                isDndActive = viewModel.isPriorityDndActive()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
 
     // Touch Pipeline Latency State
     var currentPipelineLatencyMs by remember { mutableLongStateOf(0L) }
@@ -100,15 +113,16 @@ fun TouchTab(
         modifier = modifier
             .fillMaxSize()
             .testTag("touch_tab_container"),
+        userScrollEnabled = !isTouching,
         contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        // 1. Phone Touch Pipeline Latency Test
+        // 1. Phone Touch Pipeline Latency Test (Strictly ZERO ads on this screen per AdMob policy)
         item {
             CyberCard(borderColor = HubBlue.copy(alpha = 0.5f)) {
                 SectionTitle(
-                    title = "Touch Pipeline Latency Test",
-                    subtitle = "Phone's hardware digitizer to compositor response time"
+                    title = com.example.util.tr("Touch Pipeline Latency Test", "Prueba de Latencia Táctil"),
+                    subtitle = com.example.util.tr("Phone's hardware digitizer to compositor response time", "Tiempo de respuesta del digitalizador de hardware al compositor")
                 )
 
                 Spacer(modifier = Modifier.height(6.dp))
@@ -125,7 +139,10 @@ fun TouchTab(
                         Icon(Icons.Default.Info, contentDescription = null, tint = HubBlue, modifier = Modifier.size(18.dp))
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = "Measures the phone's touch pipeline latency (hardware digitizer interrupt → kernel input driver → framework dispatch). This is local device input latency, not in-game engine or network ping.",
+                            text = com.example.util.tr(
+                                "Measures the phone's touch pipeline latency (hardware digitizer interrupt → kernel input driver → framework dispatch). This is local device input latency, not in-game engine or network ping.",
+                                "Mide la latencia táctil del teléfono (interrupción del digitalizador → controlador del kernel → despacho del sistema). Es latencia local del dispositivo, no ping de red."
+                            ),
                             style = MaterialTheme.typography.bodySmall.copy(
                                 color = MaterialTheme.colorScheme.onSurface,
                                 fontSize = 11.sp
@@ -194,6 +211,7 @@ fun TouchTab(
                         .pointerInteropFilter { motionEvent ->
                             when (motionEvent.actionMasked) {
                                 MotionEvent.ACTION_DOWN, MotionEvent.ACTION_MOVE -> {
+                                    hostView.parent?.requestDisallowInterceptTouchEvent(true)
                                     val nowUptime = SystemClock.uptimeMillis()
                                     val eventTime = motionEvent.eventTime
                                     val latency = (nowUptime - eventTime).coerceAtLeast(1L)
@@ -227,6 +245,7 @@ fun TouchTab(
                                     true
                                 }
                                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                                    hostView.parent?.requestDisallowInterceptTouchEvent(false)
                                     isTouching = false
                                     true
                                 }
@@ -277,7 +296,7 @@ fun TouchTab(
                             Icon(Icons.Default.TouchApp, contentDescription = null, tint = HubBlue, modifier = Modifier.size(32.dp))
                             Spacer(modifier = Modifier.height(4.dp))
                             Text(
-                                text = "TOUCH OR GLIDE HERE",
+                                text = com.example.util.tr("TOUCH OR GLIDE HERE", "TOCA O DESLIZA AQUÍ"),
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.Bold,
@@ -295,7 +314,7 @@ fun TouchTab(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = "Total Samples: $totalTouchesRecorded",
+                        text = "${com.example.util.tr("Total Samples", "Muestras Totales")}: $totalTouchesRecorded",
                         style = MaterialTheme.typography.bodySmall.copy(
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             fontSize = 11.sp
@@ -316,7 +335,7 @@ fun TouchTab(
                     ) {
                         Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(14.dp), tint = HubBlue)
                         Spacer(modifier = Modifier.width(4.dp))
-                        Text("RESET TEST", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Bold)
+                        Text(com.example.util.tr("RESET TEST", "REINICIAR PRUEBA"), fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Bold)
                     }
                 }
             }
@@ -332,8 +351,8 @@ fun TouchTab(
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
                         SectionTitle(
-                            title = "Touch Sampling Rate Readout",
-                            subtitle = "Hardware screen digitizer polling frequency"
+                            title = com.example.util.tr("Touch Sampling Rate Readout", "Lectura de Tasa de Muestreo Táctil"),
+                            subtitle = com.example.util.tr("Hardware screen digitizer polling frequency", "Frecuencia de sondeo del digitalizador de pantalla")
                         )
                     }
                     Box(
@@ -428,39 +447,10 @@ fun TouchTab(
             CyberCard(borderColor = if (isDndActive) LaunchGreen else MaterialTheme.colorScheme.outline) {
                 SectionTitle(
                     title = "Priority Do Not Disturb Filter",
-                    subtitle = "Blocks intrusive calls without muting game & media audio"
+                    subtitle = "Blocks intrusive calls and notifications during gameplay"
                 )
 
                 Spacer(modifier = Modifier.height(10.dp))
-
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(LaunchGreen.copy(alpha = 0.12f))
-                        .border(1.dp, LaunchGreen.copy(alpha = 0.4f), RoundedCornerShape(10.dp))
-                        .padding(12.dp)
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.VolumeUp, contentDescription = null, tint = LaunchGreen, modifier = Modifier.size(22.dp))
-                        Spacer(modifier = Modifier.width(10.dp))
-                        Column {
-                            Text(
-                                text = "Preserves Full Game Sound Effects & Music",
-                                color = MaterialTheme.colorScheme.onSurface,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 12.sp
-                            )
-                            Text(
-                                text = "Uses INTERRUPTION_FILTER_PRIORITY. Unlike total silence modes, game audio remains crisp and audible while heads-up call banners, texts, and social alerts are silenced.",
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                fontSize = 11.sp
-                            )
-                        }
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(12.dp))
 
                 if (!isDndGranted) {
                     Box(

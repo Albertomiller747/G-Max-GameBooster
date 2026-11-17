@@ -27,14 +27,14 @@
 
     <!-- Offline / Online Gate -->
     <string name="offline_gate_title">Yêu cầu kết nối Internet</string>
-    <string name="offline_gate_subtitle">Trình khởi chạy và Tăng tốc Thường hoạt động ngoại tuyến. Kết nối Wi-Fi hoặc dữ liệu di động để dùng Ghi hình, Bảng xếp hạng, Tiện ích, Tăng tốc Quái thú và Tài khoản.</string>
+    <string name="offline_gate_subtitle">Trình khởi chạy và Chế độ Tập trung hoạt động ngoại tuyến. Kết nối Wi-Fi hoặc dữ liệu di động để dùng Ghi hình, Bảng xếp hạng, Tiện ích và Tài khoản.</string>
     <string name="offline_gate_retry">Thử lại kết nối</string>
     <string name="offline_gate_back_launcher">Về Trình khởi chạy Ngoại tuyến</string>
-    <string name="offline_mode_badge">Ngoại tuyến: Trình khởi chạy &amp; Tăng tốc Thường</string>
+    <string name="offline_mode_badge">Ngoại tuyến: Trình khởi chạy &amp; Chế độ Tập trung</string>
 
-    <!-- Launcher & Boost -->
-    <string name="launcher_normal_boost">Tăng tốc Thường</string>
-    <string name="launcher_beast_boost">Tăng tốc Quái thú</string>
+    <!-- Launcher & Focus Mode -->
+    <string name="launcher_normal_boost">Chế độ Tập trung</string>
+    <string name="launcher_beast_boost">Chế độ Tập trung</string>
     <string name="launcher_boost_memory">Giải phóng RAM</string>
     <string name="launcher_launch_game">Chơi ngay</string>
     <string name="launcher_add_games">Thêm trò chơi</string>
@@ -54,7 +54,7 @@
     <string name="leaderboard_empty_title">Chưa có người chơi xác thực</string>
     <string name="leaderboard_empty_subtitle">Đăng nhập bằng Google hoặc Facebook để ghi danh trên Bảng xếp hạng Top 100.</string>
 
-    <!-- AdMob Labels -->
+    <!-- Unity Ads Labels -->
     <string name="ad_badge_label">Quảng cáo</string>
     <string name="ad_sponsored_label">Được tài trợ</string>
     <string name="ad_reward_unlock_title">Mở khóa RGB &amp; Lớp phủ (24h)</string>

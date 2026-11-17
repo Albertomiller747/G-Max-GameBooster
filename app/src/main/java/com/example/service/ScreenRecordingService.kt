@@ -111,6 +111,16 @@ class ScreenRecordingService : Service() {
             val resolvedMic = recordMic
                 ?: (resolvedMode == AudioSourceMode.INTERNAL_AND_MIC || resolvedMode == AudioSourceMode.MIC_ONLY)
 
+            val effectiveSettings = ScreenRecordingManager.getEffectiveRecordingSettings(context)
+            com.example.util.AppAnalyticsManager.logScreenRecording(
+                context = context,
+                action = "start",
+                resolution = effectiveSettings.resolutionLabel,
+                fps = effectiveSettings.fps,
+                audioMode = resolvedMode.name
+            )
+            com.example.util.RivalsManager.recordRecordingSession(context)
+
             val intent = Intent(context, ScreenRecordingService::class.java).apply {
                 action = ACTION_START
                 putExtra(EXTRA_RESULT_CODE, resultCode)
@@ -126,6 +136,7 @@ class ScreenRecordingService : Service() {
         }
 
         fun captureScreenshot(context: Context, resultCode: Int, resultData: Intent) {
+            com.example.util.AppAnalyticsManager.logScreenshotCaptured(context)
             val intent = Intent(context, ScreenRecordingService::class.java).apply {
                 action = ACTION_CAPTURE_SCREENSHOT
                 putExtra(EXTRA_RESULT_CODE, resultCode)
@@ -139,6 +150,14 @@ class ScreenRecordingService : Service() {
         }
 
         fun stopRecording(context: Context) {
+            val effectiveSettings = ScreenRecordingManager.getEffectiveRecordingSettings(context)
+            com.example.util.AppAnalyticsManager.logScreenRecording(
+                context = context,
+                action = "stop",
+                resolution = effectiveSettings.resolutionLabel,
+                fps = effectiveSettings.fps,
+                audioMode = _activeAudioMode.value.name
+            )
             val intent = Intent(context, ScreenRecordingService::class.java).apply {
                 action = ACTION_STOP
             }
@@ -189,7 +208,7 @@ class ScreenRecordingService : Service() {
                 103,
                 Intent(context, MainActivity::class.java).apply {
                     flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
-                    putExtra("extra_open_tab", 1) // Recorder Tab
+                    putExtra("extra_open_tab", "RECORD") // Recorder Tab
                     putExtra("extra_recorder_subtab", 0) // Videos
                 },
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
@@ -301,7 +320,7 @@ class ScreenRecordingService : Service() {
     private var currentFps = 60
     private var currentBitrate = 8_000_000
 
-    private val serviceScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
+    private val serviceScope = CoroutineScope(Dispatchers.Main + SupervisorJob() + com.example.util.AppCrashGuard.coroutineExceptionHandler)
     private var timerJob: Job? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -319,7 +338,15 @@ class ScreenRecordingService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        val action = intent?.action ?: return START_NOT_STICKY
+        val action = intent?.action
+        if (action == null) {
+            try {
+                startForegroundServiceNotification(includeMicrophoneType = false)
+                stopForeground(STOP_FOREGROUND_REMOVE)
+            } catch (_: Exception) {}
+            stopSelf()
+            return START_NOT_STICKY
+        }
 
         when (action) {
             ACTION_START -> {
@@ -349,6 +376,12 @@ class ScreenRecordingService : Service() {
 
                 if (resultCode != 0 && resultData != null) {
                     startRecording(resultCode, resultData, resolvedMode)
+                } else {
+                    try {
+                        startForegroundServiceNotification(includeMicrophoneType = false)
+                        stopForeground(STOP_FOREGROUND_REMOVE)
+                    } catch (_: Exception) {}
+                    stopSelf()
                 }
             }
             ACTION_CAPTURE_SCREENSHOT -> {
@@ -357,6 +390,12 @@ class ScreenRecordingService : Service() {
                 val resultData = intent.getParcelableExtra<Intent>(EXTRA_RESULT_DATA)
                 if (resultCode != 0 && resultData != null) {
                     performScreenshotCapture(resultCode, resultData)
+                } else {
+                    try {
+                        startForegroundServiceNotification(includeMicrophoneType = false)
+                        stopForeground(STOP_FOREGROUND_REMOVE)
+                    } catch (_: Exception) {}
+                    stopSelf()
                 }
             }
             ACTION_STOP -> {
@@ -702,7 +741,19 @@ class ScreenRecordingService : Service() {
             aEncoder.configure(aFormat, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
             aEncoder.start()
 
-            // 5. Create MediaMuxer & VirtualDisplay
+            // 5. Start audio capture first and verify before creating the single VirtualDisplay on MediaProjection
+            internalRecord.startRecording()
+            if (internalRecord.recordingState != AudioRecord.RECORDSTATE_RECORDING) {
+                try { internalRecord.release() } catch (_: Exception) {}
+                try { micRecord?.release() } catch (_: Exception) {}
+                try { vEncoder.stop(); vEncoder.release() } catch (_: Exception) {}
+                try { surface.release() } catch (_: Exception) {}
+                try { aEncoder.stop(); aEncoder.release() } catch (_: Exception) {}
+                return false
+            }
+            try { micRecord?.startRecording() } catch (_: Exception) {}
+
+            // 6. Create MediaMuxer & VirtualDisplay
             val muxer = MediaMuxer(outputFile.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
             val displayMetrics = resources.displayMetrics
             val vDisplay = projection.createVirtualDisplay(
@@ -715,9 +766,6 @@ class ScreenRecordingService : Service() {
                 null,
                 null
             )
-
-            internalRecord.startRecording()
-            try { micRecord?.startRecording() } catch (_: Exception) {}
 
             videoEncoder = vEncoder
             videoInputSurface = surface
@@ -1002,31 +1050,37 @@ class ScreenRecordingService : Service() {
             MediaRecorder()
         }
 
-        var audioConfigured = false
-        if (recordAudio) {
-            try {
-                recorder.setAudioSource(MediaRecorder.AudioSource.MIC)
-                audioConfigured = true
-            } catch (_: Exception) {
-                audioConfigured = false
+        fun configureAndPrepare(rec: MediaRecorder, withAudio: Boolean) {
+            rec.reset()
+            var audioReady = false
+            if (withAudio) {
+                try {
+                    rec.setAudioSource(MediaRecorder.AudioSource.MIC)
+                    audioReady = true
+                } catch (_: Exception) {
+                    audioReady = false
+                }
             }
+            rec.setVideoSource(MediaRecorder.VideoSource.SURFACE)
+            rec.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
+            rec.setOutputFile(outputFile.absolutePath)
+            rec.setVideoSize(currentWidth, currentHeight)
+            rec.setVideoEncoder(MediaRecorder.VideoEncoder.H264)
+            if (audioReady) {
+                rec.setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
+                rec.setAudioChannels(2)
+                rec.setAudioEncodingBitRate(AUDIO_BITRATE)
+                rec.setAudioSamplingRate(AUDIO_SAMPLE_RATE)
+            }
+            rec.setVideoEncodingBitRate(currentBitrate)
+            rec.setVideoFrameRate(currentFps)
+            rec.prepare()
         }
 
-        recorder.apply {
-            setVideoSource(MediaRecorder.VideoSource.SURFACE)
-            setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
-            setOutputFile(outputFile.absolutePath)
-            setVideoSize(currentWidth, currentHeight)
-            setVideoEncoder(MediaRecorder.VideoEncoder.H264)
-            if (audioConfigured) {
-                setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
-                setAudioChannels(2)
-                setAudioEncodingBitRate(AUDIO_BITRATE)
-                setAudioSamplingRate(AUDIO_SAMPLE_RATE)
-            }
-            setVideoEncodingBitRate(currentBitrate)
-            setVideoFrameRate(currentFps)
-            prepare()
+        try {
+            configureAndPrepare(recorder, recordAudio)
+        } catch (_: Exception) {
+            configureAndPrepare(recorder, false)
         }
 
         mediaRecorder = recorder
@@ -1049,9 +1103,7 @@ class ScreenRecordingService : Service() {
     private fun cleanupMuxerResources() {
         isStoppingMuxer.set(true)
         try {
-            kotlinx.coroutines.runBlocking {
-                muxerEngineJob?.join()
-            }
+            muxerEngineJob?.cancel()
         } catch (_: Exception) {}
         muxerEngineJob = null
 

@@ -69,13 +69,16 @@ import java.util.Locale
 @Composable
 fun PerformanceTab(
     viewModel: GameBoosterViewModel,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onOpenSquadPassTab: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val overlayConfig by viewModel.overlayConfig.collectAsState()
     val matchRecap by viewModel.matchRecap.collectAsState()
     val isRecording by viewModel.isMatchRecording.collectAsState()
     val thermalGuardState by viewModel.thermalGuardState.collectAsState()
+    val squadPassState by viewModel.squadPassState.collectAsState()
+    val userUsername by viewModel.userUsername.collectAsState()
     val canDrawOverlay = remember(context) { SystemSettingsHelper.canDrawOverlays(context) }
 
     LazyColumn(
@@ -144,8 +147,9 @@ fun PerformanceTab(
                                 modifier = Modifier.size(22.dp)
                             )
                             Spacer(modifier = Modifier.width(10.dp))
+                            val activeLang = com.example.util.currentAppLanguage()
                             Text(
-                                text = alertMsg,
+                                text = com.example.util.AppStrings.autoTranslateDynamic(alertMsg, activeLang),
                                 color = MaterialTheme.colorScheme.onSurface,
                                 style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
                                 modifier = Modifier.weight(1f)
@@ -156,7 +160,7 @@ fun PerformanceTab(
                             ) {
                                 Icon(
                                     imageVector = Icons.Default.Close,
-                                    contentDescription = "Dismiss",
+                                    contentDescription = com.example.util.tr("Dismiss", "Cerrar"),
                                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                     modifier = Modifier.size(16.dp)
                                 )
@@ -166,25 +170,26 @@ fun PerformanceTab(
                     Spacer(modifier = Modifier.height(12.dp))
                 }
 
+                val activeThermalLang = com.example.util.currentAppLanguage()
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     ThermalMetricBox(
                         modifier = Modifier.weight(1f),
-                        label = "HARDWARE TEMP",
+                        label = com.example.util.tr("HARDWARE TEMP", "TEMP. HARDWARE"),
                         value = String.format(Locale.US, "%.1f°C", thermalGuardState.liveTempC),
                         accent = if (thermalGuardState.liveTempC > 40f) ElectricCrimson else SolarGold
                     )
                     ThermalMetricBox(
                         modifier = Modifier.weight(1.2f),
-                        label = "OS STATUS",
-                        value = thermalGuardState.thermalStatusName,
+                        label = com.example.util.tr("OS STATUS", "ESTADO DEL SISTEMA"),
+                        value = com.example.util.AppStrings.autoTranslateDynamic(thermalGuardState.thermalStatusName, activeThermalLang),
                         accent = if (thermalGuardState.isThrottling) ElectricCrimson else HubBlue
                     )
                     ThermalMetricBox(
                         modifier = Modifier.weight(1f),
-                        label = "HEADROOM",
+                        label = com.example.util.tr("HEADROOM", "MARGEN TÉRMICO"),
                         value = String.format(Locale.US, "%.2f", thermalGuardState.thermalHeadroom),
                         accent = if (thermalGuardState.thermalHeadroom < 0.6f) ElectricCrimson else LaunchGreen
                     )
@@ -193,7 +198,10 @@ fun PerformanceTab(
                 Spacer(modifier = Modifier.height(10.dp))
 
                 Text(
-                    text = "Monitors PowerManager kernel thermal listeners (API 29+) and correlates thermal events with in-game frame pacing to protect SoC silicon from sustained heat degradation.",
+                    text = com.example.util.tr(
+                        "Monitors PowerManager kernel thermal listeners (API 29+) and correlates thermal events with in-game frame pacing to protect SoC silicon from sustained heat degradation.",
+                        "Monitorea los sensores térmicos del kernel (API 29+) y correlaciona eventos térmicos con el ritmo de cuadros para proteger el procesador del calor continuo."
+                    ),
                     style = MaterialTheme.typography.bodySmall.copy(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         fontSize = 11.sp
@@ -231,7 +239,7 @@ fun PerformanceTab(
                                 letterSpacing = 0.8.sp
                             )
                             SectionTitle(
-                                title = com.example.util.tr("Post-Match Performance Recap", "Resumen de Rendimiento Post-Partida"),
+                                title = com.example.util.tr("Session Performance Recap", "Resumen de Rendimiento de Sesión"),
                                 subtitle = com.example.util.tr("Real FPS, 1% lows, stutters, and thermal curves", "FPS reales, caídas del 1%, tirones y curvas térmicas")
                             )
                         }
@@ -244,7 +252,7 @@ fun PerformanceTab(
                                 .padding(horizontal = 8.dp, vertical = 4.dp)
                         ) {
                             Text(
-                                text = "● REC ACTIVE",
+                                text = com.example.util.tr("● REC ACTIVE", "● GRABANDO"),
                                 color = LaunchGreen,
                                 fontSize = 10.sp,
                                 fontWeight = FontWeight.Bold,
@@ -262,25 +270,25 @@ fun PerformanceTab(
                 ) {
                     MatchStatBox(
                         modifier = Modifier.weight(1f),
-                        label = "AVG FPS",
+                        label = com.example.util.tr("AVG FPS", "PROM. CUADROS"),
                         value = "${matchRecap.averageFps}",
                         accent = HubBlue
                     )
                     MatchStatBox(
                         modifier = Modifier.weight(1f),
-                        label = "1% LOWS",
+                        label = com.example.util.tr("1% LOWS", "MÍNIMO 1%"),
                         value = "${matchRecap.low1PercentFps}",
                         accent = if (matchRecap.low1PercentFps >= 45f) LaunchGreen else SolarGold
                     )
                     MatchStatBox(
                         modifier = Modifier.weight(1f),
-                        label = "STABILITY",
+                        label = com.example.util.tr("STABILITY", "ESTABILIDAD"),
                         value = "${matchRecap.stabilityScore}%",
                         accent = Color(0xFFA855F7)
                     )
                     MatchStatBox(
                         modifier = Modifier.weight(1f),
-                        label = "PEAK TEMP",
+                        label = com.example.util.tr("PEAK TEMP", "TEMP. MÁX"),
                         value = String.format(Locale.US, "%.1f°C", matchRecap.maxTempC),
                         accent = if (matchRecap.maxTempC > 41f) ElectricCrimson else SolarGold
                     )
@@ -288,8 +296,13 @@ fun PerformanceTab(
 
                 Spacer(modifier = Modifier.height(14.dp))
 
+                val activeRecapLang = com.example.util.currentAppLanguage()
+                val localizedGameTitle = com.example.util.AppStrings.autoTranslateDynamic(matchRecap.gameTitle, activeRecapLang)
                 Text(
-                    text = "Performance Dynamics (${matchRecap.gameTitle}):",
+                    text = com.example.util.tr(
+                        "Performance Dynamics ($localizedGameTitle):",
+                        "Dinámica de Rendimiento ($localizedGameTitle):"
+                    ),
                     style = MaterialTheme.typography.labelSmall.copy(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         fontWeight = FontWeight.Bold
@@ -320,14 +333,20 @@ fun PerformanceTab(
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Text(
-                        text = "Battery Drain: -${matchRecap.batteryDrained}% (${matchRecap.startBatteryPct}% → ${matchRecap.endBatteryPct}%)",
+                        text = com.example.util.tr(
+                            "Battery Drain: -${matchRecap.batteryDrained}% (${matchRecap.startBatteryPct}% → ${matchRecap.endBatteryPct}%)",
+                            "Consumo de Batería: -${matchRecap.batteryDrained}% (${matchRecap.startBatteryPct}% → ${matchRecap.endBatteryPct}%)"
+                        ),
                         style = MaterialTheme.typography.bodySmall.copy(
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             fontSize = 11.sp
                         )
                     )
                     Text(
-                        text = "Stutters: ${matchRecap.stutterCount} drops",
+                        text = com.example.util.tr(
+                            "Stutters: ${matchRecap.stutterCount} drops",
+                            "Tirones: ${matchRecap.stutterCount} caídas"
+                        ),
                         style = MaterialTheme.typography.bodySmall.copy(
                             color = if (matchRecap.stutterCount > 5) ElectricCrimson else MaterialTheme.colorScheme.onSurfaceVariant,
                             fontSize = 11.sp
@@ -381,6 +400,17 @@ fun PerformanceTab(
                         Text(com.example.util.tr("SHARE CARD", "COMPARTIR TARJETA"), color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                     }
                 }
+
+                // Contextual Post-Session / Highlight Squad Invite Prompt ("Running with a duo? Send them a 14 day Pro Guest Pass...")
+                com.example.ui.components.PostMatchGuestPassPromptCard(
+                    squadState = squadPassState,
+                    referrerUsername = userUsername.ifBlank { "SquadLeader" },
+                    gameTitle = matchRecap.gameTitle,
+                    onOpenSquadPassHub = {
+                        viewModel.requestExtrasSubTab(2)
+                        onOpenSquadPassTab()
+                    }
+                )
             }
         }
 
@@ -388,8 +418,8 @@ fun PerformanceTab(
         item {
             CyberCard(borderColor = if (overlayConfig.isEnabled) LaunchGreen else MaterialTheme.colorScheme.outline) {
                 SectionTitle(
-                    title = "Screen Overlay HUD Controls",
-                    subtitle = "Real-time floating metrics for FPS, battery, and thermals"
+                    title = com.example.util.tr("Screen Overlay HUD Controls", "Controles del Visor en Pantalla"),
+                    subtitle = com.example.util.tr("Real-time floating metrics for FPS, battery, and thermals", "Métricas flotantes en tiempo real de cuadros por segundo, batería y temperatura")
                 )
 
                 Spacer(modifier = Modifier.height(10.dp))
@@ -407,7 +437,10 @@ fun PerformanceTab(
                             Icon(Icons.Default.Warning, contentDescription = null, tint = SolarGold, modifier = Modifier.size(18.dp))
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
-                                text = "Requires 'Display over other apps' permission to stay visible over games.",
+                                text = com.example.util.tr(
+                                    "Requires 'Display over other apps' permission to stay visible over games.",
+                                    "Requiere permiso 'Mostrar sobre otras apps' para verse en los juegos."
+                                ),
                                 style = MaterialTheme.typography.bodySmall.copy(color = SolarGold, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
                             )
                         }
@@ -435,14 +468,18 @@ fun PerformanceTab(
                         Spacer(modifier = Modifier.width(10.dp))
                         Column {
                             Text(
-                                text = "Floating Screen Overlay",
+                                text = com.example.util.tr("Floating Screen Overlay", "Superposición Flotante en Pantalla"),
                                 style = MaterialTheme.typography.titleSmall.copy(
                                     fontWeight = FontWeight.Bold,
                                     color = MaterialTheme.colorScheme.onSurface
                                 )
                             )
                             Text(
-                                text = if (overlayConfig.isEnabled) "HUD is active and draggable on screen" else "Currently inactive",
+                                text = if (overlayConfig.isEnabled) {
+                                    com.example.util.tr("HUD is active and draggable on screen", "El visor está activo y se puede arrastrar")
+                                } else {
+                                    com.example.util.tr("Currently inactive", "Actualmente inactivo")
+                                },
                                 style = MaterialTheme.typography.bodySmall.copy(
                                     color = if (overlayConfig.isEnabled) LaunchGreen else MaterialTheme.colorScheme.onSurfaceVariant,
                                     fontSize = 11.sp
@@ -467,7 +504,7 @@ fun PerformanceTab(
                 Spacer(modifier = Modifier.height(12.dp))
 
                 Text(
-                    text = "Overlay Telemetry Metrics:",
+                    text = com.example.util.tr("Overlay Telemetry Metrics:", "Métricas de Telemetría en Pantalla:"),
                     style = MaterialTheme.typography.labelSmall.copy(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         fontWeight = FontWeight.Bold
@@ -479,8 +516,11 @@ fun PerformanceTab(
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     ExtrasTelemetryRow(
                         icon = Icons.Default.Speed,
-                        label = "In-Game Frame Rate (96% to 98% EFPS)",
-                        description = "6-Way Hardware Telemetry Fusion (VRR + VSYNC + GPU Swap + Game Cap + CPU/Thermal)",
+                        label = com.example.util.tr("In-Game Frame Rate (96% to 98% EFPS)", "Tasa de Cuadros en Juego (96% a 98% Precisión)"),
+                        description = com.example.util.tr(
+                            "6-Way Hardware Telemetry Fusion (VRR + VSYNC + GPU Swap + Game Cap + CPU/Thermal)",
+                            "Fusión de telemetría de hardware de 6 vías (Frecuencia Variable + Sincronización + Tarjeta Gráfica + Procesador)"
+                        ),
                         isChecked = overlayConfig.showFps,
                         onCheckedChange = { viewModel.toggleOverlayFps(context, it) },
                         accentColor = HubBlue
@@ -488,8 +528,8 @@ fun PerformanceTab(
 
                     ExtrasTelemetryRow(
                         icon = Icons.Default.Thermostat,
-                        label = "Hardware Battery Thermals",
-                        description = "Genuine Android battery broadcast temperature",
+                        label = com.example.util.tr("Hardware Battery Thermals", "Temperatura de Batería de Hardware"),
+                        description = com.example.util.tr("Genuine Android battery broadcast temperature", "Temperatura real de la batería de Android"),
                         isChecked = overlayConfig.showTemp,
                         onCheckedChange = { viewModel.toggleOverlayTemp(context, it) },
                         accentColor = SolarGold
@@ -497,8 +537,8 @@ fun PerformanceTab(
 
                     ExtrasTelemetryRow(
                         icon = Icons.Default.BatteryChargingFull,
-                        label = "Battery Percentage & Health",
-                        description = "Genuine battery capacity and charge state",
+                        label = com.example.util.tr("Battery Percentage & Health", "Porcentaje y Salud de Batería"),
+                        description = com.example.util.tr("Genuine battery capacity and charge state", "Capacidad real y estado de carga de la batería"),
                         isChecked = overlayConfig.showBattery,
                         onCheckedChange = { viewModel.toggleOverlayBattery(context, it) },
                         accentColor = LaunchGreen
@@ -506,8 +546,8 @@ fun PerformanceTab(
 
                     ExtrasTelemetryRow(
                         icon = Icons.Default.Timer,
-                        label = com.example.util.tr("Booster Session Countdown", "Cuenta Regresiva de Sesión"),
-                        description = com.example.util.tr("Live session timer and RAM maintenance feedback", "Temporizador en vivo y mantenimiento de RAM"),
+                        label = com.example.util.tr("Overlay and Focus Mode Timer", "Temporizador de Superposición y Modo Enfoque"),
+                        description = com.example.util.tr("Limits the time your software overlay and focus mode stay active on screen (1h 30m)", "Limita el tiempo que la superposición y el modo enfoque permanecen activos en pantalla (1h 30m)"),
                         isChecked = overlayConfig.showTimer,
                         onCheckedChange = { viewModel.toggleOverlayTimer(context, it) },
                         accentColor = Color(0xFFA855F7)
@@ -516,9 +556,9 @@ fun PerformanceTab(
             }
         }
 
-        // 4. Native Ad Card embedded in the Performance scrollable list with 32dp top buffer
+        // 4. Unity Banner Card embedded in the Performance scrollable list with 32dp top buffer
         item {
-            com.example.ui.components.GMaxNativeAdCard(
+            com.example.ui.components.GMaxUnityBannerCard(
                 placementTag = "performance_bottom",
                 topBuffer = 32.dp,
                 bottomBuffer = 24.dp

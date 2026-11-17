@@ -13,6 +13,7 @@ import android.graphics.Shader
 import android.net.Uri
 import android.util.Log
 import androidx.core.content.FileProvider
+import com.example.data.repository.SquadReferralRepository
 import com.example.model.MatchRecap
 import com.example.model.TelemetryPoint
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -170,6 +171,14 @@ class MatchRecapManager private constructor(private val context: Context) {
             _isRecording.value = false
             collectedSamples.clear()
             persistRecap(recap)
+            try {
+                val hudPrefs = context.getSharedPreferences("gmax_hud_prefs", Context.MODE_PRIVATE)
+                val hudActive = com.example.service.GamingOverlayService.isServiceRunning ||
+                    hudPrefs.getBoolean("hud_enabled", false)
+                if (hudActive) {
+                    SquadReferralManager.onHudMatchCompleted(context)
+                }
+            } catch (_: Exception) {}
             Log.i(TAG, "Finished match recording: ${recap.averageFps} avg FPS, 1% low: ${recap.low1PercentFps}")
             return recap
         }
@@ -325,6 +334,13 @@ class MatchRecapManager private constructor(private val context: Context) {
             val authority = "${context.packageName}.fileprovider"
             val uri: Uri = FileProvider.getUriForFile(context, authority, file)
 
+            val squadState = SquadReferralManager.state.value
+            val passSuffix = if (squadState.myReferralCode.isNotBlank()) {
+                "\n🎁 Claim my 14-Day Pro Guest Pass + Starter Crosshair with Squad Code: ${squadState.myReferralCode} (${squadState.guestPassesRemaining} Passes Left)"
+            } else {
+                ""
+            }
+
             val shareIntent = Intent(Intent.ACTION_SEND).apply {
                 type = "image/png"
                 putExtra(Intent.EXTRA_STREAM, uri)
@@ -333,7 +349,7 @@ class MatchRecapManager private constructor(private val context: Context) {
                     "🎮 Post-Match Performance Recap: ${recap.gameTitle}\n" +
                         "⚡ Avg FPS: ${recap.averageFps} | 1% Lows: ${recap.low1PercentFps} | Stability: ${recap.stabilityScore}%\n" +
                         "🌡 Peak Temp: ${String.format(Locale.US, "%.1f", recap.maxTempC)}°C | Battery Drain: -${recap.batteryDrained}%\n" +
-                        "Powered by G Max Gaming Hub"
+                        "Powered by G Max Gaming Hub$passSuffix"
                 )
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)

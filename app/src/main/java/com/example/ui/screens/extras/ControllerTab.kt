@@ -96,8 +96,8 @@ fun ControllerTab(
     val controllerLayoutMode by viewModel.controllerLayoutMode.collectAsState()
     val activeControllerGlyphs by viewModel.activeControllerGlyphs.collectAsState()
     val showWiredPopup by viewModel.showWiredControllerRequiredPopup.collectAsState()
-    val proUnlockUntilMs by com.example.util.AdMobManager.proControllerUnlockUntilMs.collectAsState()
-    val isProUnlocked = proUnlockUntilMs > System.currentTimeMillis() || com.example.util.AdMobManager.isProControllerUnlocked()
+    val proUnlockUntilMs by com.example.util.UnityAdsManager.proControllerUnlockUntilMs.collectAsState()
+    val isProUnlocked = proUnlockUntilMs > System.currentTimeMillis() || com.example.util.UnityAdsManager.isProControllerUnlocked()
     var deadzoneSlider by remember { mutableFloatStateOf(0.05f) }
 
     var selectedLedHex by remember { mutableStateOf("#00E5FF") }
@@ -113,10 +113,20 @@ fun ControllerTab(
         )
     }
 
-    // Ensure controller input lock is automatically released when leaving ControllerTab
+    // Ensure controller studio mode and input lock are managed cleanly while on ControllerTab
     DisposableEffect(Unit) {
+        com.example.util.ControllerHealthManager.setControllerStudioActive(true)
+        viewModel.refreshControllerState()
         onDispose {
+            com.example.util.ControllerHealthManager.setControllerStudioActive(false)
             viewModel.setControllerTestLocked(false)
+        }
+    }
+
+    androidx.compose.runtime.LaunchedEffect(healthState.controllerId < 0) {
+        while (healthState.controllerId < 0) {
+            kotlinx.coroutines.delay(1500L)
+            viewModel.refreshControllerState()
         }
     }
 
@@ -142,11 +152,11 @@ fun ControllerTab(
                 onSelectLayoutMode = { viewModel.setControllerLayoutMode(it) },
                 onSelectStickTrackingMode = { viewModel.setControllerOverlayStickTrackingMode(it) },
                 onToggleEnabled = { enableRequested ->
-                    if (enableRequested && !com.example.util.ControllerHealthManager.isWiredControllerConnected(context)) {
+                    if (enableRequested && !com.example.util.ControllerHealthManager.isAnyControllerConnected(context)) {
                         viewModel.setControllerOverlayEnabled(false)
                         viewModel.triggerWiredControllerRequiredPopup()
                     } else if (enableRequested && !isProUnlocked) {
-                        com.example.util.AdMobManager.requestProControllerRewardedUnlock(context) {
+                        com.example.util.UnityAdsManager.requestProControllerRewardedUnlock(context) {
                             viewModel.setControllerOverlayEnabled(true)
                         }
                     } else {
@@ -214,23 +224,25 @@ fun ControllerTab(
                             modifier = Modifier.size(26.dp)
                         )
                         Spacer(modifier = Modifier.width(10.dp))
+                        val activeCtrlLang = com.example.util.currentAppLanguage()
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                text = healthState.activeControllerName,
+                                text = com.example.util.AppStrings.autoTranslateDynamic(healthState.activeControllerName, activeCtrlLang),
                                 color = MaterialTheme.colorScheme.onSurface,
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 13.sp
                             )
+                            val localizedConnType = com.example.util.AppStrings.autoTranslateDynamic(healthState.connectionTypeLabel, activeCtrlLang)
                             Text(
                                 text = if (healthState.controllerId >= 0) {
                                     com.example.util.tr(
-                                        "Controller ID #${healthState.controllerId} • ${healthState.connectionTypeLabel}",
-                                        "ID del mando #${healthState.controllerId} • ${healthState.connectionTypeLabel}"
+                                        "Controller ID #${healthState.controllerId} • $localizedConnType",
+                                        "ID del mando #${healthState.controllerId} • $localizedConnType"
                                     )
                                 } else {
                                     com.example.util.tr(
-                                        "Connect via USB-C / OTG (Wired Required for Overlay) or Bluetooth",
-                                        "Conecta por USB-C / OTG (Cable Requerido para Superposición) o Bluetooth"
+                                        "Connect via Bluetooth or USB-C / OTG (Both Supported for Overlay)",
+                                        "Conecta por Bluetooth o USB-C / OTG (Ambos Compatibles con Superposición)"
                                     )
                                 },
                                 color = if (healthState.controllerId >= 0) LaunchGreen else MaterialTheme.colorScheme.onSurfaceVariant,
@@ -264,8 +276,8 @@ fun ControllerTab(
 
                 Text(
                     text = com.example.util.tr(
-                        "High polling rates (250Hz - 1000Hz) deliver sub-4ms response times. Lower polling rates (under 125Hz) can introduce aim smoothing or perceptible delay in fast-paced competitive games.",
-                        "Las tasas de sondeo altas (250Hz - 1000Hz) ofrecen respuesta menor a 4ms. Tasas inferiores a 125Hz pueden causar retraso perceptible en juegos competitivos."
+                        "High polling rates (250Hz to 1000Hz) deliver sub 4ms response times. Lower polling rates (under 125Hz) can introduce aim smoothing or perceptible delay in fast paced competitive games.",
+                        "Las tasas de sondeo altas (250Hz a 1000Hz) ofrecen respuesta menor a 4ms. Tasas inferiores a 125Hz pueden causar retraso perceptible en juegos competitivos."
                     ),
                     style = MaterialTheme.typography.bodySmall.copy(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -296,7 +308,19 @@ fun ControllerTab(
                     }
                 }
 
-                Spacer(modifier = Modifier.height(10.dp))
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Text(
+                    text = com.example.util.tr(
+                        "Some Controllers input might not be as Accurate as others",
+                        "Algunos mandos pueden no tener una entrada tan precisa como otros"
+                    ),
+                    color = SolarGold,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
 
                 // Start Check / Stop Check Input Isolation Banner + Button
                 Box(
@@ -629,8 +653,9 @@ fun ControllerTab(
 
                 Spacer(modifier = Modifier.height(10.dp))
 
+                val activeRumbleLang = com.example.util.currentAppLanguage()
                 Text(
-                    text = "${com.example.util.tr("Status", "Estado")}: ${healthState.rumbleStatus}",
+                    text = "${com.example.util.tr("Status", "Estado")}: ${com.example.util.AppStrings.autoTranslateDynamic(healthState.rumbleStatus, activeRumbleLang)}",
                     color = MaterialTheme.colorScheme.onSurface,
                     fontSize = 12.sp,
                     fontFamily = FontFamily.Monospace
@@ -808,7 +833,7 @@ fun ControllerTab(
 
                         val updateCustomHex = { r: Int, g: Int, b: Int ->
                             if (!isProUnlocked) {
-                                com.example.util.AdMobManager.requestProControllerRewardedUnlock(context) {
+                                com.example.util.UnityAdsManager.requestProControllerRewardedUnlock(context) {
                                     val hex = String.format(Locale.US, "#%02X%02X%02X", r, g, b)
                                     selectedLedHex = hex
                                     viewModel.setControllerLedColor(hex)
@@ -866,9 +891,9 @@ fun ControllerTab(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        GyroMetricBox(modifier = Modifier.weight(1f), label = "PITCH (X)", value = "${healthState.gyroReading.pitch} rad/s")
-                        GyroMetricBox(modifier = Modifier.weight(1f), label = "ROLL (Y)", value = "${healthState.gyroReading.roll} rad/s")
-                        GyroMetricBox(modifier = Modifier.weight(1f), label = "YAW (Z)", value = "${healthState.gyroReading.yaw} rad/s")
+                        GyroMetricBox(modifier = Modifier.weight(1f), label = com.example.util.tr("PITCH (X)", "INCLINACIÓN (X)"), value = "${healthState.gyroReading.pitch} rad/s")
+                        GyroMetricBox(modifier = Modifier.weight(1f), label = com.example.util.tr("ROLL (Y)", "GIRO (Y)"), value = "${healthState.gyroReading.roll} rad/s")
+                        GyroMetricBox(modifier = Modifier.weight(1f), label = com.example.util.tr("YAW (Z)", "GUIÑADA (Z)"), value = "${healthState.gyroReading.yaw} rad/s")
                     }
                 } else {
                     Box(
@@ -903,7 +928,7 @@ fun ControllerTab(
             ) {
                 SectionTitle(
                     title = com.example.util.tr("Controller Battery Level", "Nivel de Batería del Mando"),
-                    subtitle = com.example.util.tr("Real-time gamepad charge & low-battery alert", "Carga del mando en tiempo real y alerta de batería baja"),
+                    subtitle = com.example.util.tr("Live gamepad charge & low battery alert", "Carga del mando en vivo y alerta de batería baja"),
                     badge = if (isControllerConnected) com.example.util.tr("CONNECTED", "CONECTADO") else com.example.util.tr("DISCONNECTED", "DESCONECTADO"),
                     badgeColor = if (isControllerConnected) LaunchGreen else MaterialTheme.colorScheme.outline
                 )
@@ -949,10 +974,11 @@ fun ControllerTab(
                         modifier = Modifier.size(32.dp)
                     )
                     Spacer(modifier = Modifier.width(12.dp))
+                    val activeBatLang = com.example.util.currentAppLanguage()
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
                             text = if (isControllerConnected) {
-                                "${com.example.util.tr("Battery Status", "Estado de Batería")}: ${healthState.batteryInfo.batteryStatus}"
+                                "${com.example.util.tr("Battery Status", "Estado de Batería")}: ${com.example.util.AppStrings.autoTranslateDynamic(healthState.batteryInfo.batteryStatus, activeBatLang)}"
                             } else {
                                 "${com.example.util.tr("Battery Status", "Estado de Batería")}: ${com.example.util.tr("Disconnected (Connect a controller to view battery health)", "Desconectado (Conecta un mando para ver la batería)")}"
                             },
@@ -963,8 +989,8 @@ fun ControllerTab(
                         Text(
                             text = if (!isControllerConnected) {
                                 com.example.util.tr(
-                                    "No active gamepad detected — battery telemetry is paused until a controller is connected",
-                                    "No se detectó ningún mando activo — la telemetría de batería está en pausa hasta conectar un mando"
+                                    "No active gamepad detected. Battery telemetry is paused until a controller is connected",
+                                    "No se detectó ningún mando activo. La telemetría de batería está en pausa hasta conectar un mando"
                                 )
                             } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                                 com.example.util.tr(
@@ -985,9 +1011,9 @@ fun ControllerTab(
             }
         }
 
-        // 6. Single Safe Bottom Ad Card below Controller Battery Level Card with 32.dp top margin
+        // 6. Single Safe Bottom Unity Banner Card below Controller Battery Level Card with 32.dp top margin
         item {
-            com.example.ui.components.GMaxNativeAdCard(
+            com.example.ui.components.GMaxUnityBannerCard(
                 placementTag = "controller_bottom_below_battery",
                 topBuffer = 32.dp,
                 bottomBuffer = 24.dp
@@ -1116,8 +1142,9 @@ private fun LedColorButton(
                     .border(0.5.dp, Color.Black.copy(alpha = 0.25f), CircleShape)
             )
             Spacer(modifier = Modifier.width(5.dp))
+            val activeLedLang = com.example.util.currentAppLanguage()
             Text(
-                label,
+                com.example.util.AppStrings.autoTranslateDynamic(label, activeLedLang),
                 color = MaterialTheme.colorScheme.onSurface,
                 fontSize = 10.5.sp,
                 fontWeight = if (isSelected) FontWeight.ExtraBold else FontWeight.SemiBold

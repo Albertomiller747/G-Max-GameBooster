@@ -449,6 +449,385 @@
         "active",
         "last_updated"
       ]
+    },
+    "ReferralCodeEntry": {
+      "title": "ReferralCodeEntry",
+      "description": "Public Squad Invite Guest Pass code entry mapping a short code to the referrer player.",
+      "type": "object",
+      "properties": {
+        "referrerUid": {
+          "type": "string",
+          "description": "Authenticated Firebase UID of the referrer owning this code."
+        },
+        "referrerUsername": {
+          "type": "string",
+          "description": "Gamer handle of the referrer."
+        },
+        "referrerDisplayName": {
+          "type": "string",
+          "description": "Display name of the referrer."
+        },
+        "code": {
+          "type": "string",
+          "description": "Normalized uppercase Squad Invite code (e.g., GMAX-ALBERTO)."
+        },
+        "passesRemaining": {
+          "type": "integer",
+          "description": "Scarcity-framed Guest Passes remaining in current batch."
+        },
+        "validatedCount": {
+          "type": "integer",
+          "description": "Total number of squadmates who completed the verified core action."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the referral code entry was created or updated."
+        }
+      },
+      "required": [
+        "referrerUid",
+        "referrerUsername",
+        "referrerDisplayName",
+        "code",
+        "passesRemaining",
+        "validatedCount",
+        "updatedAt"
+      ]
+    },
+    "ReferralActivation": {
+      "title": "ReferralActivation",
+      "description": "Dual-sided referral activation record tracking an invited squadmate's core action verification and hardware fingerprint.",
+      "type": "object",
+      "properties": {
+        "inviteeUid": {
+          "type": "string",
+          "description": "Authenticated Firebase UID of the invited squadmate (document ID)."
+        },
+        "inviteeUsername": {
+          "type": "string",
+          "description": "Gamer handle of the invited squadmate."
+        },
+        "inviteeDisplayName": {
+          "type": "string",
+          "description": "Display name of the invited squadmate."
+        },
+        "referrerUid": {
+          "type": "string",
+          "description": "Authenticated Firebase UID of the referring player."
+        },
+        "referrerUsername": {
+          "type": "string",
+          "description": "Gamer handle of the referring player."
+        },
+        "referrerCode": {
+          "type": "string",
+          "description": "Squad Pass code used by the invitee."
+        },
+        "deviceFingerprintHash": {
+          "type": "string",
+          "description": "SHA-256 hardware fingerprint hash binding this activation to a unique physical device."
+        },
+        "status": {
+          "type": "string",
+          "enum": ["PENDING_ACTIVATION", "ACTIVATED"],
+          "description": "Current verification state (PENDING_ACTIVATION until 15m boosted play or 1 HUD match completes)."
+        },
+        "boostedMinutesCompleted": {
+          "type": "integer",
+          "description": "Cumulative boosted gameplay minutes completed by the invitee."
+        },
+        "hudMatchCompleted": {
+          "type": "boolean",
+          "description": "Whether the invitee has completed at least 1 full match with the Floating HUD active."
+        },
+        "activationTrigger": {
+          "type": "string",
+          "description": "Which core action triggered activation (NONE, 15M_BOOSTED_PLAY, or 1_HUD_MATCH)."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the Guest Pass was claimed."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the activation record was last updated."
+        }
+      },
+      "required": [
+        "inviteeUid",
+        "inviteeUsername",
+        "inviteeDisplayName",
+        "referrerUid",
+        "referrerUsername",
+        "referrerCode",
+        "deviceFingerprintHash",
+        "status",
+        "boostedMinutesCompleted",
+        "hudMatchCompleted",
+        "activationTrigger",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "DeviceReferralClaim": {
+      "title": "DeviceReferralClaim",
+      "description": "Immutable hardware fingerprint lock preventing multiple burner accounts on the same physical device from farming referral rewards.",
+      "type": "object",
+      "properties": {
+        "deviceFingerprintHash": {
+          "type": "string",
+          "description": "SHA-256 hardware fingerprint hash (document ID)."
+        },
+        "inviteeUid": {
+          "type": "string",
+          "description": "Authenticated Firebase UID that claimed a referral on this device."
+        },
+        "referrerUid": {
+          "type": "string",
+          "description": "Authenticated Firebase UID of the referrer."
+        },
+        "referrerCode": {
+          "type": "string",
+          "description": "Referral code claimed on this hardware device."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the hardware claim was locked."
+        }
+      },
+      "required": [
+        "deviceFingerprintHash",
+        "inviteeUid",
+        "referrerUid",
+        "referrerCode",
+        "createdAt"
+      ]
+    },
+    "RivalsSquad": {
+      "title": "RivalsSquad",
+      "description": "Real-time 5-player Rivals competition squad with leader metadata, 150-character bio, squad code, and monthly season key.",
+      "type": "object",
+      "properties": {
+        "squadId": {
+          "type": "string",
+          "description": "Unique squad identifier matching the document ID."
+        },
+        "name": {
+          "type": "string",
+          "description": "Squad display name (1 to 40 characters)."
+        },
+        "bio": {
+          "type": "string",
+          "description": "Squad bio text (maximum 150 characters)."
+        },
+        "squadCode": {
+          "type": "string",
+          "description": "Shareable Squad Code (e.g., RIVALS-SQUAD1) for automatic friend join."
+        },
+        "leaderUid": {
+          "type": "string",
+          "description": "Authenticated Firebase UID of the Squad Leader/Creator."
+        },
+        "leaderUsername": {
+          "type": "string",
+          "description": "Username handle of the Squad Leader."
+        },
+        "memberUids": {
+          "type": "array",
+          "description": "Bounded list of up to 5 member Firebase UIDs currently in the squad."
+        },
+        "seasonMonthKey": {
+          "type": "string",
+          "description": "Active UTC monthly reset key (YYYY-MM)."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the squad was created."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the squad was last updated."
+        }
+      },
+      "required": [
+        "squadId",
+        "name",
+        "bio",
+        "squadCode",
+        "leaderUid",
+        "leaderUsername",
+        "memberUids",
+        "seasonMonthKey",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "RivalsSquadCodeEntry": {
+      "title": "RivalsSquadCodeEntry",
+      "description": "Directory mapping a shareable Squad Code (RIVALS-XXXXXX) to its RivalsSquad document ID.",
+      "type": "object",
+      "properties": {
+        "squadCode": {
+          "type": "string",
+          "description": "Normalized uppercase Squad Code matching the document ID."
+        },
+        "squadId": {
+          "type": "string",
+          "description": "Target RivalsSquad document ID."
+        },
+        "leaderUid": {
+          "type": "string",
+          "description": "Authenticated Firebase UID of the Squad Leader."
+        },
+        "squadName": {
+          "type": "string",
+          "description": "Display name of the squad."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the squad code entry was created or updated."
+        }
+      },
+      "required": [
+        "squadCode",
+        "squadId",
+        "leaderUid",
+        "squadName",
+        "updatedAt"
+      ]
+    },
+    "RivalsSquadInvite": {
+      "title": "RivalsSquadInvite",
+      "description": "Direct username-search squad invitation requiring explicit acceptance by the invited player.",
+      "type": "object",
+      "properties": {
+        "inviteId": {
+          "type": "string",
+          "description": "Unique invite document ID (${squadId}_${inviteeUid})."
+        },
+        "squadId": {
+          "type": "string",
+          "description": "Target RivalsSquad document ID."
+        },
+        "squadName": {
+          "type": "string",
+          "description": "Display name of the inviting squad."
+        },
+        "inviterUid": {
+          "type": "string",
+          "description": "Authenticated Firebase UID of the Squad Leader sending the invite."
+        },
+        "inviterUsername": {
+          "type": "string",
+          "description": "Username of the Squad Leader sending the invite."
+        },
+        "inviteeUid": {
+          "type": "string",
+          "description": "Authenticated Firebase UID of the invited player."
+        },
+        "inviteeUsername": {
+          "type": "string",
+          "description": "Username of the invited player."
+        },
+        "status": {
+          "type": "string",
+          "enum": ["PENDING", "ACCEPTED", "DECLINED"],
+          "description": "Invitation status."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the invite was sent."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the invite was last updated."
+        }
+      },
+      "required": [
+        "inviteId",
+        "squadId",
+        "squadName",
+        "inviterUid",
+        "inviterUsername",
+        "inviteeUid",
+        "inviteeUsername",
+        "status",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "RivalsTaunt": {
+      "title": "RivalsTaunt",
+      "description": "One-click pre-set taunt sent when a squad member passes a rival on the Squad leaderboard.",
+      "type": "object",
+      "properties": {
+        "tauntId": {
+          "type": "string",
+          "description": "Unique taunt document ID."
+        },
+        "squadId": {
+          "type": "string",
+          "description": "RivalsSquad document ID."
+        },
+        "senderUid": {
+          "type": "string",
+          "description": "Authenticated Firebase UID of the player who passed a squadmate."
+        },
+        "senderName": {
+          "type": "string",
+          "description": "Display name or username of the sender."
+        },
+        "receiverUid": {
+          "type": "string",
+          "description": "Authenticated Firebase UID of the overtaken squadmate."
+        },
+        "receiverName": {
+          "type": "string",
+          "description": "Display name or username of the overtaken squadmate."
+        },
+        "tauntText": {
+          "type": "string",
+          "enum": [
+            "Better luck next time",
+            "Catch me if you can",
+            "Your too slow",
+            "ez",
+            "Noobs",
+            "GG",
+            "Im Just Better"
+          ],
+          "description": "Strictly one of the 7 pre-set default taunts."
+        },
+        "passEventKey": {
+          "type": "string",
+          "description": "Unique pass event identifier ensuring only one pre-set taunt per passing."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the taunt was sent."
+        }
+      },
+      "required": [
+        "tauntId",
+        "squadId",
+        "senderUid",
+        "senderName",
+        "receiverUid",
+        "receiverName",
+        "tauntText",
+        "passEventKey",
+        "createdAt"
+      ]
     }
   },
   "firestore": {
@@ -469,6 +848,49 @@
         "$ref": "#/entities/TopGearProduct"
       },
       "description": "Remotely configurable catalog of curated Top Gear affiliate products readable by signed-in users and writable exclusively by the verified developer."
+    },
+    "/referral_codes/{code}": {
+      "schema": {
+        "$ref": "#/entities/ReferralCodeEntry"
+      },
+      "description": "Public directory of Squad Invite Guest Pass codes allowing invited players to resolve a code to its referrer."
+    },
+    "/referral_activations/{inviteeUid}": {
+      "schema": {
+        "$ref": "#/entities/ReferralActivation"
+      },
+      "description": "Dual-sided referral activation ledger tracking pending and verified squadmates for both the invitee and referrer."
+    },
+    "/device_referral_claims/{deviceFingerprintHash}": {
+      "schema": {
+        "$ref": "#/entities/DeviceReferralClaim"
+      },
+      "description": "Hardware-bound anti-fraud lock ensuring each physical device can only ever claim one Guest Pass referral."
+    },
+    "/rivals_squads/{squadId}": {
+      "schema": {
+        "$ref": "#/entities/RivalsSquad"
+      },
+      "description": "Real-time 5-player Rivals competition squads with 1st-5th leaderboard ranks, 150-char bio, and Squad Leader controls."
+    },
+    "/rivals_squad_codes/{squadCode}": {
+      "schema": {
+        "$ref": "#/entities/RivalsSquadCodeEntry"
+      },
+      "description": "Lookup table mapping a shareable Squad Code (RIVALS-XXXXXX) to its RivalsSquad."
+    },
+    "/rivals_squad_invites/{inviteId}": {
+      "schema": {
+        "$ref": "#/entities/RivalsSquadInvite"
+      },
+      "description": "Pending and resolved username-search squad invitations."
+    },
+    "/rivals_taunts/{tauntId}": {
+      "schema": {
+        "$ref": "#/entities/RivalsTaunt"
+      },
+      "description": "Real-time one-click pre-set taunts sent after passing a squadmate on the leaderboard."
     }
   }
 }
+

@@ -50,7 +50,7 @@ class ControllerOverlayService : Service() {
     private var windowManager: WindowManager? = null
     private var overlayView: ControllerOverlayView? = null
     private var windowParams: WindowManager.LayoutParams? = null
-    private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate + com.example.util.AppCrashGuard.coroutineExceptionHandler)
     private var stateJob: Job? = null
     private var animationJob: Job? = null
     private var gamepadDetector: GamepadDetector? = null
@@ -204,12 +204,8 @@ class ControllerOverlayService : Service() {
                     action = ACTION_START_OR_UPDATE
                 }
                 try {
-                    androidx.core.content.ContextCompat.startForegroundService(context, intent)
-                } catch (_: Exception) {
-                    try {
-                        context.startService(intent)
-                    } catch (_: Exception) {}
-                }
+                    context.startService(intent)
+                } catch (_: Exception) {}
             } else if (isRunning) {
                 val intent = Intent(context, ControllerOverlayService::class.java).apply {
                     action = ACTION_STOP
@@ -245,55 +241,15 @@ class ControllerOverlayService : Service() {
         }
     }
 
-    private fun promoteToForeground() {
-        try {
-            val openIntent = Intent(this, com.example.MainActivity::class.java).apply {
-                flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
-            }
-            val pendingIntent = android.app.PendingIntent.getActivity(
-                this,
-                0,
-                openIntent,
-                android.app.PendingIntent.FLAG_UPDATE_CURRENT or
-                    (if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) android.app.PendingIntent.FLAG_IMMUTABLE else 0)
-            )
-            val notification = androidx.core.app.NotificationCompat.Builder(this, CHANNEL_ID)
-                .setSmallIcon(android.R.drawable.ic_dialog_info)
-                .setContentTitle("Controller Input Overlay Active")
-                .setContentText("Displaying real-time gamepad inputs over your game")
-                .setContentIntent(pendingIntent)
-                .setOngoing(true)
-                .setSilent(true)
-                .setPriority(androidx.core.app.NotificationCompat.PRIORITY_LOW)
-                .build()
-
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-                startForeground(
-                    NOTIFICATION_ID,
-                    notification,
-                    android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
-                )
-            } else {
-                startForeground(NOTIFICATION_ID, notification)
-            }
-        } catch (_: Exception) {}
-    }
-
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_STOP) {
             removeOverlayView()
-            try {
-                stopForeground(STOP_FOREGROUND_REMOVE)
-            } catch (_: Exception) {}
             stopSelf()
             return START_NOT_STICKY
         }
 
         if (!canRenderSystemOverlay(this)) {
             removeOverlayView()
-            try {
-                stopForeground(STOP_FOREGROUND_REMOVE)
-            } catch (_: Exception) {}
             stopSelf()
             return START_NOT_STICKY
         }
@@ -305,9 +261,6 @@ class ControllerOverlayService : Service() {
                 saveConfig(this, currentConfig.copy(isEnabled = false))
             }
             removeOverlayView()
-            try {
-                stopForeground(STOP_FOREGROUND_REMOVE)
-            } catch (_: Exception) {}
             stopSelf()
             return START_NOT_STICKY
         }
@@ -316,7 +269,6 @@ class ControllerOverlayService : Service() {
             this,
             currentConfig.disableControllerSpeakerAudio
         )
-        promoteToForeground()
         refreshGlyphs(force = true)
         showOrUpdateOverlay()
         observeLiveControllerState()

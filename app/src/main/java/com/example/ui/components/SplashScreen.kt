@@ -94,7 +94,7 @@ private val SmoothConsoleEasing = CubicBezierEasing(0.22f, 1.0f, 0.36f, 1.0f)
 fun SplashScreen(
     onAnimationComplete: () -> Unit,
     controllerGlyphs: ControllerGlyphMap = ControllerLayoutResolver.playStationGlyphs,
-    ultraFastTransition: Boolean = true,
+    ultraFastTransition: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current

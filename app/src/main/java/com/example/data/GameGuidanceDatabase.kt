@@ -78,7 +78,7 @@ object GameGuidanceDatabase {
             recommendedGraphics = "Smooth or Medium for maximum team-fight clarity",
             antiAliasingAdvice = "Off for crisp skill shot boundaries",
             shadowsAdvice = "Shadows Off removes distraction in jungle brushes.",
-            lowLatencyTip = "Enable 'Speed Mode' & 'Network Boost' (Wi-Fi + 4G dual-channel) in game settings.",
+            lowLatencyTip = "Enable 'Speed Mode' & 'Dual-Channel Network' (Wi-Fi + 4G dual-channel) in game settings.",
             thermalRisk = "Low",
             suggestedAdbCommand = "cmd game mode performance com.mobile.legends"
         ),

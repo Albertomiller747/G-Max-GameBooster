@@ -70,7 +70,7 @@ object ControllerInputPassThroughService {
  *    when direct USB permission is available.
  */
 object GamepadRawEventBridge {
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO + com.example.util.AppCrashGuard.coroutineExceptionHandler)
 
     @Volatile
     private var readerJob: Job? = null
@@ -356,8 +356,8 @@ object GamepadRawEventBridge {
                 val hasKnownVendor = KNOWN_USB_GAMEPAD_VENDORS.any { v ->
                     lower.contains("vendor=$v")
                 }
-                val isUsbBus = lower.contains("bus=0003") // BUS_USB = 0x03
-                if (hasKnownVendor || (isUsbBus && (lower.contains("controller") || lower.contains("gamepad") || lower.contains("joystick")))) {
+                val isUsbOrBtBus = lower.contains("bus=0003") || lower.contains("bus=0005") // BUS_USB = 0x03, BUS_BLUETOOTH = 0x05
+                if (hasKnownVendor || (isUsbOrBtBus && (lower.contains("controller") || lower.contains("gamepad") || lower.contains("joystick")))) {
                     val match = Regex("event\\d+").find(block)
                     if (match != null) {
                         return "/dev/input/${match.value}"

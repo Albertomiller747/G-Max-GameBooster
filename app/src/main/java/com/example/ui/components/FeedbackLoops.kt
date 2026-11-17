@@ -236,7 +236,7 @@ fun InstantFeedbackBannerHost(
                         }
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = active.message,
+                            text = com.example.util.AppStrings.autoTranslateDynamic(active.message, com.example.util.currentAppLanguage()),
                             style = MaterialTheme.typography.labelMedium.copy(
                                 fontWeight = FontWeight.Bold,
                                 color = Color.White,

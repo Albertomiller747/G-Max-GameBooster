@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">G Max Gaming Hub</string>
+    <string name="app_name">GMAX Gaming Hub</string>
     <string name="tagline">Game Performance Engine</string>
     <string name="version_label">Version 1.0</string>
 
@@ -21,21 +21,21 @@
     <!-- Splash & Console Startup -->
     <string name="splash_press_home">Press the Home button on your controller, or tap below to enter</string>
     <string name="splash_log_in_console">Log In to Console</string>
-    <string name="splash_entering_hub">Entering G Max Gaming Hub...</string>
+    <string name="splash_entering_hub">Entering GMAX Gaming Hub...</string>
     <string name="splash_welcome_back">Welcome Back</string>
     <string name="splash_ready_launch">Ready to launch</string>
 
     <!-- Offline / Online Gate -->
     <string name="offline_gate_title">Internet Connection Required</string>
-    <string name="offline_gate_subtitle">Game Launcher and Normal Boost work offline. Connect to Wi-Fi or mobile data to access Recorder, Leaderboard, Extras, Beast Boost, and Account features.</string>
+    <string name="offline_gate_subtitle">Game Launcher and Focus Mode work offline. Connect to Wi-Fi or mobile data to access Recorder, Leaderboard, Extras, and Account features.</string>
     <string name="offline_gate_retry">Retry Connection</string>
     <string name="offline_gate_back_launcher">Go to Offline Launcher</string>
-    <string name="offline_mode_badge">Offline Mode: Launcher &amp; Normal Boost Active</string>
+    <string name="offline_mode_badge">Offline Mode: Launcher &amp; Focus Mode Active</string>
 
-    <!-- Launcher & Boost -->
-    <string name="launcher_normal_boost">Normal Boost</string>
-    <string name="launcher_beast_boost">Beast Boost</string>
-    <string name="launcher_boost_memory">Boost Memory</string>
+    <!-- Launcher & Focus Mode -->
+    <string name="launcher_normal_boost">Focus Mode</string>
+    <string name="launcher_beast_boost">Focus Mode</string>
+    <string name="launcher_boost_memory">Optimize Memory</string>
     <string name="launcher_launch_game">Launch</string>
     <string name="launcher_add_games">Add Games</string>
     <string name="launcher_search_games">Search games...</string>
@@ -54,7 +54,7 @@
     <string name="leaderboard_empty_title">No Verified Players Ranked Yet</string>
     <string name="leaderboard_empty_subtitle">Sign in with Google or Facebook to claim your rank on the Top 100 Leaderboard.</string>
 
-    <!-- AdMob Labels -->
+    <!-- Unity Ads Labels -->
     <string name="ad_badge_label">Ad</string>
     <string name="ad_sponsored_label">Sponsored</string>
     <string name="ad_reward_unlock_title">Unlock Custom RGB &amp; Overlay (24h)</string>
@@ -62,6 +62,6 @@
     <string name="ad_reward_unlocked_active">Pro Controller RGB &amp; Overlay Unlocked</string>
 
     <!-- Real-Time Controller Input Pass-Through Service -->
-    <string name="controller_passthrough_service_label">G Max Controller Overlay Pass-Through</string>
-    <string name="controller_passthrough_service_desc">Allows the G Max Gaming Hub floating controller overlay to highlight your controller buttons and triggers in real time while you play games, without blocking game input.</string>
+    <string name="controller_passthrough_service_label">GMAX Controller Overlay Pass-Through</string>
+    <string name="controller_passthrough_service_desc">Allows the GMAX Gaming Hub floating controller overlay to highlight your controller buttons and triggers in real time while you play games, without blocking game input.</string>
 </resources>

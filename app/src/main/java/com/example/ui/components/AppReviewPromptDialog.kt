@@ -77,12 +77,12 @@ fun AppReviewPromptDialog(
 
     val badgeText = when (triggerSource) {
         ReviewTriggerSource.BOOST_30_MIN_MILESTONE -> AppStrings.trText(
-            en = "30+ MIN BOOST MILESTONE",
-            es = "META DE 30+ MIN CON IMPULSO",
-            ptBr = "MARCO DE 30+ MIN DE IMPULSO",
-            id = "MILESTONE BOOST 30+ MENIT",
-            vi = "CỘT MỐC 30+ PHÚT TĂNG TỐC",
-            tl = "30+ MIN BOOST MILESTONE"
+            en = "30+ MIN FOCUS MILESTONE",
+            es = "META DE 30+ MIN EN ENFOQUE",
+            ptBr = "MARCO DE 30+ MIN DE FOCO",
+            id = "MILESTONE FOKUS 30+ MENIT",
+            vi = "CỘT MỐC 30+ PHÚT TẬP TRUNG",
+            tl = "30+ MIN FOCUS MILESTONE"
         )
         ReviewTriggerSource.SCREEN_RECORDING_STOPPED -> AppStrings.trText(
             en = "RECORDING SAVED",
@@ -93,12 +93,12 @@ fun AppReviewPromptDialog(
             tl = "NA-SAVE ANG RECORDING"
         )
         else -> AppStrings.trText(
-            en = "BOOST SESSION COMPLETE",
-            es = "SESIÓN DE IMPULSO COMPLETADA",
-            ptBr = "SESSÃO DE IMPULSO CONCLUÍDA",
-            id = "SESI BOOST SELESAI",
-            vi = "HOÀN TẤT PHIÊN TĂNG TỐC",
-            tl = "TAPOS NA ANG BOOST SESSION"
+            en = "FOCUS SESSION COMPLETE",
+            es = "SESIÓN DE ENFOQUE COMPLETADA",
+            ptBr = "SESSÃO DE FOCO CONCLUÍDA",
+            id = "SESI FOKUS SELESAI",
+            vi = "HOÀN TẤT PHIÊN TẬP TRUNG",
+            tl = "TAPOS NA ANG FOCUS SESSION"
         )
     }
 
@@ -121,20 +121,20 @@ fun AppReviewPromptDialog(
             tl = "Na-save na ang gameplay recording mo! Mag-tap ng star sa ibaba para i-rate ang GMAX sa Google Play."
         )
         ReviewTriggerSource.BOOST_30_MIN_MILESTONE -> AppStrings.trText(
-            en = "You've gamed with GMAX Boost for over 30 minutes! Tap a star below to leave a review on Google Play.",
-            es = "¡Has jugado con GMAX Boost por más de 30 minutos! Toca una estrella para dejar tu reseña en Google Play.",
-            ptBr = "Você jogou com o GMAX Boost por mais de 30 minutos! Toque em uma estrela para deixar sua avaliação na Google Play.",
-            id = "Anda telah bermain dengan GMAX Boost lebih dari 30 menit! Ketuk bintang untuk memberi ulasan di Google Play.",
-            vi = "Bạn đã sử dụng GMAX Boost hơn 30 phút! Chạm vào sao bên dưới để để lại đánh giá trên Google Play.",
-            tl = "Mahigit 30 minuto ka nang gumagamit ng GMAX Boost! Mag-tap ng star para mag-iwan ng review sa Google Play."
+            en = "You've gamed with GMAX Focus Mode for over 30 minutes! Tap a star below to leave a review on Google Play.",
+            es = "¡Has jugado con GMAX Modo Enfoque por más de 30 minutos! Toca una estrella para dejar tu reseña en Google Play.",
+            ptBr = "Você jogou com o Modo Foco do GMAX por mais de 30 minutos! Toque em uma estrela para deixar sua avaliação na Google Play.",
+            id = "Anda telah bermain dengan Mode Fokus GMAX lebih dari 30 menit! Ketuk bintang untuk memberi ulasan di Google Play.",
+            vi = "Bạn đã sử dụng Chế độ Tập trung GMAX hơn 30 phút! Chạm vào sao bên dưới để để lại đánh giá trên Google Play.",
+            tl = "Mahigit 30 minuto ka nang gumagamit ng GMAX Focus Mode! Mag-tap ng star para mag-iwan ng review sa Google Play."
         )
         else -> AppStrings.trText(
-            en = "Your boost session kept RAM clean and frame rates locked! Tap a star below to rate GMAX on Google Play.",
+            en = "Your focus session kept RAM clean and frame rates locked! Tap a star below to rate GMAX on Google Play.",
             es = "¡Tu sesión mantuvo la RAM limpia y los FPS estables! Toca una estrella para calificar a GMAX en Google Play.",
             ptBr = "Sua sessão manteve a RAM limpa e os FPS estáveis! Toque em uma estrela para avaliar o GMAX na Google Play.",
-            id = "Sesi boost menjaga RAM bersih dan FPS stabil! Ketuk bintang di bawah untuk mengulas GMAX di Google Play.",
-            vi = "Phiên tăng tốc đã dọn sạch RAM và giữ FPS ổn định! Chạm vào sao bên dưới để đánh giá GMAX trên Google Play.",
-            tl = "Napanatiling malinis ang RAM at stable ang FPS sa iyong boost session! I-rate ang GMAX sa Google Play."
+            id = "Sesi fokus menjaga RAM bersih dan FPS stabil! Ketuk bintang di bawah untuk mengulas GMAX di Google Play.",
+            vi = "Phiên tập trung đã dọn sạch RAM và giữ FPS ổn định! Chạm vào sao bên dưới để đánh giá GMAX trên Google Play.",
+            tl = "Napanatiling malinis ang RAM at stable ang FPS sa iyong focus session! I-rate ang GMAX sa Google Play."
         )
     }
 

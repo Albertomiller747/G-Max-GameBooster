@@ -109,15 +109,19 @@ fun TouchTab(
     var lastMotionTimestampMs by remember { mutableLongStateOf(0L) }
     val recentDeltas = remember { mutableStateListOf<Long>() }
 
-    LazyColumn(
-        modifier = modifier
-            .fillMaxSize()
-            .testTag("touch_tab_container"),
-        userScrollEnabled = !isTouching,
-        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp, vertical = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
+    Column(
+        modifier = modifier.fillMaxSize()
     ) {
-        // 1. Phone Touch Pipeline Latency Test (Strictly ZERO ads on this screen per AdMob policy)
+        LazyColumn(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth()
+                .testTag("touch_tab_container"),
+            userScrollEnabled = !isTouching,
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            // 1. Phone Touch Pipeline Latency Test
         item {
             CyberCard(borderColor = HubBlue.copy(alpha = 0.5f)) {
                 SectionTitle(
@@ -159,25 +163,25 @@ fun TouchTab(
                 ) {
                     TouchMetricBox(
                         modifier = Modifier.weight(1f),
-                        label = "CURRENT",
+                        label = com.example.util.tr("CURRENT", "ACTUAL"),
                         value = if (currentPipelineLatencyMs > 0) "${currentPipelineLatencyMs}ms" else "--",
                         accent = if (currentPipelineLatencyMs <= 8) LaunchGreen else if (currentPipelineLatencyMs <= 16) HubBlue else SolarGold
                     )
                     TouchMetricBox(
                         modifier = Modifier.weight(1f),
-                        label = "AVERAGE",
+                        label = com.example.util.tr("AVERAGE", "PROMEDIO"),
                         value = if (averagePipelineLatencyMs > 0) String.format(Locale.US, "%.1fms", averagePipelineLatencyMs) else "--",
                         accent = HubBlue
                     )
                     TouchMetricBox(
                         modifier = Modifier.weight(1f),
-                        label = "BEST (MIN)",
+                        label = com.example.util.tr("BEST (MIN)", "MEJOR (MÍN)"),
                         value = if (minPipelineLatencyMs != Long.MAX_VALUE) "${minPipelineLatencyMs}ms" else "--",
                         accent = LaunchGreen
                     )
                     TouchMetricBox(
                         modifier = Modifier.weight(1f),
-                        label = "MAX",
+                        label = com.example.util.tr("MAX", "MÁX"),
                         value = if (maxPipelineLatencyMs > 0) "${maxPipelineLatencyMs}ms" else "--",
                         accent = if (maxPipelineLatencyMs > 25) ElectricCrimson else SolarGold
                     )
@@ -186,7 +190,10 @@ fun TouchTab(
                 Spacer(modifier = Modifier.height(14.dp))
 
                 Text(
-                    text = "Tap or drag your finger below to benchmark your touch response:",
+                    text = com.example.util.tr(
+                        "Tap or drag your finger below to benchmark your touch response:",
+                        "Toca o desliza tu dedo abajo para medir tu respuesta táctil:"
+                    ),
                     style = MaterialTheme.typography.labelSmall.copy(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         fontWeight = FontWeight.Bold
@@ -362,7 +369,11 @@ fun TouchTab(
                             .padding(horizontal = 10.dp, vertical = 4.dp)
                     ) {
                         Text(
-                            text = if (peakSamplingRateHz >= 240) "240Hz+ GAMING GRADE" else if (peakSamplingRateHz >= 120) "120Hz HIGH SPEED" else "STANDBY",
+                            text = when {
+                                peakSamplingRateHz >= 240 -> com.example.util.tr("240Hz+ GAMING GRADE", "240Hz+ NIVEL GAMER")
+                                peakSamplingRateHz >= 120 -> com.example.util.tr("120Hz HIGH SPEED", "120Hz ALTA VELOCIDAD")
+                                else -> com.example.util.tr("STANDBY", "EN ESPERA")
+                            },
                             color = LaunchGreen,
                             fontSize = 10.sp,
                             fontWeight = FontWeight.Bold,
@@ -387,14 +398,14 @@ fun TouchTab(
                     ) {
                         Column {
                             Text(
-                                "LIVE DIGITIZER RATE",
+                                com.example.util.tr("LIVE DIGITIZER RATE", "TASA EN VIVO"),
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 fontSize = 10.sp,
                                 fontWeight = FontWeight.Bold
                             )
                             Spacer(modifier = Modifier.height(6.dp))
                             Text(
-                                text = if (liveSamplingRateHz > 0) "${liveSamplingRateHz} Hz" else "Touch to read",
+                                text = if (liveSamplingRateHz > 0) "${liveSamplingRateHz} Hz" else com.example.util.tr("Touch to read", "Toca para medir"),
                                 color = HubBlue,
                                 fontSize = 22.sp,
                                 fontWeight = FontWeight.Bold,
@@ -413,7 +424,7 @@ fun TouchTab(
                     ) {
                         Column {
                             Text(
-                                "PEAK DETECTED",
+                                com.example.util.tr("PEAK DETECTED", "PICO DETECTADO"),
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 fontSize = 10.sp,
                                 fontWeight = FontWeight.Bold
@@ -433,7 +444,10 @@ fun TouchTab(
                 Spacer(modifier = Modifier.height(10.dp))
 
                 Text(
-                    text = "Reads consecutive MotionEvent hardware timestamps directly from the input digitizer IC. Higher polling rates (180Hz - 480Hz) provide near-instantaneous flick & aiming responsiveness in mobile shooter titles.",
+                    text = com.example.util.tr(
+                        "Reads consecutive MotionEvent hardware timestamps directly from the input digitizer IC. Higher polling rates (180Hz to 480Hz) provide fast flick & aiming responsiveness in mobile shooter titles.",
+                        "Lee marcas de tiempo consecutivas de hardware directamente del circuito digitalizador táctil. Tasas más altas (180Hz a 480Hz) brindan respuesta instantánea de puntería en juegos competitivos."
+                    ),
                     style = MaterialTheme.typography.bodySmall.copy(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         fontSize = 11.sp
@@ -446,8 +460,8 @@ fun TouchTab(
         item {
             CyberCard(borderColor = if (isDndActive) LaunchGreen else MaterialTheme.colorScheme.outline) {
                 SectionTitle(
-                    title = "Priority Do Not Disturb Filter",
-                    subtitle = "Blocks intrusive calls and notifications during gameplay"
+                    title = com.example.util.tr("Priority Do Not Disturb Filter", "Filtro Prioritario No Molestar"),
+                    subtitle = com.example.util.tr("Blocks intrusive calls and notifications during gameplay", "Bloquea llamadas y notificaciones intrusivas durante tus partidas")
                 )
 
                 Spacer(modifier = Modifier.height(10.dp))
@@ -466,13 +480,19 @@ fun TouchTab(
                             Spacer(modifier = Modifier.width(8.dp))
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(
-                                    text = "Requires Notification Policy Access permission",
+                                    text = com.example.util.tr(
+                                        "Requires Notification Policy Access permission",
+                                        "Requiere permiso de Acceso a Política de Notificaciones"
+                                    ),
                                     color = SolarGold,
                                     fontWeight = FontWeight.Bold,
                                     fontSize = 11.sp
                                 )
                                 Text(
-                                    text = "Tap to grant DND access in system settings.",
+                                    text = com.example.util.tr(
+                                        "Tap to grant DND access in system settings.",
+                                        "Toca para conceder acceso a No Molestar en ajustes del sistema."
+                                    ),
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     fontSize = 10.sp
                                 )
@@ -482,7 +502,7 @@ fun TouchTab(
                                 colors = ButtonDefaults.buttonColors(containerColor = SolarGold, contentColor = Color.Black),
                                 shape = RoundedCornerShape(8.dp)
                             ) {
-                                Text("GRANT", color = Color.Black, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                Text(com.example.util.tr("GRANT", "PERMITIR"), color = Color.Black, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                             }
                         }
                     }
@@ -509,14 +529,24 @@ fun TouchTab(
                         Spacer(modifier = Modifier.width(10.dp))
                         Column {
                             Text(
-                                text = "Priority Gaming DND",
+                                text = com.example.util.tr("Priority Gaming DND", "Modo No Molestar Prioritario"),
                                 style = MaterialTheme.typography.titleSmall.copy(
                                     fontWeight = FontWeight.Bold,
                                     color = MaterialTheme.colorScheme.onSurface
                                 )
                             )
                             Text(
-                                text = if (isDndActive) "ACTIVE: Media audio unmuted, notifications muted" else "INACTIVE: Standard notification alerts",
+                                text = if (isDndActive) {
+                                    com.example.util.tr(
+                                        "ACTIVE: Media audio unmuted, notifications muted",
+                                        "ACTIVO: Audio multimedia activo, notificaciones silenciadas"
+                                    )
+                                } else {
+                                    com.example.util.tr(
+                                        "INACTIVE: Standard notification alerts",
+                                        "INACTIVO: Alertas de notificación estándar"
+                                    )
+                                },
                                 style = MaterialTheme.typography.bodySmall.copy(
                                     color = if (isDndActive) LaunchGreen else MaterialTheme.colorScheme.onSurfaceVariant,
                                     fontSize = 11.sp
@@ -557,15 +587,20 @@ fun TouchTab(
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(Icons.Default.CheckCircle, contentDescription = null, tint = HubBlue, modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(8.dp))
+                        val activeDndLang = com.example.util.currentAppLanguage()
+                        val localizedFilterDesc = com.example.util.AppStrings.autoTranslateDynamic(savedFilterDesc, activeDndLang)
                         Column {
                             Text(
-                                text = "Auto-Restore Guarantee:",
+                                text = com.example.util.tr("Auto-Restore Guarantee:", "Garantía de Restauración Automática:"),
                                 color = MaterialTheme.colorScheme.onSurface,
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 11.sp
                             )
                             Text(
-                                text = "Previous user setting: $savedFilterDesc. Automatically restored when Priority DND is toggled off or when your gaming overlay session finishes.",
+                                text = com.example.util.tr(
+                                    "Previous user setting: $localizedFilterDesc. Automatically restored when Priority DND is toggled off or when your gaming overlay session finishes.",
+                                    "Ajuste anterior: $localizedFilterDesc. Se restaura automáticamente al desactivar No Molestar Prioritario o al terminar la sesión."
+                                ),
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 fontSize = 10.sp
                             )
@@ -574,6 +609,15 @@ fun TouchTab(
                 }
             }
         }
+        }
+
+        // Anchored Unity Banner pinned to the bottom of the Touch tab
+        com.example.ui.components.GMaxUnityAnchoredBanner(
+            placementTag = "touch_anchored_bottom",
+            topBuffer = 8.dp,
+            initialLoadDelayMs = 250L,
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+        )
     }
 }
 

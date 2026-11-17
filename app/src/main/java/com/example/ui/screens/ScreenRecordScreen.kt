@@ -46,6 +46,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.ContentCut
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Fullscreen
@@ -118,8 +119,14 @@ import com.example.model.GameMediaGroup
 import com.example.model.RecordedVideo
 import com.example.model.ResolutionPreset
 import com.example.model.VideoQualitySettings
+import com.example.service.BlackoutPresetType
 import com.example.service.ScreenRecordOverlayService
 import com.example.service.ScreenRecordingService
+import com.example.service.StreamerBlackoutOverlayService
+import com.example.service.StreamerBlackoutState
+import com.example.ui.components.LocalClipTrimmerModalDialog
+import com.example.ui.components.StreamerBlackoutQuickBar
+import com.example.ui.components.StreamerBlackoutSettingsCard
 import com.example.ui.theme.HubBlue
 import com.example.ui.theme.LaunchGreen
 import com.example.ui.theme.RecorderCoral
@@ -162,17 +169,100 @@ fun ScreenRecordScreen(
     var screenshots by remember { mutableStateOf(emptyList<CapturedScreenshot>()) }
 
     var selectedVideoForPlayback by remember { mutableStateOf<RecordedVideo?>(null) }
+    var selectedVideoForTrimming by remember { mutableStateOf<RecordedVideo?>(null) }
     var videoToDelete by remember { mutableStateOf<RecordedVideo?>(null) }
     var selectedScreenshotForPreview by remember { mutableStateOf<CapturedScreenshot?>(null) }
+    var selectedScreenshotForEdit by remember { mutableStateOf<CapturedScreenshot?>(null) }
     var screenshotToDelete by remember { mutableStateOf<CapturedScreenshot?>(null) }
     var userMessage by remember { mutableStateOf<String?>(null) }
 
-    // State from ScreenRecordingService
+    // State from ScreenRecordingService & StreamerBlackoutOverlayService
     val isRecording by ScreenRecordingService.isRecording.collectAsState()
     val recordingSeconds by ScreenRecordingService.recordingSeconds.collectAsState()
     val activeAudioMode by ScreenRecordingService.activeAudioMode.collectAsState()
     val lastSavedUri by ScreenRecordingService.lastSavedVideoUri.collectAsState()
     val lastScreenshotUri by ScreenRecordingService.lastSavedScreenshotUri.collectAsState()
+    val blackoutState by StreamerBlackoutOverlayService.state.collectAsState()
+
+    LaunchedEffect(Unit) {
+        StreamerBlackoutOverlayService.loadState(context)
+        com.example.util.InstantReplayBufferManager.init(context)
+    }
+
+    fun ensureOverlayPermissionOrPrompt(): Boolean {
+        if (Settings.canDrawOverlays(context)) return true
+        try {
+            context.startActivity(
+                Intent(
+                    Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                    Uri.parse("package:${context.packageName}")
+                )
+            )
+        } catch (_: Exception) {}
+        userMessage = com.example.util.AppStrings.trText(
+            "Grant 'Display over other apps' permission to spawn Streamer Blackout Boxes",
+            "Concede el permiso 'Mostrar sobre otras apps' para usar Cajas Negras"
+        )
+        return false
+    }
+
+    val handleToggleBlackout: (Boolean) -> Unit = { enable ->
+        if (!enable || ensureOverlayPermissionOrPrompt()) {
+            val st = StreamerBlackoutOverlayService.setEnabled(context, enable)
+            userMessage = if (st.isEnabled) {
+                com.example.util.AppStrings.trText(
+                    "Streamer Blackout Boxes active (${st.boxes.size} shield(s)). Locks on Record.",
+                    "Cajas Negras activas (${st.boxes.size} escudo(s)). Se bloquean al Grabar."
+                )
+            } else {
+                com.example.util.AppStrings.trText(
+                    "Streamer Blackout Boxes hidden",
+                    "Cajas Negras ocultas"
+                )
+            }
+        }
+    }
+
+    val handleSpawnBlackoutPreset: (BlackoutPresetType) -> Unit = { preset ->
+        if (ensureOverlayPermissionOrPrompt()) {
+            val st = StreamerBlackoutOverlayService.spawnPresetBox(context, preset)
+            userMessage = com.example.util.AppStrings.trText(
+                "Spawned ${preset.boxLabel} (${st.boxes.size}/${StreamerBlackoutOverlayService.MAX_BOX_COUNT}). Drag or resize on screen.",
+                "Creado ${preset.boxLabel} (${st.boxes.size}/${StreamerBlackoutOverlayService.MAX_BOX_COUNT}). Arrastra o cambia su tamaño."
+            )
+        }
+    }
+
+    val handleToggleBlackoutManualLock: (Boolean) -> Unit = { locked ->
+        StreamerBlackoutOverlayService.setManualTouchLocked(context, locked)
+        userMessage = if (locked) {
+            com.example.util.AppStrings.trText(
+                "Blackout Boxes touch locked: 100% of taps now pass through to your game",
+                "Cajas Negras bloqueadas: el 100% de los toques pasan al juego"
+            )
+        } else {
+            com.example.util.AppStrings.trText(
+                "Blackout Boxes unlocked for dragging and resizing",
+                "Cajas Negras desbloqueadas para mover y redimensionar"
+            )
+        }
+    }
+
+    val handleToggleBlackoutPureBlack: (Boolean) -> Unit = { pure ->
+        StreamerBlackoutOverlayService.setPurePitchBlack(context, pure)
+    }
+
+    val handleRemoveBlackoutBox: (String) -> Unit = { boxId ->
+        StreamerBlackoutOverlayService.removeBox(context, boxId)
+    }
+
+    val handleClearAllBlackoutBoxes: () -> Unit = {
+        StreamerBlackoutOverlayService.clearAllBoxes(context)
+        userMessage = com.example.util.AppStrings.trText(
+            "Cleared all Streamer Blackout Boxes",
+            "Se eliminaron todas las Cajas Negras"
+        )
+    }
 
     // Query device supported options
     val supportedResolutions = remember(context) { ScreenRecordingManager.getSupportedResolutions(context) }
@@ -292,27 +382,11 @@ fun ScreenRecordScreen(
                     }
                 }
 
-                // Right side quick actions: Restore Previous Captures + Floating Bubble toggle
+                // Right side quick actions: Floating Bubble toggle
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    IconButton(
-                        onClick = {
-                            restoreCapturesLauncher.launch(arrayOf("video/*", "image/*"))
-                        },
-                        modifier = Modifier
-                            .size(36.dp)
-                            .testTag("recorder_restore_captures_header_button")
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Refresh,
-                            contentDescription = "Restore Previous Captures",
-                            tint = HubBlue,
-                            modifier = Modifier.size(20.dp)
-                        )
-                    }
-
                     // Docked Recorder Bubble quick toggle without gray box overlay
                     IconButton(
                         onClick = {
@@ -432,7 +506,13 @@ fun ScreenRecordScreen(
                 when (selectedTab) {
                     0 -> VideosTabContent(
                         recordings = recordings,
+                        blackoutState = blackoutState,
+                        onToggleBlackoutEnabled = handleToggleBlackout,
+                        onSpawnBlackoutPreset = handleSpawnBlackoutPreset,
+                        onToggleBlackoutManualLock = handleToggleBlackoutManualLock,
+                        onClearAllBlackoutBoxes = handleClearAllBlackoutBoxes,
                         onPlayVideo = { selectedVideoForPlayback = it },
+                        onTrimVideo = { selectedVideoForTrimming = it },
                         onSaveToGallery = { video ->
                             val saved = ScreenRecordingManager.saveVideoToGallery(context, video)
                             userMessage = if (saved) {
@@ -447,7 +527,7 @@ fun ScreenRecordScreen(
                                 )
                             }
                             if (saved) {
-                                com.example.util.AdMobManager.maybeTriggerPostActionAd(
+                                com.example.util.UnityAdsManager.maybeTriggerPostActionAd(
                                     context = context,
                                     actionLabelEn = "Video Saved",
                                     actionLabelEs = "Video Guardado"
@@ -468,6 +548,13 @@ fun ScreenRecordScreen(
                         onDeleteVideo = { videoToDelete = it },
                         onRestorePreviousVideos = {
                             restoreCapturesLauncher.launch(arrayOf("video/*"))
+                        },
+                        onReplaySaved = { replayResult ->
+                            refreshMediaLists()
+                            userMessage = com.example.util.AppStrings.trText(
+                                replayResult.messageEn,
+                                replayResult.messageEs
+                            )
                         }
                     )
 
@@ -485,6 +572,7 @@ fun ScreenRecordScreen(
                             }
                         },
                         onPreviewScreenshot = { selectedScreenshotForPreview = it },
+                        onEditScreenshot = { selectedScreenshotForEdit = it },
                         onShareScreenshot = { shot ->
                             val shareUri = ScreenRecordingManager.getScreenshotShareUri(context, shot)
                             if (shareUri != null) {
@@ -514,12 +602,12 @@ fun ScreenRecordScreen(
                             ScreenRecordingManager.setInAppRecorderEnabled(context, enable)
                             userMessage = if (enable) {
                                 com.example.util.AppStrings.trText(
-                                    "In-app screen recorder controls enabled",
+                                    "App screen recorder controls enabled",
                                     "Controles de grabación en la app activados"
                                 )
                             } else {
                                 com.example.util.AppStrings.trText(
-                                    "In-app Record button hidden (Floating Bubble can still be used independently)",
+                                    "App Record button hidden (Floating Bubble can still be used independently)",
                                     "Botón Grabar oculto (la Burbuja Flotante sigue independiente)"
                                 )
                             }
@@ -599,8 +687,17 @@ fun ScreenRecordScreen(
                             settings = optimal
                             ScreenRecordingManager.saveSettings(context, optimal)
                             viewModel.scheduleCloudSettingsSync()
-                            userMessage = "Auto-tuned to ${optimal.resolutionLabel} @ ${optimal.fps} FPS (${optimal.bitrateMbps} Mbps • ${optimal.audioSourceMode.label})"
-                        }
+                            userMessage = com.example.util.AppStrings.autoTranslateDynamic(
+                                "Tuned to ${optimal.resolutionLabel} @ ${optimal.fps} FPS (${optimal.bitrateMbps} Mbps • ${optimal.audioSourceMode.label})"
+                            )
+                        },
+                        blackoutState = blackoutState,
+                        onToggleBlackoutEnabled = handleToggleBlackout,
+                        onSpawnBlackoutPreset = handleSpawnBlackoutPreset,
+                        onToggleBlackoutManualLock = handleToggleBlackoutManualLock,
+                        onToggleBlackoutPureBlack = handleToggleBlackoutPureBlack,
+                        onRemoveBlackoutBox = handleRemoveBlackoutBox,
+                        onClearAllBlackoutBoxes = handleClearAllBlackoutBoxes
                     )
                 }
 
@@ -618,24 +715,14 @@ fun ScreenRecordScreen(
                                     "Gameplay recording saved to Videos!",
                                     "¡Grabación de partida guardada en Videos!"
                                 )
-                                com.example.util.AdMobManager.maybeTriggerPostActionAd(
+                                com.example.util.UnityAdsManager.maybeTriggerPostActionAd(
                                     context = context,
                                     actionLabelEn = "Screen Recording",
                                     actionLabelEs = "Grabación de Pantalla"
                                 )
                             } else {
-                                val needsAudioPerm = settings.audioSourceMode != AudioSourceMode.MUTE &&
-                                    ContextCompat.checkSelfPermission(
-                                        context,
-                                        Manifest.permission.RECORD_AUDIO
-                                    ) != PackageManager.PERMISSION_GRANTED
-                                if (needsAudioPerm) {
-                                    pendingAudioMode = settings.audioSourceMode
-                                    pendingRecordLaunchAfterPerm = true
-                                    audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
-                                } else {
-                                    onRequestMediaProjection()
-                                }
+                                settings = ScreenRecordingManager.loadSettings(context)
+                                onRequestMediaProjection()
                             }
                         },
                         shape = RoundedCornerShape(50),
@@ -707,7 +794,7 @@ fun ScreenRecordScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = storageInfo.availableGbText,
+                        text = com.example.util.AppStrings.autoTranslateDynamic(storageInfo.availableGbText),
                         style = MaterialTheme.typography.bodySmall.copy(
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             fontWeight = FontWeight.Medium,
@@ -715,7 +802,7 @@ fun ScreenRecordScreen(
                         )
                     )
                     Text(
-                        text = storageInfo.recordableTimeText,
+                        text = com.example.util.AppStrings.autoTranslateDynamic(storageInfo.recordableTimeText),
                         style = MaterialTheme.typography.bodySmall.copy(
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             fontWeight = FontWeight.Medium,
@@ -731,12 +818,37 @@ fun ScreenRecordScreen(
     selectedVideoForPlayback?.let { video ->
         VideoPlayerModalDialog(
             video = video,
+            onTrimClip = {
+                selectedVideoForPlayback = null
+                selectedVideoForTrimming = video
+            },
             onDismiss = {
                 selectedVideoForPlayback = null
-                com.example.util.AdMobManager.maybeTriggerPostActionAd(
+                com.example.util.UnityAdsManager.maybeTriggerPostActionAd(
                     context = context,
                     actionLabelEn = "Video Preview",
                     actionLabelEs = "Vista Previa de Video"
+                )
+            }
+        )
+    }
+
+    // Local Clip Trimmer Studio Modal
+    selectedVideoForTrimming?.let { video ->
+        LocalClipTrimmerModalDialog(
+            video = video,
+            onDismiss = { selectedVideoForTrimming = null },
+            onTrimCompleted = { trimResult ->
+                selectedVideoForTrimming = null
+                refreshMediaLists()
+                userMessage = com.example.util.AppStrings.trText(
+                    trimResult.messageEn,
+                    trimResult.messageEs
+                )
+                com.example.util.UnityAdsManager.maybeTriggerPostActionAd(
+                    context = context,
+                    actionLabelEn = "Clip Trimmed",
+                    actionLabelEs = "Clip Recortado"
                 )
             }
         )
@@ -771,7 +883,27 @@ fun ScreenRecordScreen(
     selectedScreenshotForPreview?.let { shot ->
         ScreenshotPreviewDialog(
             screenshot = shot,
+            onEditScreenshot = {
+                selectedScreenshotForPreview = null
+                selectedScreenshotForEdit = shot
+            },
             onDismiss = { selectedScreenshotForPreview = null }
+        )
+    }
+
+    // Screenshot Studio Editor Modal (Cut / Crop & 6 Gaming Color Filters)
+    selectedScreenshotForEdit?.let { shotToEdit ->
+        com.example.ui.components.ScreenshotEditorModalDialog(
+            screenshot = shotToEdit,
+            onEditSaved = { saveResult ->
+                selectedScreenshotForEdit = null
+                refreshMediaLists()
+                userMessage = com.example.util.AppStrings.trText(
+                    saveResult.messageEn,
+                    saveResult.messageEs
+                )
+            },
+            onDismiss = { selectedScreenshotForEdit = null }
         )
     }
 
@@ -779,8 +911,8 @@ fun ScreenRecordScreen(
     screenshotToDelete?.let { shot ->
         AlertDialog(
             onDismissRequest = { screenshotToDelete = null },
-            title = { Text("Delete Screenshot?") },
-            text = { Text("Remove '${shot.title}' from your Screenshots library?") },
+            title = { Text(com.example.util.tr("Delete Screenshot?", "¿Eliminar Captura?")) },
+            text = { Text(com.example.util.tr("Remove '${shot.title}' from your Screenshots library?", "¿Eliminar '${shot.title}' de tu biblioteca de capturas?")) },
             confirmButton = {
                 TextButton(
                     onClick = {
@@ -789,12 +921,12 @@ fun ScreenRecordScreen(
                         refreshMediaLists()
                     }
                 ) {
-                    Text("Delete", color = RecorderCoral, fontWeight = FontWeight.Bold)
+                    Text(com.example.util.tr("Delete", "Eliminar"), color = RecorderCoral, fontWeight = FontWeight.Bold)
                 }
             },
             dismissButton = {
                 TextButton(onClick = { screenshotToDelete = null }) {
-                    Text("Cancel")
+                    Text(com.example.util.tr("Cancel", "Cancelar"))
                 }
             }
         )
@@ -868,11 +1000,18 @@ private fun RecorderThreeTabStrip(
 @Composable
 private fun VideosTabContent(
     recordings: List<RecordedVideo>,
+    blackoutState: StreamerBlackoutState,
+    onToggleBlackoutEnabled: (Boolean) -> Unit,
+    onSpawnBlackoutPreset: (BlackoutPresetType) -> Unit,
+    onToggleBlackoutManualLock: (Boolean) -> Unit,
+    onClearAllBlackoutBoxes: () -> Unit,
     onPlayVideo: (RecordedVideo) -> Unit,
+    onTrimVideo: (RecordedVideo) -> Unit,
     onSaveToGallery: (RecordedVideo) -> Unit,
     onShareVideo: (RecordedVideo) -> Unit,
     onDeleteVideo: (RecordedVideo) -> Unit,
-    onRestorePreviousVideos: () -> Unit = {}
+    onRestorePreviousVideos: () -> Unit = {},
+    onReplaySaved: (com.example.util.InstantReplaySaveResult) -> Unit = {}
 ) {
     val context = LocalContext.current
     val groupedVideos = remember(recordings) {
@@ -897,7 +1036,7 @@ private fun VideosTabContent(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(horizontal = 20.dp),
-            contentPadding = PaddingValues(top = 36.dp, bottom = 110.dp),
+            contentPadding = PaddingValues(top = 14.dp, bottom = 110.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             item {
@@ -952,9 +1091,9 @@ private fun VideosTabContent(
                 }
             }
 
-            // Medium Native Ad placed right below the empty-state text (no bottom banner near the floating Record button)
+            // Unity Banner Card placed right below the empty-state text
             item {
-                com.example.ui.components.GMaxNativeAdCard(
+                com.example.ui.components.GMaxUnityBannerCard(
                     placementTag = "recorder_videos_empty",
                     topBuffer = 28.dp,
                     bottomBuffer = 36.dp
@@ -969,6 +1108,7 @@ private fun VideosTabContent(
             contentPadding = PaddingValues(top = 12.dp, bottom = 112.dp, start = 16.dp, end = 16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
+
             // Game Filter Chip Bar
             item {
                 GameMediaFilterBar(
@@ -1007,6 +1147,10 @@ private fun VideosTabContent(
                                 ConsoleHapticManager.playSelectClick(context)
                                 onPlayVideo(video)
                             },
+                            onTrim = {
+                                ConsoleHapticManager.playSelectClick(context)
+                                onTrimVideo(video)
+                            },
                             onSaveToGallery = {
                                 ConsoleHapticManager.playSelectClick(context)
                                 onSaveToGallery(video)
@@ -1022,10 +1166,10 @@ private fun VideosTabContent(
                         )
                     }
 
-                    // Insert a Medium Native Ad card after every 3 to 4 recorded video cards
+                    // Insert a Unity Banner Card after every 3 to 4 recorded video cards
                     if (currentIndex % 4 == 0) {
                         item(key = "recorder_native_ad_$currentIndex") {
-                            com.example.ui.components.GMaxNativeAdCard(
+                            com.example.ui.components.GMaxUnityBannerCard(
                                 placementTag = "recorder_videos_feed_$currentIndex",
                                 topBuffer = 24.dp,
                                 bottomBuffer = 24.dp
@@ -1037,7 +1181,7 @@ private fun VideosTabContent(
 
             if (cumulativeVideoCount in 1..3) {
                 item(key = "recorder_native_ad_tail") {
-                    com.example.ui.components.GMaxNativeAdCard(
+                    com.example.ui.components.GMaxUnityBannerCard(
                         placementTag = "recorder_videos_tail",
                         topBuffer = 28.dp,
                         bottomBuffer = 32.dp
@@ -1200,6 +1344,7 @@ private fun GameMediaGroupHeader(
 private fun RecordedVideoItemCard(
     video: RecordedVideo,
     onPlay: () -> Unit,
+    onTrim: () -> Unit,
     onSaveToGallery: () -> Unit,
     onShare: () -> Unit,
     onDelete: () -> Unit
@@ -1259,8 +1404,8 @@ private fun RecordedVideoItemCard(
             // Thumbnail Preview with Play badge
             Box(
                 modifier = Modifier
-                    .width(110.dp)
-                    .height(66.dp)
+                    .width(102.dp)
+                    .height(64.dp)
                     .clip(RoundedCornerShape(10.dp))
                     .background(Color.Black),
                 contentAlignment = Alignment.Center
@@ -1275,7 +1420,7 @@ private fun RecordedVideoItemCard(
                 }
                 Box(
                     modifier = Modifier
-                        .size(30.dp)
+                        .size(28.dp)
                         .clip(CircleShape)
                         .background(RecorderCoral.copy(alpha = 0.88f)),
                     contentAlignment = Alignment.Center
@@ -1284,12 +1429,12 @@ private fun RecordedVideoItemCard(
                         imageVector = Icons.Default.PlayArrow,
                         contentDescription = "Play",
                         tint = Color.White,
-                        modifier = Modifier.size(18.dp)
+                        modifier = Modifier.size(16.dp)
                     )
                 }
             }
 
-            Spacer(modifier = Modifier.width(12.dp))
+            Spacer(modifier = Modifier.width(10.dp))
 
             Column(modifier = Modifier.weight(1f)) {
                 Text(
@@ -1316,7 +1461,21 @@ private fun RecordedVideoItemCard(
                 )
             }
 
-            IconButton(onClick = onSaveToGallery, modifier = Modifier.size(34.dp)) {
+            IconButton(
+                onClick = onTrim,
+                modifier = Modifier
+                    .size(32.dp)
+                    .testTag("trim_video_button_${video.id}")
+            ) {
+                Icon(
+                    imageVector = Icons.Default.ContentCut,
+                    contentDescription = "Trim Clip",
+                    tint = LaunchGreen,
+                    modifier = Modifier.size(18.dp)
+                )
+            }
+
+            IconButton(onClick = onSaveToGallery, modifier = Modifier.size(32.dp)) {
                 Icon(
                     imageVector = Icons.Default.Download,
                     contentDescription = "Save to Gallery",
@@ -1325,7 +1484,7 @@ private fun RecordedVideoItemCard(
                 )
             }
 
-            IconButton(onClick = onShare, modifier = Modifier.size(34.dp)) {
+            IconButton(onClick = onShare, modifier = Modifier.size(32.dp)) {
                 Icon(
                     imageVector = Icons.Default.Share,
                     contentDescription = "Share",
@@ -1334,7 +1493,7 @@ private fun RecordedVideoItemCard(
                 )
             }
 
-            IconButton(onClick = onDelete, modifier = Modifier.size(34.dp)) {
+            IconButton(onClick = onDelete, modifier = Modifier.size(32.dp)) {
                 Icon(
                     imageVector = Icons.Default.Delete,
                     contentDescription = "Delete",
@@ -1351,6 +1510,7 @@ private fun ScreenshotsTabContent(
     screenshots: List<CapturedScreenshot>,
     onCaptureScreenshot: () -> Unit,
     onPreviewScreenshot: (CapturedScreenshot) -> Unit,
+    onEditScreenshot: (CapturedScreenshot) -> Unit = {},
     onShareScreenshot: (CapturedScreenshot) -> Unit,
     onDeleteScreenshot: (CapturedScreenshot) -> Unit,
     onRestorePreviousScreenshots: () -> Unit = {}
@@ -1516,7 +1676,11 @@ private fun ScreenshotsTabContent(
                             gameName = group.gameName,
                             gamePackage = group.gamePackage,
                             itemCount = group.items.size,
-                            unitLabel = if (group.items.size == 1) "shot" else "shots"
+                            unitLabel = if (group.items.size == 1) {
+                                com.example.util.tr("shot", "captura")
+                            } else {
+                                com.example.util.tr("shots", "capturas")
+                            }
                         )
                     }
 
@@ -1620,6 +1784,20 @@ private fun ScreenshotsTabContent(
                                 IconButton(
                                     onClick = {
                                         ConsoleHapticManager.playSelectClick(context)
+                                        onEditScreenshot(shot)
+                                    },
+                                    modifier = Modifier.testTag("edit_screenshot_button_${shot.id}")
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.ContentCut,
+                                        contentDescription = "Edit Screenshot (Cut & Filter)",
+                                        tint = LaunchGreen
+                                    )
+                                }
+
+                                IconButton(
+                                    onClick = {
+                                        ConsoleHapticManager.playSelectClick(context)
                                         onShareScreenshot(shot)
                                     }
                                 ) {
@@ -1648,6 +1826,14 @@ private fun ScreenshotsTabContent(
                 }
             }
         }
+
+        // Anchored Unity Banner pinned to the bottom of the Screenshots tab
+        com.example.ui.components.GMaxUnityAnchoredBanner(
+            placementTag = "screenshots_anchored_bottom",
+            topBuffer = 8.dp,
+            initialLoadDelayMs = 250L,
+            modifier = Modifier.padding(top = 4.dp, bottom = 4.dp)
+        )
     }
 }
 
@@ -1664,7 +1850,14 @@ private fun RecorderSettingsTabContent(
     onRequestAudioPermissionForMode: (AudioSourceMode) -> Unit,
     onToggleOverlayBubble: (Boolean) -> Unit,
     onResetBubblePosition: () -> Unit,
-    onAutoConfigure: () -> Unit
+    onAutoConfigure: () -> Unit,
+    blackoutState: StreamerBlackoutState = StreamerBlackoutState(),
+    onToggleBlackoutEnabled: (Boolean) -> Unit = {},
+    onSpawnBlackoutPreset: (BlackoutPresetType) -> Unit = {},
+    onToggleBlackoutManualLock: (Boolean) -> Unit = {},
+    onToggleBlackoutPureBlack: (Boolean) -> Unit = {},
+    onRemoveBlackoutBox: (String) -> Unit = {},
+    onClearAllBlackoutBoxes: () -> Unit = {}
 ) {
     val context = LocalContext.current
 
@@ -1690,7 +1883,7 @@ private fun RecorderSettingsTabContent(
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = com.example.util.tr("Smart Encoder Auto-Tune", "Auto-Ajuste Inteligente del Codificador"),
+                            text = com.example.util.tr("Smart Encoder Tuning", "Ajuste Inteligente del Codificador"),
                             style = MaterialTheme.typography.titleSmall,
                             fontWeight = FontWeight.Bold,
                             color = MaterialTheme.colorScheme.onSurface
@@ -1723,7 +1916,7 @@ private fun RecorderSettingsTabContent(
                     ) {
                         Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text(com.example.util.tr("Auto-Tune", "Auto-Ajustar"), fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                        Text(com.example.util.tr("Smart Tune", "Ajustar"), fontWeight = FontWeight.Bold, fontSize = 12.sp)
                     }
                 }
             }
@@ -1801,7 +1994,7 @@ private fun RecorderSettingsTabContent(
                                         onUpdateSettings(settings.copy(fps = fps))
                                     }
                                 },
-                                label = { Text("$fps FPS") },
+                                label = { Text(com.example.util.AppStrings.autoTranslateDynamic("$fps FPS")) },
                                 colors = FilterChipDefaults.filterChipColors(
                                     selectedContainerColor = RecorderCoral.copy(alpha = 0.18f),
                                     selectedLabelColor = RecorderCoral
@@ -1882,7 +2075,7 @@ private fun RecorderSettingsTabContent(
                             Spacer(modifier = Modifier.width(12.dp))
                             Column {
                                 Text(
-                                    text = com.example.util.tr("In-App Screen Recorder Controls", "Controles de Grabación en la App"),
+                                    text = com.example.util.tr("App Screen Recorder Controls", "Controles de Grabación en la App"),
                                     fontWeight = FontWeight.Bold,
                                     color = MaterialTheme.colorScheme.onSurface
                                 )
@@ -1926,7 +2119,7 @@ private fun RecorderSettingsTabContent(
                                     color = MaterialTheme.colorScheme.onSurface
                                 )
                                 Text(
-                                    text = settings.audioSourceMode.description,
+                                    text = com.example.util.AppStrings.autoTranslateDynamic(settings.audioSourceMode.description),
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
@@ -1967,7 +2160,7 @@ private fun RecorderSettingsTabContent(
                                     },
                                     label = {
                                         Text(
-                                            text = mode.label,
+                                            text = com.example.util.AppStrings.autoTranslateDynamic(mode.label),
                                             fontWeight = if (isSelected) FontWeight.ExtraBold else FontWeight.Medium
                                         )
                                     },
@@ -2008,7 +2201,7 @@ private fun RecorderSettingsTabContent(
                             Spacer(modifier = Modifier.width(12.dp))
                             Column {
                                 Text(
-                                    text = com.example.util.tr("On-Screen Timer Pill", "Temporizador en Pantalla"),
+                                    text = com.example.util.tr("Screen Timer Pill", "Temporizador en Pantalla"),
                                     fontWeight = FontWeight.Bold,
                                     color = MaterialTheme.colorScheme.onSurface
                                 )
@@ -2175,12 +2368,26 @@ private fun RecorderSettingsTabContent(
                 }
             }
         }
+
+        // 4C. Streamer Blackout Boxes Settings Card (Anti-Stream Snipe Privacy Shields)
+        item {
+            StreamerBlackoutSettingsCard(
+                blackoutState = blackoutState,
+                onToggleEnabled = onToggleBlackoutEnabled,
+                onSpawnPreset = onSpawnBlackoutPreset,
+                onToggleManualLock = onToggleBlackoutManualLock,
+                onTogglePurePitchBlack = onToggleBlackoutPureBlack,
+                onRemoveBox = onRemoveBlackoutBox,
+                onClearAll = onClearAllBlackoutBoxes
+            )
+        }
     }
 }
 
 @Composable
 private fun ScreenshotPreviewDialog(
     screenshot: CapturedScreenshot,
+    onEditScreenshot: () -> Unit = {},
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
@@ -2242,13 +2449,41 @@ private fun ScreenshotPreviewDialog(
                     )
                 }
 
-                Spacer(modifier = Modifier.height(8.dp))
+                Spacer(modifier = Modifier.height(10.dp))
 
-                Text(
-                    text = "${screenshot.resolution} • ${screenshot.formattedSize}",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "${screenshot.resolution} • ${screenshot.formattedSize}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+
+                    OutlinedButton(
+                        onClick = onEditScreenshot,
+                        shape = RoundedCornerShape(10.dp),
+                        border = BorderStroke(1.dp, LaunchGreen),
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                        modifier = Modifier.testTag("preview_edit_screenshot_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.ContentCut,
+                            contentDescription = null,
+                            tint = LaunchGreen,
+                            modifier = Modifier.size(15.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = com.example.util.tr("Cut & Color Filter", "Recortar y Filtro"),
+                            color = LaunchGreen,
+                            fontSize = 11.5.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
             }
         }
     }
@@ -2263,6 +2498,7 @@ private fun ScreenshotPreviewDialog(
 @Composable
 fun VideoPlayerModalDialog(
     video: RecordedVideo,
+    onTrimClip: (() -> Unit)? = null,
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
@@ -2406,6 +2642,33 @@ fun VideoPlayerModalDialog(
                     }
 
                     Row(verticalAlignment = Alignment.CenterVertically) {
+                        if (onTrimClip != null) {
+                            TextButton(
+                                onClick = {
+                                    try {
+                                        mediaPlayerRef.value?.pause()
+                                    } catch (_: Exception) {}
+                                    onTrimClip()
+                                },
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                                modifier = Modifier.testTag("video_player_trim_clip_button")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.ContentCut,
+                                    contentDescription = "Trim Clip",
+                                    tint = LaunchGreen,
+                                    modifier = Modifier.size(15.dp)
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    text = com.example.util.tr("TRIM", "RECORTAR"),
+                                    color = LaunchGreen,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.ExtraBold
+                                )
+                            }
+                        }
+
                         TextButton(
                             onClick = {
                                 isFillCrop = !isFillCrop
@@ -2415,7 +2678,7 @@ fun VideoPlayerModalDialog(
                             modifier = Modifier.testTag("video_player_fit_fill_toggle")
                         ) {
                             Text(
-                                text = if (isFillCrop) "FILL" else "FIT",
+                                text = if (isFillCrop) com.example.util.tr("FILL", "LLENAR") else com.example.util.tr("FIT", "AJUSTAR"),
                                 color = HubBlue,
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.ExtraBold

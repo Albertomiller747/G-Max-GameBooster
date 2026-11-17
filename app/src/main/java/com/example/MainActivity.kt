@@ -41,6 +41,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.CloudDone
+import androidx.compose.material.icons.filled.EmojiEvents
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.RocketLaunch
@@ -118,6 +119,58 @@ class MainActivity : ComponentActivity() {
     private var selectedHubTabIndex by mutableIntStateOf(0)
     private var isShowingSplashScreen by mutableStateOf(false)
 
+    private fun isAdServicesIntent(intent: Intent?): Boolean {
+        if (intent == null) return false
+        val action = intent.action.orEmpty()
+        val pkg = intent.`package`.orEmpty()
+        val componentClass = intent.component?.className.orEmpty()
+        return action.startsWith("android.adservices.") ||
+            action.contains("MEASUREMENT_SERVICE", ignoreCase = true) ||
+            pkg.contains("adservices", ignoreCase = true) ||
+            componentClass.startsWith("android.adservices.")
+    }
+
+    override fun getSystemServiceName(serviceClass: Class<*>): String? {
+        if (serviceClass.name.startsWith("android.adservices.")) {
+            return null
+        }
+        return super.getSystemServiceName(serviceClass)
+    }
+
+    override fun getSystemService(name: String): Any? {
+        if (name.contains("adservices", ignoreCase = true) || name == "measurement") {
+            return null
+        }
+        val service = super.getSystemService(name)
+        if (service != null && service.javaClass.name.startsWith("android.adservices.")) {
+            return null
+        }
+        return service
+    }
+
+    override fun bindService(
+        service: Intent,
+        conn: android.content.ServiceConnection,
+        flags: Int
+    ): Boolean {
+        if (isAdServicesIntent(service)) {
+            return false
+        }
+        return super.bindService(service, conn, flags)
+    }
+
+    override fun bindService(
+        service: Intent,
+        flags: Int,
+        executor: java.util.concurrent.Executor,
+        conn: android.content.ServiceConnection
+    ): Boolean {
+        if (isAdServicesIntent(service)) {
+            return false
+        }
+        return super.bindService(service, flags, executor, conn)
+    }
+
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
@@ -126,25 +179,34 @@ class MainActivity : ComponentActivity() {
 
     private fun handleIncomingIntent(intent: Intent?) {
         if (intent == null) return
-        if (intent.getBooleanExtra("extra_trigger_recording", false)) {
-            triggerRecordingFromIntent = true
-            intent.removeExtra("extra_trigger_recording")
-        }
-        if (intent.getBooleanExtra("extra_trigger_screenshot", false)) {
-            triggerScreenshotFromIntent = true
-            intent.removeExtra("extra_trigger_screenshot")
-        }
-        val openTab = intent.getStringExtra("extra_open_tab")
-        if (!openTab.isNullOrEmpty()) {
-            requestedTabFromIntent = openTab
-            requestedRecorderSubTab = intent.getIntExtra("extra_recorder_subtab", 0)
-            requestedExtrasSubTab = intent.getIntExtra("extra_extras_subtab", 0)
-            intent.removeExtra("extra_open_tab")
-        }
-        if (intent.getBooleanExtra("extra_open_review_prompt", false)) {
-            com.example.util.AppReviewManager.onReviewNotificationTapped(this)
-            intent.removeExtra("extra_open_review_prompt")
-        }
+        try {
+            if (intent.getBooleanExtra("extra_trigger_recording", false)) {
+                triggerRecordingFromIntent = true
+                intent.removeExtra("extra_trigger_recording")
+            }
+            if (intent.getBooleanExtra("extra_trigger_screenshot", false)) {
+                triggerScreenshotFromIntent = true
+                intent.removeExtra("extra_trigger_screenshot")
+            }
+            val openTabStr = intent.getStringExtra("extra_open_tab")
+            val openTabInt = intent.getIntExtra("extra_open_tab", -1)
+            val resolvedOpenTab = when {
+                !openTabStr.isNullOrEmpty() -> openTabStr
+                openTabInt == 1 -> "RECORD"
+                openTabInt == 0 -> "LAUNCHER"
+                else -> null
+            }
+            if (!resolvedOpenTab.isNullOrEmpty()) {
+                requestedTabFromIntent = resolvedOpenTab
+                requestedRecorderSubTab = intent.getIntExtra("extra_recorder_subtab", 0)
+                requestedExtrasSubTab = intent.getIntExtra("extra_extras_subtab", 0)
+                intent.removeExtra("extra_open_tab")
+            }
+            if (intent.getBooleanExtra("extra_open_review_prompt", false)) {
+                com.example.util.AppReviewManager.onReviewNotificationTapped(this)
+                intent.removeExtra("extra_open_review_prompt")
+            }
+        } catch (_: Exception) {}
     }
 
     override fun onResume() {
@@ -270,17 +332,31 @@ class MainActivity : ComponentActivity() {
             }
         }
 
+        // When the user is inside the Controller Studio (Extras > Controller or Controls Overlay),
+        // consume gamepad face/shoulder/mode buttons directly for live controller testing so pressing
+        // B, X, Y, L1, or R1 never switches tabs, launches a game, or starts screen recording.
+        if (com.example.util.ControllerHealthManager.isControllerStudioActive) {
+            if (KeyEvent.isGamepadButton(event.keyCode) ||
+                event.keyCode == KeyEvent.KEYCODE_BUTTON_MODE
+            ) {
+                return true
+            }
+        }
+
         if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
             when (event.keyCode) {
-                KeyEvent.KEYCODE_BUTTON_MODE,
-                KeyEvent.KEYCODE_HOME -> {
+                KeyEvent.KEYCODE_BUTTON_MODE -> {
                     com.example.util.ConsoleHapticManager.playLaunchPulse(this)
                     selectedHubTabIndex = 0
-                    val nextConsoleState = !viewModel.isBigScreenModeManual.value
-                    viewModel.setBigScreenModeManual(nextConsoleState)
+                    val isCurrentlyConsole = viewModel.isBigScreenModeManual.value
+                    if (isCurrentlyConsole) {
+                        viewModel.exitConsoleModeImmediately()
+                    } else {
+                        viewModel.setBigScreenModeManual(true)
+                    }
                     Toast.makeText(
                         this,
-                        if (nextConsoleState) {
+                        if (!isCurrentlyConsole) {
                             com.example.util.AppStrings.trText(
                                 "Big Screen Console Mode Activated",
                                 "Modo Consola en Pantalla Grande Activado"
@@ -309,7 +385,7 @@ class MainActivity : ComponentActivity() {
                     // Controller B button: exit manual Big Screen mode or return to Launcher tab
                     com.example.util.ConsoleHapticManager.playBackTone(this)
                     if (viewModel.isBigScreenModeManual.value) {
-                        viewModel.setBigScreenModeManual(false)
+                        viewModel.exitConsoleModeImmediately()
                         return true
                     }
                     if (selectedHubTabIndex != 0) {
@@ -318,45 +394,49 @@ class MainActivity : ComponentActivity() {
                     }
                 }
                 KeyEvent.KEYCODE_BUTTON_X -> {
-                    // Controller Square / X button: Boost and launch the currently focused game tile directly
-                    com.example.util.ConsoleHapticManager.playLaunchPulse(this)
-                    val target = viewModel.boostAndLaunchFocusedGame()
-                    val gameLabel = target?.appName ?: com.example.util.AppStrings.trText("Selected Game", "Juego Seleccionado")
-                    Toast.makeText(
-                        this,
-                        com.example.util.AppStrings.trText(
-                            "Boosting & Launching $gameLabel",
-                            "Optimizando e Iniciando $gameLabel"
-                        ),
-                        Toast.LENGTH_SHORT
-                    ).show()
-                    return true
-                }
-                KeyEvent.KEYCODE_BUTTON_Y -> {
-                    // Controller Y button: Toggle Gameplay Screen Recording anywhere in the Hub
-                    com.example.util.ConsoleHapticManager.playSelectClick(this)
-                    if (ScreenRecordingService.isRecording.value) {
-                        val stopIntent = Intent(this, ScreenRecordingService::class.java).apply {
-                            action = ScreenRecordingService.ACTION_STOP
-                        }
-                        startService(stopIntent)
+                    if (selectedHubTabIndex == 0) {
+                        // Controller Square / X button on Launcher tab: Boost and launch the currently focused game tile directly
+                        com.example.util.ConsoleHapticManager.playLaunchPulse(this)
+                        val target = viewModel.boostAndLaunchFocusedGame()
+                        val gameLabel = target?.appName ?: com.example.util.AppStrings.trText("Selected Game", "Juego Seleccionado")
                         Toast.makeText(
                             this,
                             com.example.util.AppStrings.trText(
-                                "Recording saved to Videos!",
-                                "¡Grabación guardada en Videos!"
+                                "Launching $gameLabel with Focus Mode",
+                                "Iniciando $gameLabel con Modo Enfoque"
                             ),
                             Toast.LENGTH_SHORT
                         ).show()
-                        com.example.util.AdMobManager.maybeTriggerPostActionAd(
-                            this,
-                            "Screen Recording",
-                            "Grabación de Pantalla"
-                        )
-                    } else {
-                        triggerRecordingFromIntent = true
+                        return true
                     }
-                    return true
+                }
+                KeyEvent.KEYCODE_BUTTON_Y -> {
+                    if (selectedHubTabIndex == 0 || selectedHubTabIndex == 1) {
+                        // Controller Y button: Toggle Gameplay Screen Recording from Launcher or Recorder tab
+                        com.example.util.ConsoleHapticManager.playSelectClick(this)
+                        if (ScreenRecordingService.isRecording.value) {
+                            val stopIntent = Intent(this, ScreenRecordingService::class.java).apply {
+                                action = ScreenRecordingService.ACTION_STOP
+                            }
+                            startService(stopIntent)
+                            Toast.makeText(
+                                this,
+                                com.example.util.AppStrings.trText(
+                                    "Recording saved to Videos!",
+                                    "¡Grabación guardada en Videos!"
+                                ),
+                                Toast.LENGTH_SHORT
+                            ).show()
+                            com.example.util.UnityAdsManager.maybeTriggerPostActionAd(
+                                this,
+                                "Screen Recording",
+                                "Grabación de Pantalla"
+                            )
+                        } else {
+                            triggerRecordingFromIntent = true
+                        }
+                        return true
+                    }
                 }
             }
         }
@@ -369,11 +449,16 @@ class MainActivity : ComponentActivity() {
         com.example.util.AppStrings.init(this)
         handleIncomingIntent(intent)
 
-        // Offload notification channel creation, WorkManager scheduling, and AdMob warmup off the critical launch frame
+        com.example.util.UnityAdsManager.registerActivity(this@MainActivity)
+        com.example.util.UnityAdsManager.initializeAndPreload(this@MainActivity)
+
+        // Offload notification channel creation, WorkManager scheduling, Google Analytics, and Squad Referral Loop off the critical launch frame
         lifecycleScope.launch(kotlinx.coroutines.Dispatchers.Default) {
+            com.example.util.AppAnalyticsManager.initialize(this@MainActivity)
+            com.example.util.SquadReferralManager.initialize(this@MainActivity)
             com.example.util.SmartNotificationManager.ensureNotificationChannel(this@MainActivity)
+            com.example.util.AlbertoGiftManager.checkAndPostPreLaunchNotification(this@MainActivity)
             com.example.util.SmartNotificationManager.scheduleBackgroundChecks(this@MainActivity)
-            com.example.util.AdMobManager.initializeAndPreload(this@MainActivity)
         }
 
         setContent {
@@ -388,6 +473,7 @@ class MainActivity : ComponentActivity() {
             val reducedAnimations by viewModel.reducedAnimations.collectAsState()
             val activeControllerGlyphs by viewModel.activeControllerGlyphs.collectAsState()
             val controllerOverlayConfig by viewModel.controllerOverlayConfig.collectAsState()
+            val overlaySettings by viewModel.overlaySettings.collectAsState()
 
             GMaxGamingHubTheme(
                 appTheme = currentTheme,
@@ -412,29 +498,50 @@ class MainActivity : ComponentActivity() {
                     val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
                     val autoBigScreenLandscape by viewModel.autoBigScreenLandscape.collectAsState()
                     val isBigScreenManual by viewModel.isBigScreenModeManual.collectAsState()
+                    val suppressAutoLandscapeConsole by viewModel.suppressAutoLandscapeConsole.collectAsState()
+                    val showConsoleStartupAnimation by viewModel.showConsoleStartupAnimation.collectAsState()
                     val socialProvider by viewModel.socialSignedInProvider.collectAsState()
                     val customEmail by viewModel.customEmail.collectAsState()
                     val isUserAlreadySignedIn = currentFirebaseUser != null ||
                         socialProvider.isNotBlank() ||
                         customEmail.isNotBlank()
 
-                    // When manual Console Mode is engaged, automatically rotate to sensor landscape; restore unspecified on exit
-                    LaunchedEffect(isBigScreenManual) {
+                    LaunchedEffect(currentFirebaseUser?.email, customEmail) {
+                        val activeEmail = currentFirebaseUser?.email?.takeIf { it.isNotBlank() } ?: customEmail
+                        if (com.example.util.AlbertoGiftManager.isTargetGiftRecipient(activeEmail)) {
+                            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+                                com.example.util.SmartNotificationManager.ensureNotificationChannel(this@MainActivity)
+                                com.example.util.AlbertoGiftManager.checkAndPostPreLaunchNotification(
+                                    context = this@MainActivity,
+                                    explicitEmail = activeEmail
+                                )
+                            }
+                        }
+                    }
+
+                    LaunchedEffect(isLandscape) {
+                        if (!isLandscape) {
+                            viewModel.clearSuppressAutoLandscapeConsole()
+                        }
+                    }
+
+                    // When manual Console Mode is engaged, rotate to sensor landscape; when exiting Console Mode, snap back to portrait immediately
+                    LaunchedEffect(isBigScreenManual, suppressAutoLandscapeConsole) {
                         try {
-                            requestedOrientation = if (isBigScreenManual) {
-                                android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+                            if (isBigScreenManual) {
+                                requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+                            } else if (suppressAutoLandscapeConsole) {
+                                requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+                                kotlinx.coroutines.delay(450)
+                                requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
                             } else {
-                                android.content.pm.ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+                                requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
                             }
                         } catch (_: Exception) {}
                     }
 
-                    // PS4-style Console Startup Animation & Controller Login Gate ONLY activates in Landscape mode!
-                    var hasCompletedLandscapeConsoleBoot by rememberSaveable { mutableStateOf(false) }
-                    val shouldShowConsoleStartup = (isLandscape || isBigScreenManual) &&
-                        (autoBigScreenLandscape || isBigScreenManual) &&
-                        !hasCompletedLandscapeConsoleBoot &&
-                        !reducedAnimations
+                    // PS4-style Console Startup Animation plays every time Console Mode is entered or toggled
+                    val shouldShowConsoleStartup = showConsoleStartupAnimation && !reducedAnimations
 
                     LaunchedEffect(shouldShowConsoleStartup) {
                         isShowingSplashScreen = shouldShowConsoleStartup
@@ -442,9 +549,9 @@ class MainActivity : ComponentActivity() {
 
                     if (shouldShowConsoleStartup) {
                         SplashScreen(
-                            onAnimationComplete = { hasCompletedLandscapeConsoleBoot = true },
+                            onAnimationComplete = { viewModel.completeConsoleStartupAnimation() },
                             controllerGlyphs = activeControllerGlyphs,
-                            ultraFastTransition = true
+                            ultraFastTransition = false
                         )
                     } else if (!hasCompletedAuthStep && !isUserAlreadySignedIn) {
                         // Sign In or Create Account page right after app launch (Splash) and before Welcome page (Onboarding)
@@ -489,25 +596,30 @@ class MainActivity : ComponentActivity() {
                         val videoProjectionLauncher = rememberLauncherForActivityResult(
                             contract = ActivityResultContracts.StartActivityForResult()
                         ) { result ->
-                            if (result.resultCode == Activity.RESULT_OK && result.data != null) {
-                                val recSettings = com.example.util.ScreenRecordingManager.loadSettings(context)
-                                ScreenRecordingService.startRecording(
-                                    context = context,
-                                    resultCode = result.resultCode,
-                                    resultData = result.data!!,
-                                    recordMic = recSettings.recordMic,
-                                    audioSourceMode = recSettings.audioSourceMode
-                                )
+                            val dataIntent = result.data
+                            if (result.resultCode == Activity.RESULT_OK && dataIntent != null) {
+                                try {
+                                    val recSettings = com.example.util.ScreenRecordingManager.loadSettings(context)
+                                    ScreenRecordingService.startRecording(
+                                        context = context,
+                                        resultCode = result.resultCode,
+                                        resultData = dataIntent,
+                                        recordMic = recSettings.recordMic,
+                                        audioSourceMode = recSettings.audioSourceMode
+                                    )
+                                } catch (_: Exception) {}
                             }
                         }
 
                         val recordAudioPermissionLauncher = rememberLauncherForActivityResult(
                             contract = ActivityResultContracts.RequestPermission()
                         ) { _ ->
-                            try {
-                                videoProjectionLauncher.launch(mediaProjectionManager.createScreenCaptureIntent())
-                            } catch (e: Exception) {
-                                e.printStackTrace()
+                            android.os.Handler(android.os.Looper.getMainLooper()).post {
+                                try {
+                                    videoProjectionLauncher.launch(mediaProjectionManager.createScreenCaptureIntent())
+                                } catch (e: Exception) {
+                                    e.printStackTrace()
+                                }
                             }
                         }
 
@@ -515,12 +627,15 @@ class MainActivity : ComponentActivity() {
                         val screenshotProjectionLauncher = rememberLauncherForActivityResult(
                             contract = ActivityResultContracts.StartActivityForResult()
                         ) { result ->
-                            if (result.resultCode == Activity.RESULT_OK && result.data != null) {
-                                ScreenRecordingService.captureScreenshot(
-                                    context,
-                                    result.resultCode,
-                                    result.data!!
-                                )
+                            val dataIntent = result.data
+                            if (result.resultCode == Activity.RESULT_OK && dataIntent != null) {
+                                try {
+                                    ScreenRecordingService.captureScreenshot(
+                                        context,
+                                        result.resultCode,
+                                        dataIntent
+                                    )
+                                } catch (_: Exception) {}
                             }
                         }
 
@@ -591,18 +706,45 @@ class MainActivity : ComponentActivity() {
                                     selectedHubTabIndex = 5
                                     requestedTabFromIntent = null
                                 }
+                                "RIVALS" -> {
+                                    selectedHubTabIndex = 6
+                                    requestedTabFromIntent = null
+                                }
                             }
                         }
 
                         LaunchedEffect(Unit) {
-                            com.example.util.AdMobManager.maybeShowAppOpenAdOnLaunch()
+                            com.example.util.UnityAdsManager.maybeShowAppOpenAdOnLaunch()
+                        }
+
+                        LaunchedEffect(selectedHubTabIndex) {
+                            val tabScreenName = when (selectedHubTabIndex) {
+                                0 -> "Game_Launcher"
+                                1 -> "Screen_Recorder"
+                                2 -> "Top_Gear"
+                                3 -> "Extras_Studio"
+                                4 -> "Settings"
+                                5 -> "Gamer_Profile"
+                                6 -> "Rivals_Hub"
+                                else -> "Hub_Tab_$selectedHubTabIndex"
+                            }
+                            com.example.util.AppAnalyticsManager.logScreenView(
+                                context = context,
+                                screenName = tabScreenName
+                            )
                         }
 
                         var manualNetworkRetryTick by remember { mutableIntStateOf(0) }
                         val isDeviceOnlineLive by com.example.util.rememberIsDeviceOnline()
-                        val isDeviceOnline = remember(isDeviceOnlineLive, manualNetworkRetryTick) {
-                            isDeviceOnlineLive || com.example.util.NetworkConnectivityMonitor.isCurrentlyOnline(context)
+                        LaunchedEffect(manualNetworkRetryTick) {
+                            if (manualNetworkRetryTick > 0) {
+                                com.example.util.NetworkConnectivityMonitor.triggerImmediateRecheck(context)
+                            }
                         }
+                        val isDeviceOnline = isDeviceOnlineLive
+
+                        val squadPassState by viewModel.squadPassState.collectAsState()
+                        val rivalsState by viewModel.rivalsState.collectAsState()
 
                         Box(modifier = Modifier.fillMaxSize()) {
                             Scaffold(
@@ -625,6 +767,13 @@ class MainActivity : ComponentActivity() {
                                             alert = controllerAlert,
                                             onDismiss = { viewModel.dismissControllerAlert() }
                                         )
+                                        // Real-time high-dopamine Squadmate activation notification banner
+                                        com.example.ui.components.SquadDopamineNotificationBanner(
+                                            message = squadPassState.highDopamineToastMessage,
+                                            onDismiss = {
+                                                com.example.util.SquadReferralManager.dismissDopamineToast()
+                                            }
+                                        )
                                     }
                                 }
                             ) { innerPadding ->
@@ -642,7 +791,13 @@ class MainActivity : ComponentActivity() {
                                         // Tab 0 (Game Launcher) and Tab 1 (Screen Recorder) work offline.
                                         // Top Gear, Extras, Settings, and Profile require internet connectivity.
                                         when (tabIndex) {
-                                            0 -> GamesScreen(viewModel = viewModel)
+                                            0 -> GamesScreen(
+                                                viewModel = viewModel,
+                                                onOpenSquadPassHub = {
+                                                    requestedExtrasSubTab = 2
+                                                    selectedHubTabIndex = 3
+                                                }
+                                            )
                                             1 -> ScreenRecordScreen(
                                                 viewModel = viewModel,
                                                 onRequestMediaProjection = requestVideoCapture,
@@ -658,16 +813,16 @@ class MainActivity : ComponentActivity() {
                                                                 selectedHubTabIndex = 1
                                                             }
                                                             pairsWithText.contains("temperature", ignoreCase = true) -> {
-                                                                requestedExtrasSubTab = 5
+                                                                requestedExtrasSubTab = 6
                                                                 selectedHubTabIndex = 3
                                                             }
                                                             pairsWithText.contains("Console", ignoreCase = true) -> {
-                                                                requestedExtrasSubTab = 3
+                                                                requestedExtrasSubTab = 4
                                                                 selectedHubTabIndex = 3
                                                             }
                                                             pairsWithText.contains("Touch", ignoreCase = true) ||
                                                                 pairsWithText.contains("Crosshair", ignoreCase = true) -> {
-                                                                requestedExtrasSubTab = 2
+                                                                requestedExtrasSubTab = 3
                                                                 selectedHubTabIndex = 3
                                                             }
                                                             pairsWithText.contains("Battery", ignoreCase = true) -> {
@@ -728,6 +883,14 @@ class MainActivity : ComponentActivity() {
                                                     onGoToOfflineLauncher = { selectedHubTabIndex = 0 }
                                                 )
                                             }
+                                            6 -> {
+                                                androidx.activity.compose.BackHandler {
+                                                    selectedHubTabIndex = 0
+                                                }
+                                                com.example.ui.screens.RivalsScreen(
+                                                    viewModel = viewModel
+                                                )
+                                            }
                                         }
                                     }
                                 }
@@ -768,9 +931,35 @@ class MainActivity : ComponentActivity() {
                                 )
                             }
 
-                            // Pre-loaded Full-Screen Ad Presentation Host (strictly excluded on Top Gear tab)
+                            // Unity Ads Privacy & Consent Prompt (Shown once on first run or when reopened from Settings)
+                            val needsUnityPrivacyConsent by com.example.util.UnityAdsManager.needsPrivacyConsentPrompt.collectAsState()
+                            if (needsUnityPrivacyConsent) {
+                                com.example.ui.components.UnityPrivacyConsentDialog(
+                                    onAcceptPersonalized = {
+                                        com.example.util.UnityAdsManager.submitPrivacyConsent(context, true)
+                                    },
+                                    onSelectNonPersonalized = {
+                                        com.example.util.UnityAdsManager.submitPrivacyConsent(context, false)
+                                    }
+                                )
+                            }
+
+                            // Invite a Squad In-App Popup (appears after 2x Booster, 2x Recording, or 2x Overlay if user has no Squad)
+                            if (rivalsState.showInviteSquadPopup && rivalsState.activeSquad == null) {
+                                com.example.ui.screens.InviteSquadInAppPopupDialog(
+                                    onOpenRivalsTab = {
+                                        com.example.util.RivalsManager.dismissInviteSquadPopup()
+                                        selectedHubTabIndex = 6
+                                    },
+                                    onDismiss = {
+                                        com.example.util.RivalsManager.dismissInviteSquadPopup()
+                                    }
+                                )
+                            }
+
+                            // Pre-loaded Full-Screen Unity Ad Presentation Host (strictly excluded on Top Gear tab)
                             if (selectedHubTabIndex != 2) {
-                                com.example.ui.components.AdMobFullScreenPresentationHost()
+                                com.example.ui.components.UnityFullScreenPresentationHost()
                             }
                         }
                     }
@@ -788,9 +977,10 @@ private fun InAppControllerOverlayHost(
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val controllerHealthState by viewModel.controllerHealthState.collectAsState()
-    val isWired = controllerHealthState.isWiredConnection ||
-        com.example.util.ControllerHealthManager.isWiredControllerConnected(context)
-    if (!isWired) return
+    val isConnected = controllerHealthState.controllerId >= 0 ||
+        controllerHealthState.isWiredConnection ||
+        com.example.util.ControllerHealthManager.isAnyControllerConnected(context)
+    if (!isConnected) return
     com.example.ui.components.FloatingInAppControllerOverlay(
         state = controllerHealthState,
         glyphs = glyphs,
@@ -826,11 +1016,12 @@ private fun RazerInspiredTopHubBar(
 ) {
     val launcherLabel = com.example.util.tr("Launcher", "Lanzador")
     val recorderLabel = com.example.util.tr("Recorder", "Grabador")
+    val rivalsLabel = com.example.util.tr("Rivals", "Rivales")
     val topGearLabel = com.example.util.tr("Top Gear", "Top Gear")
     val extrasLabel = com.example.util.tr("Extras", "Extras")
     val settingsLabel = com.example.util.tr("Settings", "Ajustes")
 
-    val tabs = remember(launcherLabel, recorderLabel, topGearLabel, extrasLabel, settingsLabel) {
+    val tabs = remember(launcherLabel, recorderLabel, rivalsLabel, topGearLabel, extrasLabel, settingsLabel) {
         listOf(
             TopHubNavTab(
                 index = 0,
@@ -845,6 +1036,13 @@ private fun RazerInspiredTopHubBar(
                 icon = Icons.Default.Videocam,
                 testTag = "nav_record",
                 activeAccent = RecorderCoral
+            ),
+            TopHubNavTab(
+                index = 6,
+                label = rivalsLabel,
+                icon = Icons.Default.EmojiEvents,
+                testTag = "nav_rivals",
+                activeAccent = Color(0xFFFFD54F)
             ),
             TopHubNavTab(
                 index = 2,

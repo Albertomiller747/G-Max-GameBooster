@@ -124,9 +124,6 @@ fun AuthScreen(
     var password by rememberSaveable { mutableStateOf("") }
     var confirmPassword by rememberSaveable { mutableStateOf("") }
 
-    // Interactive Account Picker Fallback state ("Google")
-    var activeSocialFallbackProvider by remember { mutableStateOf<String?>(null) }
-
     // Complete immediately if already authenticated without launching a Credential Manager popup
     LaunchedEffect(Unit) {
         UserAccountRepository.attemptAutoSignIn(
@@ -152,7 +149,7 @@ fun AuthScreen(
                 isLoading = false
                 onAuthSuccess()
             },
-            onAuthError = { _ ->
+            onAuthError = { errMsg ->
                 isLoading = false
                 if (allowFormFallback && email.isNotBlank()) {
                     onSocialSignInSuccess(
@@ -161,30 +158,16 @@ fun AuthScreen(
                         email
                     )
                 } else {
-                    activeSocialFallbackProvider = "Google"
+                    errorMessage = errMsg
                 }
             },
             scope = coroutineScope,
             onAuthCancelled = {
                 isLoading = false
-                if (allowFormFallback && com.example.util.PremadeTagsCatalog.isOfficialDeveloperEmail(email)) {
-                    onSaveCredentials(fullName, email)
-                    onAuthSuccess()
-                } else {
-                    infoMessage = "Google Sign-In was dismissed. Tap Google again to retry."
-                }
-            },
-            onRequireFallbackPicker = {
-                isLoading = false
-                if (allowFormFallback && email.isNotBlank()) {
-                    onSocialSignInSuccess(
-                        "Google",
-                        fullName.ifBlank { email.substringBefore("@") },
-                        email
-                    )
-                } else {
-                    activeSocialFallbackProvider = "Google"
-                }
+                infoMessage = com.example.util.AppStrings.trText(
+                    "Google Sign-In was cancelled.",
+                    "Se canceló el inicio de sesión con Google."
+                )
             }
         )
     }
@@ -277,7 +260,7 @@ fun AuthScreen(
                                 )
                             )
                             Text(
-                                text = com.example.util.tr("Console Launcher & Performance Booster", "Lanzador de Consola e Impulsor de Rendimiento"),
+                                text = com.example.util.tr("Console Launcher & Gaming Overlay Hub", "Lanzador de Consola y Centro de Superposición"),
                                 style = MaterialTheme.typography.bodySmall.copy(
                                     fontSize = 11.5.sp,
                                     color = Color(0xFF94A3B8)
@@ -444,12 +427,14 @@ fun AuthScreen(
                                 .clickable(enabled = !isLoading) {
                                     errorMessage = null
                                     infoMessage = null
-                                    if (isCreateAccountMode && fullName.isBlank()) {
+                                    val cleanName = fullName.trim()
+                                    val cleanEmail = email.trim()
+                                    if (isCreateAccountMode && cleanName.isBlank()) {
                                         errorMessage = com.example.util.AppStrings.trText("Please enter your full name.", "Por favor, ingresa tu nombre completo.")
                                         return@clickable
                                     }
-                                    if (email.isBlank()) {
-                                        errorMessage = com.example.util.AppStrings.trText("Please enter your email address.", "Por favor, ingresa tu correo electrónico.")
+                                    if (cleanEmail.isBlank() || !cleanEmail.contains("@")) {
+                                        errorMessage = com.example.util.AppStrings.trText("Please enter a valid email address.", "Por favor, ingresa un correo electrónico válido.")
                                         return@clickable
                                     }
                                     if (password.isBlank()) {
@@ -460,8 +445,9 @@ fun AuthScreen(
                                         errorMessage = com.example.util.AppStrings.trText("Passwords do not match.", "Las contraseñas no coinciden.")
                                         return@clickable
                                     }
-                                    onSaveCredentials(fullName, email)
-                                    triggerGoogleCredentialAuth(true)
+                                    val resolvedName = cleanName.ifBlank { cleanEmail.substringBefore("@") }
+                                    onSaveCredentials(resolvedName, cleanEmail)
+                                    onSocialSignInSuccess("Google", resolvedName, cleanEmail)
                                 }
                                 .padding(horizontal = 28.dp)
                                 .testTag("auth_submit_pill_button"),
@@ -623,260 +609,6 @@ fun AuthScreen(
             }
         }
     }
-
-    activeSocialFallbackProvider?.let { provider ->
-        SocialAccountPickerFallbackDialog(
-            providerName = provider,
-            initialName = fullName,
-            initialEmail = email,
-            onDismiss = { activeSocialFallbackProvider = null },
-            onConfirmAccount = { chosenName, chosenEmail ->
-                activeSocialFallbackProvider = null
-                onSocialSignInSuccess(provider, chosenName, chosenEmail)
-            }
-        )
-    }
-}
-
-@Composable
-fun SocialAccountPickerFallbackDialog(
-    providerName: String,
-    initialName: String = "",
-    initialEmail: String = "",
-    onDismiss: () -> Unit,
-    onConfirmAccount: (fullName: String, email: String) -> Unit
-) {
-    val isFacebook = providerName.equals("Facebook", ignoreCase = true)
-    val brandAccent = if (isFacebook) Color(0xFF1877F2) else Color(0xFF4285F4)
-    val defaultEmailDomain = if (isFacebook) "facebook.com" else "gmail.com"
-
-    var nameInput by rememberSaveable(providerName) {
-        mutableStateOf(initialName.ifBlank { "G-Max Pro Gamer" })
-    }
-    var emailInput by rememberSaveable(providerName) {
-        mutableStateOf(
-            initialEmail.ifBlank {
-                if (isFacebook) "gmax.gamer@facebook.com" else "gmax.gamer@gmail.com"
-            }
-        )
-    }
-    var validationError by remember { mutableStateOf<String?>(null) }
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        containerColor = Color(0xFF111827),
-        title = {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(
-                    modifier = Modifier
-                        .size(30.dp)
-                        .clip(CircleShape)
-                        .background(brandAccent),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = if (isFacebook) "f" else "G",
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.Black,
-                        color = Color.White
-                    )
-                }
-                Spacer(modifier = Modifier.width(10.dp))
-                Column {
-                    Text(
-                        text = "Continue with $providerName",
-                        style = MaterialTheme.typography.titleMedium.copy(
-                            fontWeight = FontWeight.ExtraBold,
-                            color = Color(0xFFF8FAFC)
-                        )
-                    )
-                    Text(
-                        text = "Select or enter your $providerName account",
-                        style = MaterialTheme.typography.labelSmall.copy(
-                            color = Color(0xFF94A3B8)
-                        )
-                    )
-                }
-            }
-        },
-        text = {
-            Column(
-                modifier = Modifier.fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                // Quick 1-Tap Account Card
-                Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable {
-                            val resolvedName = nameInput.trim().ifBlank { "$providerName Gamer" }
-                            val resolvedEmail = emailInput.trim().ifBlank { "gamer@$defaultEmailDomain" }
-                            onConfirmAccount(resolvedName, resolvedEmail)
-                        }
-                        .testTag("social_picker_quick_account_card"),
-                    shape = RoundedCornerShape(12.dp),
-                    colors = CardDefaults.cardColors(containerColor = Color(0xFF1E293B)),
-                    border = BorderStroke(1.dp, brandAccent.copy(alpha = 0.55f))
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(12.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(38.dp)
-                                .clip(CircleShape)
-                                .background(brandAccent.copy(alpha = 0.22f))
-                                .border(1.dp, brandAccent, CircleShape),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = (nameInput.trim().firstOrNull()?.uppercaseChar() ?: 'G').toString(),
-                                fontWeight = FontWeight.Black,
-                                color = Color.White,
-                                fontSize = 15.sp
-                            )
-                        }
-                        Spacer(modifier = Modifier.width(10.dp))
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = nameInput.ifBlank { "$providerName Gamer" },
-                                style = MaterialTheme.typography.bodyMedium.copy(
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color(0xFFF8FAFC)
-                                )
-                            )
-                            Text(
-                                text = emailInput.ifBlank { "gamer@$defaultEmailDomain" },
-                                style = MaterialTheme.typography.labelSmall.copy(
-                                    color = Color(0xFF94A3B8)
-                                )
-                            )
-                        }
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.ArrowForward,
-                            contentDescription = "Instant Sign In",
-                            tint = brandAccent,
-                            modifier = Modifier.size(18.dp)
-                        )
-                    }
-                }
-
-                // Editable Name & Email fields
-                MockupElevatedInputField(
-                    label = "$providerName DISPLAY NAME",
-                    value = nameInput,
-                    onValueChange = {
-                        nameInput = it
-                        validationError = null
-                    },
-                    placeholder = "Your Name",
-                    leadingIcon = Icons.Outlined.Person,
-                    keyboardType = KeyboardType.Text,
-                    imeAction = ImeAction.Next,
-                    testTag = "social_fallback_name_input"
-                )
-
-                MockupElevatedInputField(
-                    label = "$providerName EMAIL",
-                    value = emailInput,
-                    onValueChange = {
-                        emailInput = it
-                        validationError = null
-                    },
-                    placeholder = "you@$defaultEmailDomain",
-                    leadingIcon = Icons.Outlined.Email,
-                    keyboardType = KeyboardType.Email,
-                    imeAction = ImeAction.Done,
-                    testTag = "social_fallback_email_input"
-                )
-
-                if (validationError != null) {
-                    Text(
-                        text = validationError ?: "",
-                        style = MaterialTheme.typography.labelSmall.copy(
-                            color = RecorderCoral,
-                            fontWeight = FontWeight.Bold
-                        )
-                    )
-                }
-
-                if (!isFacebook) {
-                    val dialogContext = LocalContext.current
-                    OutlinedButton(
-                        onClick = {
-                            try {
-                                val addAccountIntent = android.content.Intent(android.provider.Settings.ACTION_ADD_ACCOUNT).apply {
-                                    putExtra(android.provider.Settings.EXTRA_ACCOUNT_TYPES, arrayOf("com.google"))
-                                    addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-                                }
-                                dialogContext.startActivity(addAccountIntent)
-                            } catch (_: Exception) {
-                                try {
-                                    val syncSettingsIntent = android.content.Intent(android.provider.Settings.ACTION_SYNC_SETTINGS).apply {
-                                        addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-                                    }
-                                    dialogContext.startActivity(syncSettingsIntent)
-                                } catch (_: Exception) {
-                                }
-                            }
-                        },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .testTag("add_device_google_account_button"),
-                        shape = RoundedCornerShape(10.dp),
-                        border = BorderStroke(1.dp, HubBlue.copy(alpha = 0.5f))
-                    ) {
-                        Text(
-                            text = "Add Google Account in Device Settings",
-                            style = MaterialTheme.typography.labelMedium.copy(
-                                color = HubBlue,
-                                fontWeight = FontWeight.Bold
-                            )
-                        )
-                    }
-                }
-            }
-        },
-        confirmButton = {
-            Button(
-                onClick = {
-                    val cleanName = nameInput.trim()
-                    val cleanEmail = emailInput.trim()
-                    if (cleanName.isBlank()) {
-                        validationError = "Please enter your display name"
-                        return@Button
-                    }
-                    if (cleanEmail.isBlank() || !cleanEmail.contains("@")) {
-                        validationError = "Please enter a valid email address"
-                        return@Button
-                    }
-                    onConfirmAccount(cleanName, cleanEmail)
-                },
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = brandAccent,
-                    contentColor = Color.White
-                ),
-                shape = RoundedCornerShape(10.dp),
-                modifier = Modifier.testTag("social_fallback_confirm_button")
-            ) {
-                Text(
-                    text = "Continue as ${nameInput.trim().substringBefore(" ").ifBlank { "Gamer" }}",
-                    fontWeight = FontWeight.Bold
-                )
-            }
-        },
-        dismissButton = {
-            TextButton(
-                onClick = onDismiss,
-                modifier = Modifier.testTag("social_fallback_cancel_button")
-            ) {
-                Text("Cancel", color = Color(0xFF94A3B8))
-            }
-        }
-    )
 }
 
 @Composable

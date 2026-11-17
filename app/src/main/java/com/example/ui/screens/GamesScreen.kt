@@ -155,7 +155,8 @@ private fun hasUsageAccessPermission(context: Context): Boolean {
 @Composable
 fun GamesScreen(
     viewModel: GameBoosterViewModel,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onOpenSquadPassHub: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val focusManager = LocalFocusManager.current
@@ -163,7 +164,8 @@ fun GamesScreen(
     val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
     val autoBigScreenLandscape by viewModel.autoBigScreenLandscape.collectAsState()
     val isBigScreenManual by viewModel.isBigScreenModeManual.collectAsState()
-    val isBigScreenMode = isBigScreenManual || (isLandscape && autoBigScreenLandscape)
+    val suppressAutoLandscapeConsole by viewModel.suppressAutoLandscapeConsole.collectAsState()
+    val isBigScreenMode = isBigScreenManual || (isLandscape && autoBigScreenLandscape && !suppressAutoLandscapeConsole)
 
     val thermalInfo by viewModel.thermalInfo.collectAsState()
     val hardwareSpecs by viewModel.hardwareSpecs.collectAsState()
@@ -183,12 +185,15 @@ fun GamesScreen(
     val firstGameFocusRequester = remember { FocusRequester() }
     val dailyStreakState by viewModel.dailyStreakState.collectAsState()
     val streakFeedback by viewModel.streakFeedbackMessage.collectAsState()
+    val squadPassState by viewModel.squadPassState.collectAsState()
+    val userUsername by viewModel.userUsername.collectAsState()
 
     var searchQuery by remember { mutableStateOf("") }
     var showAddGameDialog by remember { mutableStateOf(false) }
     var showStreakHubModal by remember { mutableStateOf(false) }
     var showStreakLostModal by remember { mutableStateOf(false) }
     var gameForLaunchPopup by remember { mutableStateOf<InstalledApp?>(null) }
+    var gameForAppInfoModal by remember { mutableStateOf<InstalledApp?>(null) }
     var usageGranted by remember { mutableStateOf(hasUsageAccessPermission(context)) }
     val isDeviceOnline by com.example.util.rememberIsDeviceOnline()
 
@@ -465,26 +470,14 @@ fun GamesScreen(
                         }
                     }
 
-                    // Quick Boost Button (Normal Boost works 100% offline; Beast Boost requires internet)
+                    // Focus Mode & Launch Button (automatically uses 1h 30m profile)
                     var boostBtnFocused by remember { mutableStateOf(false) }
                     Button(
                         onClick = {
                             ConsoleHapticManager.playLaunchPulse(context)
                             val target = filteredGames.firstOrNull { it.packageName == selectedGamePackage }
-                            val effectiveMode = if (selectedBoostMode == BoostMode.BEAST && !isDeviceOnline) {
-                                android.widget.Toast.makeText(
-                                    context,
-                                    com.example.util.AppStrings.trText(
-                                        "Beast Boost requires internet. Running offline Normal Boost.",
-                                        "Modo Bestia requiere internet. Ejecutando Impulso Normal sin conexión."
-                                    ),
-                                    android.widget.Toast.LENGTH_SHORT
-                                ).show()
-                                BoostMode.GAMING
-                            } else {
-                                selectedBoostMode
-                            }
-                            viewModel.quickBoost(targetApp = target, mode = effectiveMode)
+                            viewModel.setBoostMode(BoostMode.BEAST)
+                            viewModel.quickBoost(targetApp = target, mode = BoostMode.BEAST)
                         },
                         shape = RoundedCornerShape(barCorner),
                         colors = ButtonDefaults.buttonColors(
@@ -509,12 +502,12 @@ fun GamesScreen(
                     ) {
                         Icon(
                             imageVector = Icons.Default.Bolt,
-                            contentDescription = "Quick Boost",
+                            contentDescription = "Focus Mode",
                             modifier = Modifier.size(iconSize)
                         )
                         Spacer(modifier = Modifier.width(4.dp))
                         Text(
-                            text = com.example.util.tr("Boost", "Impulsar"),
+                            text = com.example.util.tr("Focus Mode", "Modo Enfoque"),
                             fontWeight = FontWeight.Bold,
                             fontSize = btnFont
                         )
@@ -571,7 +564,11 @@ fun GamesScreen(
                     OutlinedButton(
                         onClick = {
                             ConsoleHapticManager.playLaunchPulse(context)
-                            viewModel.setBigScreenModeManual(!isBigScreenMode)
+                            if (isBigScreenMode) {
+                                viewModel.exitConsoleModeImmediately()
+                            } else {
+                                viewModel.setBigScreenModeManual(true)
+                            }
                         },
                         shape = RoundedCornerShape(barCorner),
                         contentPadding = PaddingValues(horizontal = btnPadH, vertical = 0.dp),
@@ -647,24 +644,13 @@ fun GamesScreen(
                         controllerGlyphs = activeControllerGlyphs,
                         onQuickPlayNormal = {
                             ConsoleHapticManager.playLaunchPulse(context)
-                            viewModel.setBoostMode(BoostMode.GAMING)
-                            viewModel.quickBoost(targetApp = spotlightStats.game, mode = BoostMode.GAMING)
+                            viewModel.setBoostMode(BoostMode.BEAST)
+                            viewModel.quickBoost(targetApp = spotlightStats.game, mode = BoostMode.BEAST)
                         },
                         onQuickPlayBeast = {
-                            if (!isDeviceOnline) {
-                                android.widget.Toast.makeText(
-                                    context,
-                                    com.example.util.AppStrings.trText(
-                                        "Beast Boost requires an internet connection. Normal Boost is available offline.",
-                                        "El Modo Bestia requiere conexión a internet. El Impulso Normal está disponible sin conexión."
-                                    ),
-                                    android.widget.Toast.LENGTH_SHORT
-                                ).show()
-                            } else {
-                                ConsoleHapticManager.playLaunchPulse(context)
-                                viewModel.setBoostMode(BoostMode.BEAST)
-                                viewModel.quickBoost(targetApp = spotlightStats.game, mode = BoostMode.BEAST)
-                            }
+                            ConsoleHapticManager.playLaunchPulse(context)
+                            viewModel.setBoostMode(BoostMode.BEAST)
+                            viewModel.quickBoost(targetApp = spotlightStats.game, mode = BoostMode.BEAST)
                         },
                         onConfigurePopup = {
                             ConsoleHapticManager.playSelectClick(context)
@@ -715,11 +701,10 @@ fun GamesScreen(
                 }
             }
 
-            // Active Boost Session Banner
+            // Active Overlay and Focus Mode Timer Banner
             if (sessionState.isActive) {
                 item {
-                    val isBeast = sessionState.mode == BoostMode.BEAST
-                    val accent = if (isBeast) RecorderCoral else LaunchGreen
+                    val accent = LaunchGreen
                     Card(
                         modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(16.dp),
@@ -744,7 +729,7 @@ fun GamesScreen(
                                     contentAlignment = Alignment.Center
                                 ) {
                                     Icon(
-                                        imageVector = Icons.Default.Bolt,
+                                        imageVector = Icons.Default.Layers,
                                         contentDescription = null,
                                         tint = accent,
                                         modifier = Modifier.size(22.dp)
@@ -753,14 +738,14 @@ fun GamesScreen(
                                 Spacer(modifier = Modifier.width(12.dp))
                                 Column {
                                     Text(
-                                        text = "${sessionState.mode?.title ?: com.example.util.tr("BOOST", "IMPULSO")} ${com.example.util.tr("ACTIVE", "ACTIVO")}",
+                                        text = com.example.util.tr("OVERLAY AND FOCUS MODE TIMER", "TEMPORIZADOR DE SUPERPOSICIÓN Y MODO ENFOQUE"),
                                         style = MaterialTheme.typography.labelSmall,
                                         color = accent,
                                         fontWeight = FontWeight.ExtraBold,
                                         letterSpacing = 0.8.sp
                                     )
                                     Text(
-                                        text = "${com.example.util.tr("Remaining", "Restante")}: ${sessionState.formattedCountdown}",
+                                        text = "${com.example.util.tr("Active on Screen", "Activo en Pantalla")}: ${sessionState.formattedCountdown}",
                                         style = MaterialTheme.typography.titleMedium,
                                         color = MaterialTheme.colorScheme.onSurface,
                                         fontWeight = FontWeight.Bold
@@ -882,6 +867,10 @@ fun GamesScreen(
                                         selectedGamePackage = stat.game.packageName
                                         gameForLaunchPopup = stat.game
                                     },
+                                    onInfoPressed = {
+                                        ConsoleHapticManager.playSelectClick(context)
+                                        gameForAppInfoModal = stat.game
+                                    },
                                     testTagPrefix = "recent_tile"
                                 )
                             }
@@ -965,6 +954,10 @@ fun GamesScreen(
                                         selectedMostPlayedPackage = stat.game.packageName
                                         selectedGamePackage = stat.game.packageName
                                         gameForLaunchPopup = stat.game
+                                    },
+                                    onInfoPressed = {
+                                        ConsoleHapticManager.playSelectClick(context)
+                                        gameForAppInfoModal = stat.game
                                     },
                                     testTagPrefix = "most_played_tile"
                                 )
@@ -1050,8 +1043,8 @@ fun GamesScreen(
                             Spacer(modifier = Modifier.height(4.dp))
                             Text(
                                 text = com.example.util.tr(
-                                    "Add installed games from your device to launch with Boost & HUD.",
-                                    "Añade juegos instalados desde tu dispositivo para iniciar con Impulso y HUD."
+                                    "Add installed games from your device to launch with Focus Mode & HUD.",
+                                    "Añade juegos instalados desde tu dispositivo para iniciar con Modo Enfoque y HUD."
                                 ),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -1097,6 +1090,10 @@ fun GamesScreen(
                                 onLaunchPressed = {
                                     selectedGamePackage = game.packageName
                                     gameForLaunchPopup = game
+                                },
+                                onInfoPressed = {
+                                    ConsoleHapticManager.playSelectClick(context)
+                                    gameForAppInfoModal = game
                                 },
                                 testTagPrefix = "game_tile",
                                 focusRequester = if (index == 0) firstGameFocusRequester else null
@@ -1172,9 +1169,21 @@ fun GamesScreen(
                 }
             }
 
-            // 8. Native Ad Card embedded in the scrollable list with 32dp top buffer from interactive tiles
+            // 7B. Squad Pass & Pro Guest Pass Dashboard Banner (Discord/WhatsApp Dual-Sided Referral Loop)
             item {
-                com.example.ui.components.GMaxNativeAdCard(
+                com.example.ui.components.DashboardSquadPassBannerCard(
+                    squadState = squadPassState,
+                    referrerUsername = userUsername.ifBlank { "SquadLeader" },
+                    onOpenSquadPassHub = {
+                        ConsoleHapticManager.playSelectClick(context)
+                        onOpenSquadPassHub()
+                    }
+                )
+            }
+
+            // 8. Unity Banner Card embedded in the scrollable list with 32dp top buffer from interactive tiles
+            item {
+                com.example.ui.components.GMaxUnityBannerCard(
                     placementTag = "launcher_bottom",
                     topBuffer = 32.dp,
                     bottomBuffer = 24.dp
@@ -1210,60 +1219,143 @@ fun GamesScreen(
 
         // Pre-Launch Booster Popup (shown when user presses green Launch button under a selected game)
         gameForLaunchPopup?.let { targetGame ->
+            var stagedOverlayConfig by remember(targetGame.packageName) {
+                mutableStateOf(
+                    overlayConfig.copy(isEnabled = true)
+                )
+            }
+            LaunchedEffect(targetGame.packageName) {
+                // Stage overlay on when popup opens without showing the live floating HUD until "Open Game" is pressed
+                viewModel.stageOverlayConfigForPreLaunch(context, stagedOverlayConfig)
+            }
             PreLaunchBoosterPopup(
                 game = targetGame,
                 initialBoostMode = selectedBoostMode,
-                overlayConfig = overlayConfig,
+                overlayConfig = stagedOverlayConfig,
                 showControllerGlyphs = isControllerConnected,
+                onSelectBoostMode = { modeSelected ->
+                    ConsoleHapticManager.playSelectClick(context)
+                    // Choosing a booster mode turns on Device Display Overlay in staged state (does not show on screen until Open Game)
+                    val updated = stagedOverlayConfig.copy(isEnabled = true)
+                    stagedOverlayConfig = updated
+                    viewModel.setBoostMode(modeSelected)
+                    viewModel.stageOverlayConfigForPreLaunch(context, updated)
+                },
                 onToggleOverlay = { enabled ->
                     ConsoleHapticManager.playSelectClick(context)
-                    viewModel.toggleOverlayEnabled(context, enabled)
+                    val updated = stagedOverlayConfig.copy(isEnabled = enabled)
+                    stagedOverlayConfig = updated
+                    viewModel.stageOverlayConfigForPreLaunch(context, updated)
                 },
                 onToggleFps = {
                     ConsoleHapticManager.playSelectClick(context)
-                    viewModel.toggleOverlayFps(context, !overlayConfig.showFps)
+                    val updated = stagedOverlayConfig.copy(showFps = !stagedOverlayConfig.showFps)
+                    stagedOverlayConfig = updated
+                    viewModel.stageOverlayConfigForPreLaunch(context, updated)
                 },
                 onToggleTimer = {
                     ConsoleHapticManager.playSelectClick(context)
-                    viewModel.toggleOverlayTimer(context, !overlayConfig.showTimer)
+                    val updated = stagedOverlayConfig.copy(showTimer = !stagedOverlayConfig.showTimer)
+                    stagedOverlayConfig = updated
+                    viewModel.stageOverlayConfigForPreLaunch(context, updated)
                 },
                 onToggleRamPct = {
                     ConsoleHapticManager.playSelectClick(context)
-                    viewModel.toggleOverlayRamPct(context, !overlayConfig.showRamPct)
+                    val updated = stagedOverlayConfig.copy(showRamPct = !stagedOverlayConfig.showRamPct)
+                    stagedOverlayConfig = updated
+                    viewModel.stageOverlayConfigForPreLaunch(context, updated)
                 },
                 onToggleTemp = {
                     ConsoleHapticManager.playSelectClick(context)
-                    viewModel.toggleOverlayTemp(context, !overlayConfig.showTemp)
+                    val updated = stagedOverlayConfig.copy(showTemp = !stagedOverlayConfig.showTemp)
+                    stagedOverlayConfig = updated
+                    viewModel.stageOverlayConfigForPreLaunch(context, updated)
                 },
                 onToggleBattery = {
                     ConsoleHapticManager.playSelectClick(context)
-                    viewModel.toggleOverlayBattery(context, !overlayConfig.showBattery)
+                    val updated = stagedOverlayConfig.copy(showBattery = !stagedOverlayConfig.showBattery)
+                    stagedOverlayConfig = updated
+                    viewModel.stageOverlayConfigForPreLaunch(context, updated)
                 },
                 onToggleClock = {
                     ConsoleHapticManager.playSelectClick(context)
-                    viewModel.toggleOverlayClock(context, !overlayConfig.showClock)
+                    val updated = stagedOverlayConfig.copy(showClock = !stagedOverlayConfig.showClock)
+                    stagedOverlayConfig = updated
+                    viewModel.stageOverlayConfigForPreLaunch(context, updated)
+                },
+                onToggleNetSpeed = {
+                    ConsoleHapticManager.playSelectClick(context)
+                    val updated = stagedOverlayConfig.copy(showNetSpeed = !stagedOverlayConfig.showNetSpeed)
+                    stagedOverlayConfig = updated
+                    viewModel.stageOverlayConfigForPreLaunch(context, updated)
+                },
+                onToggleNotificationTicker = {
+                    ConsoleHapticManager.playSelectClick(context)
+                    val nextVal = !stagedOverlayConfig.showNotificationTicker
+                    val updated = stagedOverlayConfig.copy(showNotificationTicker = nextVal)
+                    stagedOverlayConfig = updated
+                    viewModel.stageOverlayConfigForPreLaunch(context, updated)
+                    if (nextVal && !com.example.service.NotificationTickerOverlayService.isNotificationListenerGranted(context)) {
+                        com.example.service.NotificationTickerOverlayService.openNotificationListenerSettings(context)
+                    }
+                },
+                onChangeTickerDuration = { secs ->
+                    ConsoleHapticManager.playSelectClick(context)
+                    val updated = stagedOverlayConfig.copy(tickerDurationSeconds = secs)
+                    stagedOverlayConfig = updated
+                    viewModel.stageOverlayConfigForPreLaunch(context, updated)
                 },
                 onToggleAutoScale = {
                     ConsoleHapticManager.playSelectClick(context)
-                    viewModel.toggleOverlayAutoScale(context, !overlayConfig.autoScaleSmallScreens)
+                    val updated = stagedOverlayConfig.copy(autoScaleSmallScreens = !stagedOverlayConfig.autoScaleSmallScreens)
+                    stagedOverlayConfig = updated
+                    viewModel.stageOverlayConfigForPreLaunch(context, updated)
                 },
-                onOpenGame = { chosenMode ->
-                    val effectiveMode = if (chosenMode == BoostMode.BEAST && !isDeviceOnline) {
-                        android.widget.Toast.makeText(
+                onToggleSpeedrunTimer = {
+                    ConsoleHapticManager.playSelectClick(context)
+                    val updated = stagedOverlayConfig.copy(speedrunTimerEnabled = !stagedOverlayConfig.speedrunTimerEnabled)
+                    stagedOverlayConfig = updated
+                    viewModel.stageOverlayConfigForPreLaunch(context, updated)
+                },
+                onToggleVolumeLock = { enabled ->
+                    ConsoleHapticManager.playSelectClick(context)
+                    val updated = stagedOverlayConfig.copy(gamingVolumeLockEnabled = enabled)
+                    stagedOverlayConfig = updated
+                    viewModel.stageOverlayConfigForPreLaunch(context, updated)
+                },
+                onChangeVolumeLockPercent = { pct ->
+                    ConsoleHapticManager.playSelectClick(context)
+                    val updated = stagedOverlayConfig.copy(gamingVolumeLockPercent = pct)
+                    stagedOverlayConfig = updated
+                    viewModel.stageOverlayConfigForPreLaunch(context, updated)
+                },
+                onToggleHardcoreMode = { enabled ->
+                    ConsoleHapticManager.playSelectClick(context)
+                    val updated = stagedOverlayConfig.copy(hardcoreModeEnabled = enabled)
+                    stagedOverlayConfig = updated
+                    viewModel.stageOverlayConfigForPreLaunch(context, updated)
+                },
+                onOpenPostMatchSummary = {
+                    ConsoleHapticManager.playSelectClick(context)
+                    viewModel.openPostMatchSummaryModal(context)
+                },
+                onOpenGame = { _ ->
+                    viewModel.setBoostMode(BoostMode.BEAST)
+                    val finalOverlayToLaunch = stagedOverlayConfig
+                    if (finalOverlayToLaunch.speedrunTimerEnabled) {
+                        com.example.service.SpeedrunTimerOverlayService.setEnabled(
                             context,
-                            com.example.util.AppStrings.trText(
-                                "Beast Boost requires internet. Launching with offline Normal Boost.",
-                                "Modo Bestia requiere internet. Iniciando con Impulso Normal sin conexión."
-                            ),
-                            android.widget.Toast.LENGTH_SHORT
-                        ).show()
-                        BoostMode.GAMING
-                    } else {
-                        chosenMode
+                            true,
+                            targetGame.packageName,
+                            targetGame.appName
+                        )
                     }
-                    viewModel.setBoostMode(effectiveMode)
                     gameForLaunchPopup = null
-                    viewModel.quickBoost(targetApp = targetGame, mode = effectiveMode)
+                    viewModel.quickBoost(
+                        targetApp = targetGame,
+                        mode = BoostMode.BEAST,
+                        chosenOverlayConfig = finalOverlayToLaunch
+                    )
                 },
                 onRemoveFromLibrary = {
                     ConsoleHapticManager.playSelectClick(context)
@@ -1271,9 +1363,41 @@ fun GamesScreen(
                     gameForLaunchPopup = null
                 },
                 onOpenAppInfo = {
-                    SystemSettingsHelper.openAppDetails(context, targetGame.packageName)
+                    ConsoleHapticManager.playSelectClick(context)
+                    gameForAppInfoModal = targetGame
                 },
                 onDismiss = { gameForLaunchPopup = null }
+            )
+        }
+
+        // Rich (i) App Info Modal Dialog (App Size, Launch Count, Recorded Video Duration & Size, App Version)
+        gameForAppInfoModal?.let { infoTargetApp ->
+            com.example.ui.components.GameAppInfoModalDialog(
+                game = infoTargetApp,
+                onOpenSystemAppInfo = {
+                    ConsoleHapticManager.playSelectClick(context)
+                    SystemSettingsHelper.openAppDetails(context, infoTargetApp.packageName)
+                },
+                onDismiss = { gameForAppInfoModal = null }
+            )
+        }
+
+        // Auto-shown or manually opened Post-Match Summary Modal (Hardcore Mode Missed Call Log + Match Telemetry)
+        val hardcoreState by viewModel.hardcoreModeState.collectAsState()
+        val latestMatchRecap by viewModel.matchRecap.collectAsState()
+        if (hardcoreState.showPostMatchSummaryModal) {
+            com.example.ui.components.PostMatchSummaryModalDialog(
+                hardcoreState = hardcoreState,
+                latestRecap = latestMatchRecap,
+                onCallBack = { phone ->
+                    com.example.service.HardcoreCallBlockerManager.dialCallback(context, phone)
+                },
+                onClearCallsLog = {
+                    com.example.service.HardcoreCallBlockerManager.clearBlockedCallsLog(context)
+                },
+                onDismiss = {
+                    viewModel.dismissPostMatchSummaryModal(context)
+                }
             )
         }
 
@@ -1484,43 +1608,13 @@ private fun BigScreenSpotlightCard(
                     ) {
                         Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size((15f * scale).dp))
                         Spacer(modifier = Modifier.width(4.dp))
-                        Text("Play", fontWeight = FontWeight.ExtraBold, fontSize = btnFontSp)
+                        Text(com.example.util.tr("Open Game", "Abrir Juego"), fontWeight = FontWeight.ExtraBold, fontSize = btnFontSp)
                         if (showControllerGlyphs) {
                             Spacer(modifier = Modifier.width(5.dp))
                             InlineControllerGlyphBadge(
                                 glyph = controllerGlyphs.southGlyph,
                                 badgeColor = Color.White,
                                 textColor = LaunchGreen
-                            )
-                        }
-                    }
-
-                    var beastFocus by remember { mutableStateOf(false) }
-                    Button(
-                        onClick = onQuickPlayBeast,
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = RecorderCoral,
-                            contentColor = Color.White
-                        ),
-                        shape = RoundedCornerShape((10f * scale).dp),
-                        contentPadding = PaddingValues(horizontal = btnPadH, vertical = btnPadV),
-                        modifier = Modifier
-                            .onFocusChanged { beastFocus = it.isFocused }
-                            .border(
-                                width = if (beastFocus) 2.dp else 0.dp,
-                                color = if (beastFocus) Color.White else Color.Transparent,
-                                shape = RoundedCornerShape((10f * scale).dp)
-                            )
-                    ) {
-                        Icon(Icons.Default.RocketLaunch, contentDescription = null, modifier = Modifier.size((14f * scale).dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("Beast", fontWeight = FontWeight.ExtraBold, fontSize = btnFontSp)
-                        if (showControllerGlyphs) {
-                            Spacer(modifier = Modifier.width(5.dp))
-                            InlineControllerGlyphBadge(
-                                glyph = controllerGlyphs.westGlyph,
-                                badgeColor = Color.White,
-                                textColor = RecorderCoral
                             )
                         }
                     }
@@ -1597,7 +1691,7 @@ private fun ConsoleControllerLegendBar(
             horizontalArrangement = Arrangement.spacedBy((9f * scale).dp)
         ) {
             ControllerKeyHint(badge = glyphs.southGlyph, label = com.example.util.tr("Launch", "Iniciar"), badgeColor = LaunchGreen, scale = scale)
-            ControllerKeyHint(badge = glyphs.westGlyph, label = com.example.util.tr("Boost", "Impulsar"), badgeColor = HubBlue, scale = scale)
+            ControllerKeyHint(badge = glyphs.westGlyph, label = com.example.util.tr("Focus Mode", "Modo Enfoque"), badgeColor = HubBlue, scale = scale)
             ControllerKeyHint(badge = glyphs.northGlyph, label = com.example.util.tr("Record", "Grabar"), badgeColor = Color(0xFFF59E0B), scale = scale)
             ControllerKeyHint(badge = "${glyphs.leftBumper}/${glyphs.rightBumper}", label = com.example.util.tr("Tabs", "Pestañas"), scale = scale)
         }
@@ -1655,6 +1749,7 @@ private fun ConsoleShowcaseGameTile(
     subtitleBadgeText: String?,
     onSelectGame: () -> Unit,
     onLaunchPressed: () -> Unit,
+    onInfoPressed: () -> Unit = {},
     testTagPrefix: String,
     focusRequester: FocusRequester? = null
 ) {
@@ -1745,6 +1840,29 @@ private fun ConsoleShowcaseGameTile(
                 packageName = game.packageName,
                 modifier = Modifier.fillMaxSize()
             )
+
+            // (i) App Info Badge Button at Top-Start of Game Tile
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .padding(6.dp)
+                    .size(26.dp)
+                    .clip(CircleShape)
+                    .background(Color(0xD90F172A))
+                    .border(1.dp, Color(0xFF38BDF8).copy(alpha = 0.85f), CircleShape)
+                    .clickable {
+                        onInfoPressed()
+                    }
+                    .testTag("${testTagPrefix}_info_${game.packageName}"),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = "i",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    color = Color(0xFF38BDF8)
+                )
+            }
 
             // Optional Top Telemetry Badge (Last Played time or Play Hours rank)
             if (!topBadgeText.isNullOrBlank()) {
@@ -1883,6 +2001,7 @@ private fun PreLaunchBoosterPopup(
     initialBoostMode: BoostMode,
     overlayConfig: com.example.model.OverlayHudConfig,
     showControllerGlyphs: Boolean,
+    onSelectBoostMode: (BoostMode) -> Unit = {},
     onToggleOverlay: (Boolean) -> Unit,
     onToggleFps: () -> Unit,
     onToggleTimer: () -> Unit,
@@ -1890,7 +2009,15 @@ private fun PreLaunchBoosterPopup(
     onToggleTemp: () -> Unit,
     onToggleBattery: () -> Unit,
     onToggleClock: () -> Unit,
+    onToggleNetSpeed: () -> Unit = {},
+    onToggleNotificationTicker: () -> Unit = {},
+    onChangeTickerDuration: (Int) -> Unit = {},
     onToggleAutoScale: () -> Unit,
+    onToggleSpeedrunTimer: () -> Unit = {},
+    onToggleVolumeLock: (Boolean) -> Unit = {},
+    onChangeVolumeLockPercent: (Int) -> Unit = {},
+    onToggleHardcoreMode: (Boolean) -> Unit = {},
+    onOpenPostMatchSummary: () -> Unit = {},
     onOpenGame: (BoostMode) -> Unit,
     onRemoveFromLibrary: () -> Unit,
     onOpenAppInfo: () -> Unit,
@@ -1903,23 +2030,15 @@ private fun PreLaunchBoosterPopup(
     val isCompactHeight = screenHeightDp < 520
     val isOverlayEnabled = overlayConfig.isEnabled
     val openGameFocusRequester = remember { FocusRequester() }
-    val normalBoostFocusRequester = remember { FocusRequester() }
-    var chosenMode by remember(initialBoostMode) {
-        mutableStateOf(
-            if (initialBoostMode == BoostMode.BEAST) BoostMode.BEAST else BoostMode.GAMING
-        )
-    }
+    val chosenMode = BoostMode.BEAST
 
     // Automatically focus the Open Game button first so pressing 'A' in Console Mode launches immediately without scrolling
     LaunchedEffect(Unit) {
+        onSelectBoostMode(BoostMode.BEAST)
         kotlinx.coroutines.delay(50)
         try {
             openGameFocusRequester.requestFocus()
-        } catch (_: Exception) {
-            try {
-                normalBoostFocusRequester.requestFocus()
-            } catch (_: Exception) {}
-        }
+        } catch (_: Exception) {}
     }
 
     Dialog(
@@ -1974,7 +2093,7 @@ private fun PreLaunchBoosterPopup(
                                 overflow = TextOverflow.Ellipsis
                             )
                             Text(
-                                text = com.example.util.tr("Configure Boost & Display Overlay", "Configurar Impulso y Superposición"),
+                                text = com.example.util.tr("Configure Focus Mode & Display Overlay", "Configurar Modo Enfoque y Superposición"),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -2005,157 +2124,6 @@ private fun PreLaunchBoosterPopup(
                         .weight(1f, fill = false)
                         .verticalScroll(rememberScrollState())
                 ) {
-                    // 1. Booster Mode Selector: Normal vs Beast Booster
-                    Text(
-                        text = com.example.util.tr("SELECT BOOSTER MODE", "SELECCIONAR MODO DE IMPULSO"),
-                        style = MaterialTheme.typography.labelSmall,
-                        fontWeight = FontWeight.ExtraBold,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    letterSpacing = 0.8.sp
-                )
-
-                Spacer(modifier = Modifier.height(6.dp))
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    val isNormal = chosenMode != BoostMode.BEAST
-                    var normalFocused by remember { mutableStateOf(false) }
-                    var beastFocused by remember { mutableStateOf(false) }
-
-                    // Normal Booster Option (Default initial focus with white outline)
-                    Card(
-                        modifier = Modifier
-                            .weight(1f)
-                            .focusRequester(normalBoostFocusRequester)
-                            .onFocusChanged {
-                                if (it.isFocused && !normalFocused) {
-                                    ConsoleHapticManager.playFocusTick(context)
-                                                                }
-                                normalFocused = it.isFocused
-                            }
-                            .onKeyEvent { ev ->
-                                if (ev.type == KeyEventType.KeyDown &&
-                                    (ev.key == Key.DirectionCenter || ev.key == Key.Enter || ev.key == Key.ButtonA)
-                                ) {
-                                    ConsoleHapticManager.playSelectClick(context)
-                                    chosenMode = BoostMode.GAMING
-                                    true
-                                } else false
-                            }
-                            .clickable {
-                                ConsoleHapticManager.playSelectClick(context)
-                                chosenMode = BoostMode.GAMING
-                            }
-                            .focusable()
-                            .testTag("popup_mode_normal"),
-                        shape = RoundedCornerShape(14.dp),
-                        colors = CardDefaults.cardColors(
-                            containerColor = if (isNormal) {
-                                HubBlue.copy(alpha = 0.15f)
-                            } else {
-                                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
-                            }
-                        ),
-                        border = BorderStroke(
-                            width = if (normalFocused) 2.5.dp else if (isNormal) 2.dp else 1.dp,
-                            color = when {
-                                normalFocused -> Color.White
-                                isNormal -> HubBlue
-                                else -> MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)
-                            }
-                        )
-                    ) {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(10.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Bolt,
-                                contentDescription = null,
-                                tint = if (isNormal) HubBlue else MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(20.dp)
-                            )
-                            Spacer(modifier = Modifier.height(3.dp))
-                            Text(
-                                text = com.example.util.tr("Normal Booster", "Impulso Normal"),
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 12.5.sp,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                            Text(
-                                text = com.example.util.tr("Balanced • Offline Ready", "Equilibrado • Sin Conexión"),
-                                fontSize = 10.5.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-
-                    // Beast Booster Option
-                    Card(
-                        modifier = Modifier
-                            .weight(1f)
-                            .onFocusChanged {
-                                if (it.isFocused && !beastFocused) {
-                                    ConsoleHapticManager.playFocusTick(context)
-                                }
-                                beastFocused = it.isFocused
-                            }
-                            .clickable {
-                                ConsoleHapticManager.playSelectClick(context)
-                                chosenMode = BoostMode.BEAST
-                            }
-                            .focusable()
-                            .testTag("popup_mode_beast"),
-                        shape = RoundedCornerShape(14.dp),
-                        colors = CardDefaults.cardColors(
-                            containerColor = if (!isNormal) {
-                                RecorderCoral.copy(alpha = 0.16f)
-                            } else {
-                                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
-                            }
-                        ),
-                        border = BorderStroke(
-                            width = if (beastFocused || !isNormal) 2.dp else 1.dp,
-                            color = when {
-                                beastFocused -> Color.White
-                                !isNormal -> RecorderCoral
-                                else -> MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)
-                            }
-                        )
-                    ) {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(10.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.RocketLaunch,
-                                contentDescription = null,
-                                tint = if (!isNormal) RecorderCoral else MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(20.dp)
-                            )
-                            Spacer(modifier = Modifier.height(3.dp))
-                            Text(
-                                text = com.example.util.tr("Beast Booster", "Modo Bestia"),
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 12.5.sp,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                            Text(
-                                text = com.example.util.tr("Max FPS • Online", "Máx FPS • En Línea"),
-                                fontSize = 10.5.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(12.dp))
 
                 // 2. Device Display Overlay (HUD) Master Toggle + Inline Editable Metric Chips & 1-Row Auto-Scaled Preview
                 Card(
@@ -2200,7 +2168,7 @@ private fun PreLaunchBoosterPopup(
                                         text = if (isOverlayEnabled) {
                                             "Tap chips below to edit your live HUD metrics"
                                         } else {
-                                            "Enable to customize on-screen gaming telemetry"
+                                            "Enable to customize screen gaming telemetry"
                                         },
                                         fontSize = 10.5.sp,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -2228,7 +2196,8 @@ private fun PreLaunchBoosterPopup(
                             overlayConfig.showRamPct,
                             overlayConfig.showTemp,
                             overlayConfig.showBattery,
-                            overlayConfig.showClock
+                            overlayConfig.showClock,
+                            overlayConfig.showNetSpeed
                         ).count { it }.coerceAtLeast(1)
 
                         Row(
@@ -2281,12 +2250,119 @@ private fun PreLaunchBoosterPopup(
                                 onClick = onToggleClock
                             )
                             PopupOverlayMetricChip(
-                                label = "Auto-Scale",
+                                label = "Ping / KB/s",
+                                isSelected = overlayConfig.showNetSpeed,
+                                accentColor = LaunchGreen,
+                                testTag = "booster_chip_netspeed",
+                                onClick = onToggleNetSpeed
+                            )
+                            PopupOverlayMetricChip(
+                                label = "Ticker (${overlayConfig.tickerDurationSeconds}s)",
+                                isSelected = overlayConfig.showNotificationTicker,
+                                accentColor = Color(0xFF38BDF8),
+                                testTag = "booster_chip_ticker",
+                                onClick = onToggleNotificationTicker
+                            )
+                            PopupOverlayMetricChip(
+                                label = "Speedrun",
+                                isSelected = overlayConfig.speedrunTimerEnabled,
+                                accentColor = Color(0xFF10B981),
+                                testTag = "booster_chip_speedrun",
+                                onClick = onToggleSpeedrunTimer
+                            )
+                            PopupOverlayMetricChip(
+                                label = "Smart Scale",
                                 isSelected = overlayConfig.autoScaleSmallScreens,
                                 accentColor = LaunchGreen,
                                 testTag = "booster_chip_autoscale",
                                 onClick = onToggleAutoScale
                             )
+                        }
+
+                        // Compact Top Edge Notification Ticker & Silent Reply Launching Sub-Row
+                        if (overlayConfig.showNotificationTicker) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            val isListenerGranted = remember(overlayConfig.showNotificationTicker) {
+                                com.example.service.NotificationTickerOverlayService.isNotificationListenerGranted(context)
+                            }
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(Color(0xFF0D1422))
+                                    .border(1.dp, HubBlue.copy(alpha = 0.4f), RoundedCornerShape(10.dp))
+                                    .padding(horizontal = 10.dp, vertical = 6.dp)
+                                    .testTag("prelaunch_ticker_subcard"),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = com.example.util.tr(
+                                            "Top Edge Notification Ticker & Silent Reply",
+                                            "Ticker Superior y Respuesta Rápida Silenciosa"
+                                        ),
+                                        color = Color.White,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                    Text(
+                                        text = com.example.util.tr(
+                                            "Replaces WhatsApp/Telegram/SMS/Call popups • Countdown: ${overlayConfig.tickerDurationSeconds}s",
+                                            "Reemplaza alertas de WhatsApp/SMS/Llamadas • Cuenta atrás: ${overlayConfig.tickerDurationSeconds}s"
+                                        ),
+                                        color = Color(0xFF94A3B8),
+                                        fontSize = 9.5.sp
+                                    )
+                                }
+
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    listOf(4, 6, 8, 10).forEach { secOption ->
+                                        val isDurSelected = overlayConfig.tickerDurationSeconds == secOption
+                                        Box(
+                                            modifier = Modifier
+                                                .clip(RoundedCornerShape(50))
+                                                .background(
+                                                    if (isDurSelected) HubBlue else Color(0xFF1E293B)
+                                                )
+                                                .clickable { onChangeTickerDuration(secOption) }
+                                                .padding(horizontal = 6.dp, vertical = 3.dp)
+                                                .testTag("prelaunch_ticker_dur_${secOption}s")
+                                        ) {
+                                            Text(
+                                                text = "${secOption}s",
+                                                color = if (isDurSelected) Color(0xFF04141F) else Color(0xFFCBD5E1),
+                                                fontSize = 9.5.sp,
+                                                fontWeight = FontWeight.ExtraBold
+                                            )
+                                        }
+                                    }
+
+                                    if (!isListenerGranted) {
+                                        Box(
+                                            modifier = Modifier
+                                                .clip(RoundedCornerShape(50))
+                                                .background(Color(0xFFF59E0B).copy(alpha = 0.2f))
+                                                .border(1.dp, Color(0xFFF59E0B), RoundedCornerShape(50))
+                                                .clickable {
+                                                    com.example.service.NotificationTickerOverlayService.openNotificationListenerSettings(context)
+                                                }
+                                                .padding(horizontal = 7.dp, vertical = 3.dp)
+                                                .testTag("prelaunch_grant_ticker_listener_button")
+                                        ) {
+                                            Text(
+                                                text = com.example.util.tr("Grant", "Permiso"),
+                                                color = Color(0xFFFBBF24),
+                                                fontSize = 9.5.sp,
+                                                fontWeight = FontWeight.ExtraBold
+                                            )
+                                        }
+                                    }
+                                }
+                            }
                         }
 
                         // Live 1-Row Auto-Scaled HUD Preview Bar (Guaranteed never to wrap into 2 rows)
@@ -2328,8 +2404,8 @@ private fun PreLaunchBoosterPopup(
                                 }
                                 if (overlayConfig.showTimer) {
                                     Text(
-                                        text = if (chosenMode == BoostMode.BEAST) "🔥1:30:00" else "⏳3:00:00",
-                                        color = if (chosenMode == BoostMode.BEAST) Color(0xFFFF5722) else LaunchGreen,
+                                        text = "🔥1:30:00",
+                                        color = Color(0xFFFF5722),
                                         fontSize = previewFontSp,
                                         fontWeight = FontWeight.Bold,
                                         maxLines = 1,
@@ -2376,10 +2452,128 @@ private fun PreLaunchBoosterPopup(
                                         softWrap = false
                                     )
                                 }
+                                if (overlayConfig.showNetSpeed) {
+                                    Text(
+                                        text = if (isCompactPreview) "⇅18KB/s" else "↓14 ↑4KB/s",
+                                        color = LaunchGreen,
+                                        fontSize = previewFontSp,
+                                        fontWeight = FontWeight.Bold,
+                                        maxLines = 1,
+                                        softWrap = false
+                                    )
+                                }
                             }
                         }
                     }
                 }
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                // 2b. Launcher Options: Anti-Cheat Speedrun Timer (Yes / No)
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(14.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
+                    ),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.25f))
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("prelaunch_speedrun_yes_no_row"),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = com.example.util.tr(
+                                        "Speedrun Timer",
+                                        "Cronómetro Speedrun"
+                                    ),
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 12.5.sp,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Text(
+                                    text = com.example.util.tr(
+                                        "Launch ${game.appName} with speedrun timer & record run history",
+                                        "Iniciar ${game.appName} con cronómetro speedrun y guardar historial"
+                                    ),
+                                    fontSize = 10.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                val isSpeedrunYes = overlayConfig.speedrunTimerEnabled
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(50))
+                                        .background(if (isSpeedrunYes) LaunchGreen else Color(0xFF1E293B))
+                                        .clickable {
+                                            if (!isSpeedrunYes) onToggleSpeedrunTimer()
+                                        }
+                                        .padding(horizontal = 10.dp, vertical = 4.dp)
+                                        .testTag("prelaunch_speedrun_yes_button")
+                                ) {
+                                    Text(
+                                        text = com.example.util.tr("Yes", "Sí"),
+                                        color = if (isSpeedrunYes) Color(0xFF04141F) else Color(0xFF94A3B8),
+                                        fontSize = 10.5.sp,
+                                        fontWeight = FontWeight.ExtraBold
+                                    )
+                                }
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(50))
+                                        .background(if (!isSpeedrunYes) Color(0xFFEF4444).copy(alpha = 0.25f) else Color(0xFF1E293B))
+                                        .border(
+                                            1.dp,
+                                            if (!isSpeedrunYes) Color(0xFFEF4444) else Color.Transparent,
+                                            RoundedCornerShape(50)
+                                        )
+                                        .clickable {
+                                            if (isSpeedrunYes) onToggleSpeedrunTimer()
+                                        }
+                                        .padding(horizontal = 10.dp, vertical = 4.dp)
+                                        .testTag("prelaunch_speedrun_no_button")
+                                ) {
+                                    Text(
+                                        text = com.example.util.tr("No", "No"),
+                                        color = if (!isSpeedrunYes) Color(0xFFFCA5A5) else Color(0xFF94A3B8),
+                                        fontSize = 10.5.sp,
+                                        fontWeight = FontWeight.ExtraBold
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                // 2c. Gaming Volume Lock (AudioManager) & Hardcore Call-Blocker Mode (CallScreeningService)
+                val hcState by com.example.service.HardcoreCallBlockerManager.state.collectAsState()
+                com.example.ui.components.LauncherVolumeAndHardcoreOptionsCard(
+                    gamingVolumeLockEnabled = overlayConfig.gamingVolumeLockEnabled,
+                    gamingVolumeLockPercent = overlayConfig.gamingVolumeLockPercent,
+                    hardcoreModeEnabled = overlayConfig.hardcoreModeEnabled,
+                    blockedCallsCount = hcState.blockedCalls.size,
+                    onToggleVolumeLock = onToggleVolumeLock,
+                    onChangeVolumeLockPercent = onChangeVolumeLockPercent,
+                    onToggleHardcoreMode = onToggleHardcoreMode,
+                    onOpenPostMatchSummary = onOpenPostMatchSummary
+                )
                 } // End scrollable middle section
 
                 Spacer(modifier = Modifier.height(if (isCompactHeight) 8.dp else 12.dp))

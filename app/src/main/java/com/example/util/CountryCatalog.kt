@@ -113,7 +113,9 @@ object CountryCatalog {
         } catch (_: Exception) {
             "US"
         }
-        return getCountryByCode(localeCode) ?: BY_CODE["US"]!!
+        return getCountryByCode(localeCode)
+            ?: BY_CODE["US"]
+            ?: ALL_COUNTRIES.first()
     }
 
     fun searchCountries(query: String): List<CountryOption> {

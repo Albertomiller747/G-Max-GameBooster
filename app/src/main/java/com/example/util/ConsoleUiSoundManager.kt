@@ -31,7 +31,7 @@ object ConsoleUiSoundManager {
     private const val KEY_CONSOLE_SOUNDS_ENABLED = "console_ui_sounds_enabled"
     private const val SAMPLE_RATE = 44100
 
-    private val soundScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val soundScope = CoroutineScope(SupervisorJob() + Dispatchers.Default + AppCrashGuard.coroutineExceptionHandler)
     private var lastTickTimeMs = 0L
 
     fun isConsoleUiSoundsEnabled(context: Context): Boolean {

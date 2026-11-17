@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -20,6 +21,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -39,6 +41,7 @@ import androidx.compose.material.icons.filled.Headphones
 import androidx.compose.material.icons.filled.Memory
 import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material.icons.filled.Pin
+import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Speed
@@ -51,10 +54,14 @@ import androidx.compose.material.icons.filled.WifiTethering
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.material3.Divider
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -90,9 +97,12 @@ import com.example.data.PerformanceOptionsRepository
 import com.example.model.OptionActionType
 import com.example.model.OptionIconType
 import com.example.model.PerformanceOption
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import com.example.ui.components.AntiCheatNoticeDialog
 import com.example.ui.components.DeveloperModeHelperBanner
 import com.example.ui.components.DeveloperModeTutorialDialog
+import com.example.ui.components.SectionTitle
 import com.example.ui.components.TacticalCrosshairCard
 import com.example.ui.components.copyToClipboard
 import com.example.ui.theme.HubBlue
@@ -119,30 +129,20 @@ fun OptionsScreen(
     var pendingOptionToActivate by remember { mutableStateOf<PerformanceOption?>(null) }
     val boostFeedback by viewModel.boostFeedback.collectAsState()
     val overlaySettings by viewModel.overlaySettings.collectAsState()
+    val libraryGames by viewModel.libraryGames.collectAsState()
     val controllerOverlayConfig by viewModel.controllerOverlayConfig.collectAsState()
     val controllerHealthState by viewModel.controllerHealthState.collectAsState()
     val controllerLayoutMode by viewModel.controllerLayoutMode.collectAsState()
     val activeControllerGlyphs by viewModel.activeControllerGlyphs.collectAsState()
-    var showAntiCheatNotice by remember { mutableStateOf(false) }
     var showDevModeTutorial by remember { mutableStateOf(false) }
 
     val requestActivateOption: (PerformanceOption) -> Unit = { option ->
         val runOptionActivation: () -> Unit = {
-            if (option.id == "tweak_crosshair" || option.actionType == OptionActionType.DIRECT_CROSSHAIR_OVERLAY) {
-                if (!overlaySettings.antiCheatNoticeAcknowledged && !overlaySettings.isEnabled) {
-                    showAntiCheatNotice = true
-                } else {
-                    handleOptionClick(context, option, viewModel) {
-                        selectedOptionForModal = option
-                    }
-                }
-            } else {
-                handleOptionClick(context, option, viewModel) {
-                    selectedOptionForModal = option
-                }
+            handleOptionClick(context, option, viewModel) {
+                selectedOptionForModal = option
             }
         }
-        com.example.util.AdMobManager.maybeTriggerPostActionAd(
+        com.example.util.UnityAdsManager.maybeTriggerPostActionAd(
             context = context,
             actionLabelEn = "Apply Tweaks",
             actionLabelEs = "Aplicar Ajustes",
@@ -242,8 +242,9 @@ fun OptionsScreen(
                             horizontalArrangement = Arrangement.SpaceBetween,
                             modifier = Modifier.fillMaxWidth()
                         ) {
+                            val activeLang = com.example.util.currentAppLanguage()
                             Text(
-                                text = boostFeedback ?: "",
+                                text = com.example.util.AppStrings.autoTranslateDynamic(boostFeedback ?: "", activeLang),
                                 color = MaterialTheme.colorScheme.onSurface,
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.SemiBold,
@@ -313,10 +314,14 @@ fun OptionsScreen(
 
             // If user is searching, show all matched options
             if (searchQuery.isNotBlank()) {
+                val activeSearchLang = com.example.util.AppStrings.resolveActiveLanguageContext(context)
                 val matches = allOptions.filter {
                     it.title.contains(searchQuery, ignoreCase = true) ||
                         it.tags.contains(searchQuery, ignoreCase = true) ||
-                        it.description.contains(searchQuery, ignoreCase = true)
+                        it.description.contains(searchQuery, ignoreCase = true) ||
+                        com.example.util.AppStrings.autoTranslateDynamic(it.title, activeSearchLang).contains(searchQuery, ignoreCase = true) ||
+                        com.example.util.AppStrings.autoTranslateDynamic(it.tags, activeSearchLang).contains(searchQuery, ignoreCase = true) ||
+                        com.example.util.AppStrings.autoTranslateDynamic(it.description, activeSearchLang).contains(searchQuery, ignoreCase = true)
                 }
 
                 item {
@@ -330,6 +335,53 @@ fun OptionsScreen(
                         modifier = Modifier.padding(horizontal = 16.dp)
                     )
                     Spacer(modifier = Modifier.height(8.dp))
+                }
+
+                val showTickerInSearch = searchQuery.contains("ticker", ignoreCase = true) ||
+                    searchQuery.contains("notification", ignoreCase = true) ||
+                    searchQuery.contains("reply", ignoreCase = true) ||
+                    searchQuery.contains("silent", ignoreCase = true)
+                if (showTickerInSearch) {
+                    item(key = "search_ticker_card") {
+                        Box(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+                            TopEdgeNotificationTickerSectionCard()
+                        }
+                    }
+                }
+
+                val showVolumeInSearch = searchQuery.contains("volume", ignoreCase = true) ||
+                    searchQuery.contains("audio", ignoreCase = true) ||
+                    searchQuery.contains("sound", ignoreCase = true)
+                if (showVolumeInSearch) {
+                    item(key = "search_volume_card") {
+                        Box(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+                            GamingVolumeLockSectionCard()
+                        }
+                    }
+                }
+
+                val showCallBlockerInSearch = searchQuery.contains("call", ignoreCase = true) ||
+                    searchQuery.contains("hardcore", ignoreCase = true) ||
+                    searchQuery.contains("reject", ignoreCase = true) ||
+                    searchQuery.contains("block", ignoreCase = true)
+                if (showCallBlockerInSearch) {
+                    item(key = "search_call_blocker_card") {
+                        Box(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+                            HardcoreCallBlockerSectionCard()
+                        }
+                    }
+                }
+
+                val showSpeedrunInSearch = searchQuery.contains("speedrun", ignoreCase = true) ||
+                    searchQuery.contains("timer", ignoreCase = true) ||
+                    searchQuery.contains("split", ignoreCase = true) ||
+                    searchQuery.contains("cheat", ignoreCase = true)
+                if (showSpeedrunInSearch) {
+                    item(key = "search_speedrun_card") {
+                        Box(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+                            AntiCheatSpeedrunSectionCard(availableGames = libraryGames)
+                        }
+                    }
                 }
 
                 items(matches, key = { "search_${it.id}" }) { option ->
@@ -348,6 +400,74 @@ fun OptionsScreen(
                     }
                 }
             } else {
+                // 2d. Standalone Section: Top Edge Notification Ticker & Silent Reply
+                item(key = "tweaks_notification_ticker_section") {
+                    Spacer(modifier = Modifier.height(20.dp))
+                    Box(modifier = Modifier.padding(horizontal = 16.dp)) {
+                        SectionTitle(
+                            com.example.util.tr(
+                                "Top Edge Notification Ticker & Silent Reply",
+                                "Ticker Superior de Notificaciones y Respuesta Silenciosa"
+                            )
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Box(modifier = Modifier.padding(horizontal = 16.dp)) {
+                        TopEdgeNotificationTickerSectionCard()
+                    }
+                }
+
+                // 2e. Standalone Section: Gaming Volume Lock
+                item(key = "tweaks_gaming_volume_lock_section") {
+                    Spacer(modifier = Modifier.height(20.dp))
+                    Box(modifier = Modifier.padding(horizontal = 16.dp)) {
+                        SectionTitle(
+                            com.example.util.tr(
+                                "Gaming Volume Lock (AudioManager)",
+                                "Bloqueo de Volumen Gamer (AudioManager)"
+                            )
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Box(modifier = Modifier.padding(horizontal = 16.dp)) {
+                        GamingVolumeLockSectionCard()
+                    }
+                }
+
+                // 2f. Standalone Section: Hardcore Mode Call Blocker
+                item(key = "tweaks_hardcore_call_blocker_section") {
+                    Spacer(modifier = Modifier.height(20.dp))
+                    Box(modifier = Modifier.padding(horizontal = 16.dp)) {
+                        SectionTitle(
+                            com.example.util.tr(
+                                "Hardcore Call Blocker & Telecom Reject",
+                                "Bloqueador de Llamadas Hardcore y Rechazo Telecom"
+                            )
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Box(modifier = Modifier.padding(horizontal = 16.dp)) {
+                        HardcoreCallBlockerSectionCard()
+                    }
+                }
+
+                // 2g. Standalone Section: Speedrun Timer & Past Speedruns by App
+                item(key = "tweaks_speedrun_timer_section") {
+                    Spacer(modifier = Modifier.height(20.dp))
+                    Box(modifier = Modifier.padding(horizontal = 16.dp)) {
+                        SectionTitle(
+                            com.example.util.tr(
+                                "Speedrun Timer & App History",
+                                "Cronómetro Speedrun e Historial por App"
+                            )
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Box(modifier = Modifier.padding(horizontal = 16.dp)) {
+                        AntiCheatSpeedrunSectionCard(availableGames = libraryGames)
+                    }
+                }
+
                 // 3. Section: Most Popular Tweaks
                 item {
                     Spacer(modifier = Modifier.height(20.dp))
@@ -446,10 +566,10 @@ fun OptionsScreen(
                     }
                 }
 
-                // 6. Native Ad Card embedded in the Tweaks scrollable list with 32dp top buffer
+                // 6. Unity Banner Card embedded in the Tweaks scrollable list with 32dp top buffer
                 item {
                     Box(modifier = Modifier.padding(horizontal = 16.dp)) {
-                        com.example.ui.components.GMaxNativeAdCard(
+                        com.example.ui.components.GMaxUnityBannerCard(
                             placementTag = "tweaks_bottom",
                             topBuffer = 32.dp,
                             bottomBuffer = 24.dp
@@ -515,20 +635,6 @@ fun OptionsScreen(
             )
         }
 
-        // Anti-Cheat Fair Play Notice Dialog
-        if (showAntiCheatNotice) {
-            AntiCheatNoticeDialog(
-                onConfirm = {
-                    viewModel.acknowledgeAntiCheatNotice()
-                    showAntiCheatNotice = false
-                    viewModel.setCrosshairEnabled(context, true)
-                },
-                onDismiss = {
-                    showAntiCheatNotice = false
-                }
-            )
-        }
-
         // Android Developer Mode Activation Tutorial Dialog
         if (showDevModeTutorial) {
             DeveloperModeTutorialDialog(
@@ -545,6 +651,14 @@ fun FeaturedHeroCard(
     onActionClick: () -> Unit
 ) {
     val isSupported = option.isSupported
+    val activeLang = com.example.util.currentAppLanguage()
+    val localizedCategory = com.example.util.AppStrings.autoTranslateDynamic(option.category, activeLang)
+    val localizedTitle = com.example.util.AppStrings.autoTranslateDynamic(option.title, activeLang)
+    val localizedDesc = if (!isSupported && option.unsupportedReason != null) {
+        com.example.util.AppStrings.autoTranslateDynamic("Requires: ${option.unsupportedReason}", activeLang)
+    } else {
+        com.example.util.AppStrings.autoTranslateDynamic(option.description, activeLang)
+    }
 
     Box(
         modifier = Modifier
@@ -593,7 +707,7 @@ fun FeaturedHeroCard(
                             .padding(horizontal = 6.dp, vertical = 2.dp)
                     ) {
                         Text(
-                            text = option.category.uppercase(),
+                            text = localizedCategory.uppercase(),
                             style = MaterialTheme.typography.labelSmall.copy(
                                 color = HubBlue,
                                 fontWeight = FontWeight.Bold,
@@ -611,7 +725,7 @@ fun FeaturedHeroCard(
                                 .padding(horizontal = 6.dp, vertical = 2.dp)
                         ) {
                             Text(
-                                text = "UNSUPPORTED",
+                                text = com.example.util.tr("UNSUPPORTED", "NO COMPATIBLE"),
                                 style = MaterialTheme.typography.labelSmall.copy(
                                     color = Color(0xFFEF4444),
                                     fontWeight = FontWeight.Bold,
@@ -624,7 +738,7 @@ fun FeaturedHeroCard(
 
                 Spacer(modifier = Modifier.height(8.dp))
                 Text(
-                    text = option.title,
+                    text = localizedTitle,
                     style = MaterialTheme.typography.titleMedium.copy(
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onSurface
@@ -634,7 +748,7 @@ fun FeaturedHeroCard(
                 )
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
-                    text = if (!isSupported && option.unsupportedReason != null) "Requires: ${option.unsupportedReason}" else option.description,
+                    text = localizedDesc,
                     style = MaterialTheme.typography.bodySmall.copy(
                         color = if (!isSupported) Color(0xFFEF4444) else MaterialTheme.colorScheme.onSurfaceVariant,
                         fontSize = 12.sp
@@ -670,7 +784,13 @@ fun FeaturedHeroCard(
                 .testTag("featured_hero_action_${option.id}")
         ) {
             Text(
-                text = if (!isSupported) "N/A" else if (isApplied) "Applied" else "Configure",
+                text = if (!isSupported) {
+                    com.example.util.tr("N/A", "N/D")
+                } else if (isApplied) {
+                    com.example.util.tr("Applied", "Aplicado")
+                } else {
+                    com.example.util.tr("Configure", "Configurar")
+                },
                 fontSize = 12.sp,
                 fontWeight = FontWeight.Bold
             )
@@ -725,9 +845,10 @@ fun PerformanceOptionRow(
                 Spacer(modifier = Modifier.width(8.dp))
             }
 
+            val activeLang = com.example.util.currentAppLanguage()
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = option.title,
+                    text = com.example.util.AppStrings.autoTranslateDynamic(option.title, activeLang),
                     style = MaterialTheme.typography.titleSmall.copy(
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onSurface
@@ -738,7 +859,7 @@ fun PerformanceOptionRow(
                 Spacer(modifier = Modifier.height(2.dp))
                 if (!isSupported && option.unsupportedReason != null) {
                     Text(
-                        text = "Unavailable: ${option.unsupportedReason}",
+                        text = com.example.util.AppStrings.autoTranslateDynamic("Unavailable: ${option.unsupportedReason}", activeLang),
                         style = MaterialTheme.typography.bodySmall.copy(
                             color = Color(0xFFEF4444),
                             fontSize = 11.sp,
@@ -749,7 +870,7 @@ fun PerformanceOptionRow(
                     )
                 } else {
                     Text(
-                        text = option.tags,
+                        text = com.example.util.AppStrings.autoTranslateDynamic(option.tags, activeLang),
                         style = MaterialTheme.typography.bodySmall.copy(
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             fontSize = 12.sp
@@ -788,9 +909,9 @@ fun PerformanceOptionRow(
         ) {
             Text(
                 text = when {
-                    !isSupported -> "N/A"
-                    isApplied -> "Active"
-                    else -> "Boost"
+                    !isSupported -> com.example.util.tr("N/A", "N/D")
+                    isApplied -> com.example.util.tr("Active", "Activo")
+                    else -> com.example.util.tr("Apply", "Aplicar")
                 },
                 fontSize = 12.sp,
                 fontWeight = FontWeight.Bold
@@ -809,6 +930,7 @@ fun OptionDetailModal(
     onOpenDevTutorial: () -> Unit = {}
 ) {
     val context = LocalContext.current
+    val activeLang = com.example.util.currentAppLanguage()
     val isSupported = option.isSupported
     val requiresDevMode = option.actionType == OptionActionType.DIRECT_SECURE_SETTINGS_ANIMATIONS ||
         option.actionType == OptionActionType.DIRECT_SECURE_SETTINGS_DNS ||
@@ -827,7 +949,7 @@ fun OptionDetailModal(
         ) {
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = option.title,
+                    text = com.example.util.AppStrings.autoTranslateDynamic(option.title, activeLang),
                     style = MaterialTheme.typography.titleMedium.copy(
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onSurface
@@ -836,7 +958,7 @@ fun OptionDetailModal(
                     overflow = TextOverflow.Ellipsis
                 )
                 Text(
-                    text = option.category,
+                    text = com.example.util.AppStrings.autoTranslateDynamic(option.category, activeLang),
                     style = MaterialTheme.typography.labelSmall.copy(color = MaterialTheme.colorScheme.onSurfaceVariant)
                 )
             }
@@ -844,7 +966,7 @@ fun OptionDetailModal(
             IconButton(onClick = onDismiss) {
                 Icon(
                     imageVector = Icons.Default.Close,
-                    contentDescription = "Close",
+                    contentDescription = com.example.util.tr("Close", "Cerrar"),
                     tint = MaterialTheme.colorScheme.onSurface
                 )
             }
@@ -870,7 +992,7 @@ fun OptionDetailModal(
                 )
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
-                    text = "Developer Mode 4-Step Tutorial",
+                    text = com.example.util.tr("Developer Mode 4 Step Tutorial", "Tutorial de 4 Pasos para Modo Desarrollador"),
                     fontWeight = FontWeight.Bold,
                     fontSize = 13.sp,
                     color = HubBlue
@@ -898,14 +1020,17 @@ fun OptionDetailModal(
                     Spacer(modifier = Modifier.width(10.dp))
                     Column {
                         Text(
-                            text = "Not Supported on This Phone",
+                            text = com.example.util.tr("Not Supported on This Phone", "No Compatible en Este Teléfono"),
                             style = MaterialTheme.typography.labelMedium.copy(
                                 color = Color(0xFFEF4444),
                                 fontWeight = FontWeight.Bold
                             )
                         )
                         Text(
-                            text = option.unsupportedReason ?: "Required hardware or Android API is absent on this device.",
+                            text = com.example.util.AppStrings.autoTranslateDynamic(
+                                option.unsupportedReason ?: "Required hardware or Android API is absent on this device.",
+                                activeLang
+                            ),
                             style = MaterialTheme.typography.bodySmall.copy(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 fontSize = 11.sp
@@ -918,7 +1043,7 @@ fun OptionDetailModal(
         }
 
         Text(
-            text = option.description,
+            text = com.example.util.AppStrings.autoTranslateDynamic(option.description, activeLang),
             style = MaterialTheme.typography.bodyMedium.copy(color = MaterialTheme.colorScheme.onSurfaceVariant)
         )
 
@@ -935,14 +1060,18 @@ fun OptionDetailModal(
         ) {
             Column {
                 Text(
-                    text = "Applied on Phone",
+                    text = com.example.util.tr("Applied on Phone", "Aplicado en el Teléfono"),
                     style = MaterialTheme.typography.bodyMedium.copy(
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onSurface
                     )
                 )
                 Text(
-                    text = if (isApplied) "Option marked as active on this device" else "Not yet enabled",
+                    text = if (isApplied) {
+                        com.example.util.tr("Option marked as active on this device", "Opción marcada como activa en este dispositivo")
+                    } else {
+                        com.example.util.tr("Not yet enabled", "Aún no activado")
+                    },
                     style = MaterialTheme.typography.labelSmall.copy(
                         color = if (isApplied) LaunchGreen else MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -976,7 +1105,11 @@ fun OptionDetailModal(
                 Icon(imageVector = Icons.Default.Bolt, contentDescription = null, modifier = Modifier.size(18.dp))
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
-                    text = if (isApplied) "Deactivate Tweak Now" else "Apply Tweak Now",
+                    text = if (isApplied) {
+                        com.example.util.tr("Deactivate Tweak Now", "Desactivar Ajuste Ahora")
+                    } else {
+                        com.example.util.tr("Apply Tweak Now", "Aplicar Ajuste Ahora")
+                    },
                     fontWeight = FontWeight.Bold,
                     fontSize = 14.sp
                 )
@@ -986,7 +1119,7 @@ fun OptionDetailModal(
         option.adbCommand?.let { adbCmd ->
             Spacer(modifier = Modifier.height(12.dp))
             Text(
-                text = "ADB Command (Power Users)",
+                text = com.example.util.tr("ADB Command (Power Users)", "Comando de Depuración de Android (Usuarios Avanzados)"),
                 style = MaterialTheme.typography.labelSmall.copy(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     fontWeight = FontWeight.Bold
@@ -1015,15 +1148,16 @@ fun OptionDetailModal(
                         ),
                         modifier = Modifier.weight(1f)
                     )
+                    val copiedMsg = com.example.util.tr("ADB Command Copied!", "¡Comando Copiado!")
                     IconButton(
                         onClick = {
-                            copyToClipboard(context, adbCmd, "ADB Command Copied!")
+                            copyToClipboard(context, adbCmd, copiedMsg)
                         },
                         modifier = Modifier.size(32.dp)
                     ) {
                         Icon(
                             imageVector = Icons.Default.ContentCopy,
-                            contentDescription = "Copy",
+                            contentDescription = com.example.util.tr("Copy", "Copiar"),
                             tint = HubBlue,
                             modifier = Modifier.size(16.dp)
                         )
@@ -1082,6 +1216,8 @@ fun ActivationWarningDialog(
     onDismiss: () -> Unit
 ) {
     var dontAskAgain by remember { mutableStateOf(false) }
+    val activeLang = com.example.util.currentAppLanguage()
+    val localizedTitle = com.example.util.AppStrings.autoTranslateDynamic(optionTitle, activeLang)
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -1095,7 +1231,7 @@ fun ActivationWarningDialog(
                 )
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
-                    text = "Performance Notice",
+                    text = com.example.util.tr("Performance Notice", "Aviso de Rendimiento"),
                     style = MaterialTheme.typography.titleMedium.copy(
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onSurface
@@ -1106,7 +1242,10 @@ fun ActivationWarningDialog(
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text(
-                    text = "Before activating \"$optionTitle\", note the following trade-offs:",
+                    text = com.example.util.tr(
+                        "Before activating \"$localizedTitle\", review the following details:",
+                        "Antes de activar \"$localizedTitle\", revisa los siguientes detalles:"
+                    ),
                     style = MaterialTheme.typography.bodyMedium.copy(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         fontWeight = FontWeight.SemiBold
@@ -1122,7 +1261,10 @@ fun ActivationWarningDialog(
                         .padding(12.dp)
                 ) {
                     Text(
-                        text = "• Online games might see this as cheating.\n• Your phone might heat up under sustained boost.\n• System loses some animations to perform better.",
+                        text = com.example.util.tr(
+                            "• Online games might see this as cheating.\n• Your phone might heat up under sustained load.\n• System loses some animations to perform better.",
+                            "• Los juegos en línea podrían detectarlo como trampa.\n• Tu teléfono puede calentarse con la carga continua.\n• El sistema reduce animaciones para rendir mejor."
+                        ),
                         style = MaterialTheme.typography.bodySmall.copy(
                             color = MaterialTheme.colorScheme.onSurface,
                             fontSize = 12.sp,
@@ -1150,7 +1292,7 @@ fun ActivationWarningDialog(
                     )
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(
-                        text = "Do not ask again",
+                        text = com.example.util.tr("Do not ask again", "No volver a preguntar"),
                         style = MaterialTheme.typography.bodySmall.copy(
                             color = MaterialTheme.colorScheme.onSurface,
                             fontWeight = FontWeight.Medium
@@ -1165,7 +1307,7 @@ fun ActivationWarningDialog(
                 colors = ButtonDefaults.buttonColors(containerColor = HubBlue, contentColor = Color.White),
                 shape = RoundedCornerShape(8.dp)
             ) {
-                Text("Proceed & Activate", fontWeight = FontWeight.Bold)
+                Text(com.example.util.tr("Proceed & Activate", "Continuar y Activar"), fontWeight = FontWeight.Bold)
             }
         },
         dismissButton = {
@@ -1173,10 +1315,639 @@ fun ActivationWarningDialog(
                 onClick = onDismiss,
                 shape = RoundedCornerShape(8.dp)
             ) {
-                Text("Cancel", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(com.example.util.tr("Cancel", "Cancelar"), color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         },
         containerColor = MaterialTheme.colorScheme.surface,
         shape = RoundedCornerShape(16.dp)
     )
 }
+
+@Composable
+fun TopEdgeNotificationTickerSectionCard(
+    modifier: Modifier = Modifier
+) {
+    val context = LocalContext.current
+    val tickerConfig by com.example.service.NotificationTickerOverlayService.config.collectAsState()
+    val lastReplySent by com.example.service.NotificationTickerOverlayService.lastSilentReplySent.collectAsState()
+    val isNotifListenerGranted = remember(tickerConfig) {
+        com.example.service.NotificationTickerOverlayService.isNotificationListenerGranted(context)
+    }
+
+    Card(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .border(
+                1.dp,
+                if (tickerConfig.isEnabled) BoostActiveCyan.copy(alpha = 0.75f)
+                else MaterialTheme.colorScheme.outline.copy(alpha = 0.45f),
+                RoundedCornerShape(16.dp)
+            )
+            .testTag("tweaks_notification_ticker_card"),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        shape = RoundedCornerShape(16.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Default.DoNotDisturb,
+                            contentDescription = null,
+                            tint = BoostActiveCyan,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = com.example.util.tr(
+                                "Top Edge Notification Ticker & Silent Reply",
+                                "Ticker Superior de Notificaciones y Respuesta Silenciosa"
+                            ),
+                            style = MaterialTheme.typography.titleSmall.copy(
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = com.example.util.tr(
+                            "Intercepts WhatsApp, Telegram, SMS & incoming calls into a top edge ticker, hides when answered, and sends silent RemoteInput replies",
+                            "Intercepta WhatsApp, Telegram, SMS y llamadas en un ticker superior, se oculta al contestar y envía respuestas silenciosas reales"
+                        ),
+                        style = MaterialTheme.typography.bodySmall.copy(
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            fontSize = 11.sp
+                        )
+                    )
+                }
+
+                Switch(
+                    checked = tickerConfig.isEnabled,
+                    onCheckedChange = { enabled ->
+                        com.example.service.NotificationTickerOverlayService.setEnabled(context, enabled)
+                        if (enabled && !isNotifListenerGranted) {
+                            com.example.service.NotificationTickerOverlayService.openNotificationListenerSettings(context)
+                        }
+                    },
+                    colors = SwitchDefaults.colors(
+                        checkedThumbColor = Color.White,
+                        checkedTrackColor = BoostActiveCyan
+                    ),
+                    modifier = Modifier.testTag("tweaks_notification_ticker_toggle")
+                )
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = com.example.util.tr(
+                        "Ticker Countdown (Default 6s):",
+                        "Cuenta Atrás del Ticker (6s por defecto):"
+                    ),
+                    style = MaterialTheme.typography.labelSmall.copy(
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontWeight = FontWeight.Bold
+                    )
+                )
+                Text(
+                    text = "${tickerConfig.countdownSeconds}s",
+                    style = MaterialTheme.typography.labelMedium.copy(
+                        color = BoostActiveCyan,
+                        fontWeight = FontWeight.ExtraBold,
+                        fontFamily = FontFamily.Monospace
+                    )
+                )
+            }
+
+            Spacer(modifier = Modifier.height(6.dp))
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                listOf(4, 6, 8, 10, 12, 15).forEach { secs ->
+                    val isSelected = tickerConfig.countdownSeconds == secs
+                    FilterChip(
+                        selected = isSelected,
+                        onClick = {
+                            com.example.service.NotificationTickerOverlayService.setCountdownSeconds(context, secs)
+                        },
+                        label = {
+                            Text(
+                                text = if (secs == 6) com.example.util.tr("6s (Default)", "6s (Por defecto)") else "${secs}s",
+                                fontSize = 11.sp,
+                                fontWeight = if (isSelected) FontWeight.ExtraBold else FontWeight.Medium
+                            )
+                        },
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = BoostActiveCyan.copy(alpha = 0.22f),
+                            selectedLabelColor = BoostActiveCyan
+                        ),
+                        modifier = Modifier.testTag("tweaks_ticker_duration_${secs}s")
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Text(
+                text = com.example.util.tr(
+                    "Silent Quick Reply Presets (Tap 'Reply ▾' on ticker):",
+                    "Respuestas Rápidas Silenciosas (Toca 'Reply ▾' en el ticker):"
+                ),
+                style = MaterialTheme.typography.labelSmall.copy(
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontWeight = FontWeight.Bold
+                )
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                com.example.service.NotificationTickerOverlayService.QUICK_REPLIES.forEach { presetReply ->
+                    val activeLang = com.example.util.currentAppLanguage()
+                    val localizedReply = com.example.util.AppStrings.autoTranslateDynamic(presetReply, activeLang)
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(50))
+                            .background(MaterialTheme.colorScheme.surfaceVariant)
+                            .border(1.dp, HubBlue.copy(alpha = 0.45f), RoundedCornerShape(50))
+                            .padding(horizontal = 9.dp, vertical = 4.dp)
+                    ) {
+                        Text(
+                            text = "\"$localizedReply\"",
+                            fontSize = 10.5.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+                }
+            }
+
+            if (!lastReplySent.isNullOrBlank()) {
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    text = com.example.util.tr(
+                        "✓ Last silent background reply sent: \"$lastReplySent\"",
+                        "✓ Última respuesta silenciosa enviada: \"$lastReplySent\""
+                    ),
+                    color = LaunchGreen,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                if (!isNotifListenerGranted) {
+                    OutlinedButton(
+                        onClick = {
+                            com.example.service.NotificationTickerOverlayService.openNotificationListenerSettings(context)
+                        },
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.testTag("tweaks_grant_notif_listener_button")
+                    ) {
+                        Text(
+                            text = com.example.util.tr("Grant Notification Access", "Dar Acceso a Notificaciones"),
+                            color = BoostActiveCyan,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+
+                OutlinedButton(
+                    onClick = {
+                        if (!android.provider.Settings.canDrawOverlays(context)) {
+                            com.example.util.SystemSettingsHelper.openOverlayPermissionSettings(context)
+                        } else {
+                            com.example.service.NotificationTickerOverlayService.triggerDemoTicker(context, isCall = false)
+                        }
+                    },
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier.testTag("tweaks_test_message_ticker_button")
+                ) {
+                    Text(
+                        text = com.example.util.tr("Test Message Ticker", "Probar Ticker de Mensaje"),
+                        color = HubBlue,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+
+                OutlinedButton(
+                    onClick = {
+                        if (!android.provider.Settings.canDrawOverlays(context)) {
+                            com.example.util.SystemSettingsHelper.openOverlayPermissionSettings(context)
+                        } else {
+                            com.example.service.NotificationTickerOverlayService.triggerDemoTicker(context, isCall = true)
+                        }
+                    },
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier.testTag("tweaks_test_call_ticker_button")
+                ) {
+                    Text(
+                        text = com.example.util.tr("Test Call Ticker", "Probar Ticker de Llamada"),
+                        color = LaunchGreen,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun GamingVolumeLockSectionCard(
+    modifier: Modifier = Modifier
+) {
+    val context = LocalContext.current
+    val volLockState by com.example.service.GamingVolumeLockManager.state.collectAsState()
+
+    Card(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .border(
+                1.dp,
+                if (volLockState.isEnabled) HubBlue.copy(alpha = 0.75f)
+                else MaterialTheme.colorScheme.outline.copy(alpha = 0.45f),
+                RoundedCornerShape(16.dp)
+            )
+            .testTag("tweaks_gaming_volume_lock_card"),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        shape = RoundedCornerShape(16.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Default.Headphones,
+                            contentDescription = null,
+                            tint = HubBlue,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = com.example.util.tr(
+                                "Gaming Volume Lock (${volLockState.lockedVolumePercent}%)",
+                                "Bloqueo de Volumen Gamer (${volLockState.lockedVolumePercent}%)"
+                            ),
+                            style = MaterialTheme.typography.titleSmall.copy(
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = com.example.util.tr(
+                            "Uses Android AudioManager to detect accidental volume button presses during matches, restores volume to ${volLockState.lockedVolumePercent}%, and shows a compact notice banner",
+                            "Usa Android AudioManager para detectar cambios accidentales de volumen, restaurarlo al ${volLockState.lockedVolumePercent}% y mostrar un aviso compacto"
+                        ),
+                        style = MaterialTheme.typography.bodySmall.copy(
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            fontSize = 11.sp
+                        )
+                    )
+                }
+
+                Switch(
+                    checked = volLockState.isEnabled,
+                    onCheckedChange = { enabled ->
+                        com.example.service.GamingVolumeLockManager.setEnabled(context, enabled)
+                    },
+                    colors = SwitchDefaults.colors(
+                        checkedThumbColor = Color.White,
+                        checkedTrackColor = HubBlue
+                    ),
+                    modifier = Modifier.testTag("tweaks_gaming_volume_lock_toggle")
+                )
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                listOf(50, 65, 80, 90, 100).forEach { pct ->
+                    val isSelected = volLockState.lockedVolumePercent == pct
+                    FilterChip(
+                        selected = isSelected,
+                        onClick = {
+                            com.example.service.GamingVolumeLockManager.setLockedVolumePercent(context, pct)
+                        },
+                        label = {
+                            Text(
+                                text = if (pct == 80) com.example.util.tr("80% (Default)", "80% (Por defecto)") else "$pct%",
+                                fontSize = 11.sp,
+                                fontWeight = if (isSelected) FontWeight.ExtraBold else FontWeight.Medium
+                            )
+                        },
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = HubBlue.copy(alpha = 0.22f),
+                            selectedLabelColor = HubBlue
+                        ),
+                        modifier = Modifier.testTag("tweaks_volume_lock_pct_$pct")
+                    )
+                }
+
+                OutlinedButton(
+                    onClick = {
+                        com.example.service.GamingVolumeLockManager.simulateAccidentalVolumeDropAndSnapBack(context)
+                    },
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier.testTag("tweaks_test_volume_lock_snapback_button")
+                ) {
+                    Text(
+                        text = com.example.util.tr("Test Volume Restore Notice", "Probar Aviso de Restauración"),
+                        color = LaunchGreen,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+
+            if (!volLockState.lastNoticeMessage.isNullOrBlank()) {
+                Spacer(modifier = Modifier.height(6.dp))
+                val activeLang = com.example.util.currentAppLanguage()
+                Text(
+                    text = com.example.util.AppStrings.autoTranslateDynamic(volLockState.lastNoticeMessage ?: "", activeLang),
+                    color = BoostActiveCyan,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun HardcoreCallBlockerSectionCard(
+    modifier: Modifier = Modifier
+) {
+    val context = LocalContext.current
+    val hardcoreState by com.example.service.HardcoreCallBlockerManager.state.collectAsState()
+    var showTweaksPostMatchModal by remember { mutableStateOf(false) }
+
+    val phonePermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions()
+    ) {
+        com.example.service.HardcoreCallBlockerManager.refreshPermissionStates(context)
+    }
+
+    Card(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .border(
+                1.dp,
+                if (hardcoreState.isEnabled) Color(0xFFEF4444).copy(alpha = 0.75f)
+                else MaterialTheme.colorScheme.outline.copy(alpha = 0.45f),
+                RoundedCornerShape(16.dp)
+            )
+            .testTag("tweaks_hardcore_call_blocker_card"),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        shape = RoundedCornerShape(16.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Default.Warning,
+                            contentDescription = null,
+                            tint = Color(0xFFEF4444),
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = com.example.util.tr(
+                                "Hardcore Mode Call Blocker & Missed Call Log",
+                                "Modo Hardcore Bloqueador de Llamadas y Registro Real"
+                            ),
+                            style = MaterialTheme.typography.titleSmall.copy(
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = com.example.util.tr(
+                            "Uses Android CallScreeningService, TelecomManager.endCall(), and DND silence to reject incoming phone calls and log them for quick callback",
+                            "Usa CallScreeningService, TelecomManager.endCall() y silencio DND para rechazar llamadas entrantes reales y registrarlas para devolver la llamada"
+                        ),
+                        style = MaterialTheme.typography.bodySmall.copy(
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            fontSize = 11.sp
+                        )
+                    )
+                }
+
+                Switch(
+                    checked = hardcoreState.isEnabled,
+                    onCheckedChange = { enabled ->
+                        com.example.service.HardcoreCallBlockerManager.setEnabled(context, enabled)
+                        if (enabled && !hardcoreState.isTelecomPermissionGranted) {
+                            phonePermissionLauncher.launch(
+                                arrayOf(
+                                    android.Manifest.permission.READ_PHONE_STATE,
+                                    android.Manifest.permission.ANSWER_PHONE_CALLS
+                                )
+                            )
+                        }
+                    },
+                    colors = SwitchDefaults.colors(
+                        checkedThumbColor = Color.White,
+                        checkedTrackColor = Color(0xFFEF4444)
+                    ),
+                    modifier = Modifier.testTag("tweaks_hardcore_mode_toggle")
+                )
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                OutlinedButton(
+                    onClick = { showTweaksPostMatchModal = true },
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier.testTag("tweaks_open_post_match_summary_button")
+                ) {
+                    Text(
+                        text = com.example.util.tr(
+                            "Open Session Summary (${hardcoreState.blockedCalls.size})",
+                            "Abrir Resumen de Partida (${hardcoreState.blockedCalls.size})"
+                        ),
+                        color = HubBlue,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+
+                if (!hardcoreState.isCallScreeningRoleHeld) {
+                    OutlinedButton(
+                        onClick = {
+                            com.example.service.HardcoreCallBlockerManager.openCallScreeningSettingsFallback(context)
+                        },
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.testTag("tweaks_grant_call_screening_role_button")
+                    ) {
+                        Text(
+                            text = com.example.util.tr("Grant Call Screening Role", "Activar Rol de Filtro de Llamadas"),
+                            color = BoostActiveCyan,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+
+                if (!hardcoreState.isTelecomPermissionGranted) {
+                    OutlinedButton(
+                        onClick = {
+                            phonePermissionLauncher.launch(
+                                arrayOf(
+                                    android.Manifest.permission.READ_PHONE_STATE,
+                                    android.Manifest.permission.ANSWER_PHONE_CALLS
+                                )
+                            )
+                        },
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.testTag("tweaks_grant_telecom_hangup_button")
+                    ) {
+                        Text(
+                            text = com.example.util.tr("Grant Telecom Hangup", "Dar Permiso Telecom Colgar"),
+                            color = Color(0xFFEF4444),
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+
+                if (!hardcoreState.isDndAccessGranted) {
+                    OutlinedButton(
+                        onClick = {
+                            com.example.service.HardcoreCallBlockerManager.openDndPolicyAccessSettings(context)
+                        },
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.testTag("tweaks_grant_dnd_silence_button")
+                    ) {
+                        Text(
+                            text = com.example.util.tr("Grant DND Silence", "Dar Acceso No Molestar"),
+                            color = RankGold,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+            }
+
+            if (hardcoreState.blockedCalls.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    hardcoreState.blockedCalls.take(3).forEach { callRecord ->
+                        com.example.ui.components.BlockedCallRowItem(
+                            record = callRecord,
+                            onCallBack = {
+                                com.example.service.HardcoreCallBlockerManager.dialCallback(
+                                    context,
+                                    callRecord.phoneNumber
+                                )
+                            }
+                        )
+                    }
+                }
+            }
+
+            if (showTweaksPostMatchModal) {
+                com.example.ui.components.PostMatchSummaryModalDialog(
+                    hardcoreState = hardcoreState,
+                    latestRecap = null,
+                    onCallBack = { phone ->
+                        com.example.service.HardcoreCallBlockerManager.dialCallback(context, phone)
+                    },
+                    onClearCallsLog = {
+                        com.example.service.HardcoreCallBlockerManager.clearBlockedCallsLog(context)
+                    },
+                    onDismiss = { showTweaksPostMatchModal = false }
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun AntiCheatSpeedrunSectionCard(
+    availableGames: List<com.example.model.InstalledApp> = emptyList(),
+    modifier: Modifier = Modifier
+) {
+    Card(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .border(
+                1.dp,
+                MaterialTheme.colorScheme.outline.copy(alpha = 0.45f),
+                RoundedCornerShape(16.dp)
+            )
+            .testTag("tweaks_speedrun_section_card"),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        shape = RoundedCornerShape(16.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+    ) {
+        Box(modifier = Modifier.padding(16.dp)) {
+            com.example.ui.components.AntiCheatSpeedrunTimerCard(
+                availableGames = availableGames
+            )
+        }
+    }
+}
+
+
+

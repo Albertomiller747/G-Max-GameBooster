@@ -148,9 +148,41 @@ class GameBoosterViewModel(application: Application) : AndroidViewModel(applicat
     private val _isBigScreenModeManual = MutableStateFlow(false)
     val isBigScreenModeManual: StateFlow<Boolean> = _isBigScreenModeManual.asStateFlow()
 
+    private val _suppressAutoLandscapeConsole = MutableStateFlow(false)
+    val suppressAutoLandscapeConsole: StateFlow<Boolean> = _suppressAutoLandscapeConsole.asStateFlow()
+
+    private val _showConsoleStartupAnimation = MutableStateFlow(false)
+    val showConsoleStartupAnimation: StateFlow<Boolean> = _showConsoleStartupAnimation.asStateFlow()
+
     fun setBigScreenModeManual(enabled: Boolean) {
         _isBigScreenModeManual.value = enabled
+        if (enabled) {
+            _suppressAutoLandscapeConsole.value = false
+            _showConsoleStartupAnimation.value = true
+        } else {
+            _suppressAutoLandscapeConsole.value = true
+            _showConsoleStartupAnimation.value = false
+        }
         com.example.util.ConsoleHapticManager.playSelectClick(context)
+    }
+
+    fun exitConsoleModeImmediately() {
+        _isBigScreenModeManual.value = false
+        _suppressAutoLandscapeConsole.value = true
+        _showConsoleStartupAnimation.value = false
+        com.example.util.ConsoleHapticManager.playSelectClick(context)
+    }
+
+    fun onLandscapeConsoleEnteredAutomatically() {
+        // Console startup animation is only triggered when the user explicitly taps the Console Mode button
+    }
+
+    fun clearSuppressAutoLandscapeConsole() {
+        _suppressAutoLandscapeConsole.value = false
+    }
+
+    fun completeConsoleStartupAnimation() {
+        _showConsoleStartupAnimation.value = false
     }
 
     val gameGuidanceList: List<GameGuidance> = GameGuidanceDatabase.gamesList
@@ -196,13 +228,13 @@ class GameBoosterViewModel(application: Application) : AndroidViewModel(applicat
     private val _appliedOptionIds = MutableStateFlow<Set<String>>(setOf("pop_3_ram", "net_wifi_5g"))
     val appliedOptionIds: StateFlow<Set<String>> = _appliedOptionIds.asStateFlow()
 
-    // 2 Boost Modes: Gaming and Beast
-    private val _selectedBoostMode = MutableStateFlow(BoostMode.GAMING)
+    // Default to 1h 30m profile (BoostMode.BEAST)
+    private val _selectedBoostMode = MutableStateFlow(BoostMode.BEAST)
     val selectedBoostMode: StateFlow<BoostMode> = _selectedBoostMode.asStateFlow()
 
-    fun setBoostMode(mode: BoostMode) {
-        _selectedBoostMode.value = mode
-        hubPrefs.edit().putString("hub_selected_boost_mode", mode.name).apply()
+    fun setBoostMode(@Suppress("UNUSED_PARAMETER") mode: BoostMode) {
+        _selectedBoostMode.value = BoostMode.BEAST
+        hubPrefs.edit().putString("hub_selected_boost_mode", BoostMode.BEAST.name).apply()
         scheduleCloudSettingsSync()
     }
 
@@ -210,7 +242,7 @@ class GameBoosterViewModel(application: Application) : AndroidViewModel(applicat
     private val _hardwareSpecs = MutableStateFlow(PhoneHardwareSpecs())
     val hardwareSpecs: StateFlow<PhoneHardwareSpecs> = _hardwareSpecs.asStateFlow()
 
-    // Real-time Screen Overlay HUD Config (FPS, Temp, Battery)
+    // Real-time Screen Overlay HUD Config (FPS, Temp, Battery, Net Speed KB/s)
     private val _overlayConfig = MutableStateFlow(OverlayHudConfig())
     val overlayConfig: StateFlow<OverlayHudConfig> = _overlayConfig.asStateFlow()
 
@@ -254,6 +286,9 @@ class GameBoosterViewModel(application: Application) : AndroidViewModel(applicat
         try { Firebase.auth.currentUser } catch (_: Exception) { null }
     )
     val currentFirebaseUser: StateFlow<FirebaseUser?> = _currentFirebaseUser.asStateFlow()
+    val currentUser: StateFlow<FirebaseUser?> get() = currentFirebaseUser
+
+    fun getSavedCustomUsername(): String = _userUsername.value
 
     private val _socialSignedInProvider = MutableStateFlow(
         hubPrefs.getString("hub_social_auth_provider", "") ?: ""
@@ -379,10 +414,27 @@ class GameBoosterViewModel(application: Application) : AndroidViewModel(applicat
             _userUsername.value = savedUsername
         }
         try {
+            com.example.util.ConfigCodeCodec.setActiveAccount(context, key)
+            com.example.service.CrosshairOverlayService.setActiveAccount(context, key)
+            _overlaySettings.value = com.example.service.CrosshairOverlayService.getSavedConfig(context, key)
             com.example.util.DailyStreakManager.switchAccount(context, key)
             com.example.util.GamePlayStatsHelper.setActiveAccountKey(context, key)
             refreshPlayStats()
         } catch (_: Exception) {}
+    }
+
+    /**
+     * Switches the active account context for HUD, Crosshair, and Base64 Config Code isolation.
+     */
+    fun switchAccountLoadout(accountKey: String, usernameHandle: String = "") {
+        val cleanKey = com.example.util.ConfigCodeCodec.sanitizeAccountKey(accountKey)
+        com.example.util.ConfigCodeCodec.setActiveAccount(context, cleanKey)
+        com.example.service.CrosshairOverlayService.setActiveAccount(context, cleanKey)
+        if (usernameHandle.isNotBlank()) {
+            _userUsername.value = usernameHandle.removePrefix("@")
+            hubPrefs.edit().putString("hub_username_$cleanKey", _userUsername.value).apply()
+        }
+        _overlaySettings.value = com.example.service.CrosshairOverlayService.getSavedConfig(context, cleanKey)
     }
 
     private val _customDeletionUrl = MutableStateFlow(
@@ -437,8 +489,9 @@ class GameBoosterViewModel(application: Application) : AndroidViewModel(applicat
         _totalPlayTimeSummary,
         _cloudProfile,
         _seasonHalvingCount,
-        _antiCheatRevision
-    ) { summary, cloud, halvings, _ ->
+        _antiCheatRevision,
+        _customEmail
+    ) { summary, cloud, halvings, _, localEmail ->
         val rawMins = maxOf(summary.totalMinutes, cloud?.totalPlayTimeMinutes ?: 0L)
         val rawSessions = maxOf(summary.totalSessions.toLong(), cloud?.totalSessionsCount ?: 0L)
         val (verifiedMins, verifiedSessions) = com.example.util.LeaderboardAntiCheatEngine.clampVerifiedPlayStats(
@@ -447,9 +500,17 @@ class GameBoosterViewModel(application: Application) : AndroidViewModel(applicat
             rawTotalSessions = rawSessions
         )
         val computed = com.example.util.GamerscoreEngine.calculateGamerscore(verifiedMins, verifiedSessions, halvings)
-        val cloudSavedScore = cloud?.gamerscore ?: 0L
-        if (cloudSavedScore > computed.totalScore) {
-            com.example.util.GamerscoreEngine.calculateGamerscoreFromVerifiedScore(cloudSavedScore)
+        val activeEmail = _currentFirebaseUser.value?.email?.takeIf { it.isNotBlank() }
+            ?: cloud?.email?.takeIf { it.isNotBlank() }
+            ?: localEmail
+        val giftScoreFloor = if (com.example.util.AlbertoGiftManager.isTargetGiftRecipient(activeEmail)) {
+            com.example.util.AlbertoGiftManager.GIFT_GAMERSCORE
+        } else {
+            0L
+        }
+        val effectiveCloudOrGiftScore = maxOf(cloud?.gamerscore ?: 0L, giftScoreFloor)
+        if (effectiveCloudOrGiftScore > computed.totalScore) {
+            com.example.util.GamerscoreEngine.calculateGamerscoreFromVerifiedScore(effectiveCloudOrGiftScore)
         } else {
             computed
         }
@@ -491,7 +552,25 @@ class GameBoosterViewModel(application: Application) : AndroidViewModel(applicat
             } else {
                 _isVerifiedDeveloperAccount.value = false
             }
+            if (com.example.util.AlbertoGiftManager.isTargetGiftRecipient(user.email)) {
+                _appTheme.value = AppBackgroundTheme.DARK_HUB
+                hubPrefs.edit().putString("hub_theme_mode", AppBackgroundTheme.DARK_HUB.name).apply()
+            }
             startCloudProfileSyncForUser(user)
+            try {
+                com.example.util.SquadReferralManager.syncAuthenticatedUser(
+                    context = context,
+                    uid = user.uid,
+                    username = _userUsername.value.ifBlank { user.email?.substringBefore("@").orEmpty() },
+                    displayName = _customDisplayName.value.ifBlank { user.displayName ?: "G-Max Gamer" }
+                )
+            } catch (_: Exception) {}
+            try {
+                com.example.util.RivalsManager.syncAuthenticatedUser(
+                    context = context,
+                    uid = user.uid
+                )
+            } catch (_: Exception) {}
         } else {
             profileObserverJob?.cancel()
             profileObserverJob = null
@@ -500,7 +579,28 @@ class GameBoosterViewModel(application: Application) : AndroidViewModel(applicat
             _userAvatarUrl.value = ""
             _userBannerUrl.value = "cyber_neon_grid"
             _cloudSyncStatus.value = "Guest Mode (Local Storage Only)"
+            try {
+                com.example.util.SquadReferralManager.onUserSignedOut(context)
+            } catch (_: Exception) {}
+            try {
+                com.example.util.RivalsManager.onUserSignedOut(context)
+            } catch (_: Exception) {}
         }
+    }
+
+    // Dual-Sided Squad Referral Loop & Pro Guest Pass State
+    val squadPassState: StateFlow<com.example.data.repository.SquadPassSummaryState> =
+        com.example.util.SquadReferralManager.state
+
+    // Real-Time Rivals Competition State
+    val rivalsState: StateFlow<com.example.data.repository.RivalsUiState> =
+        com.example.util.RivalsManager.state
+
+    private val _requestedExtrasSubTab = MutableStateFlow(0)
+    val requestedExtrasSubTab: StateFlow<Int> = _requestedExtrasSubTab.asStateFlow()
+
+    fun requestExtrasSubTab(subTab: Int) {
+        _requestedExtrasSubTab.value = subTab.coerceIn(0, 6)
     }
 
     private val _showPermissionsPage = MutableStateFlow(false)
@@ -623,8 +723,8 @@ class GameBoosterViewModel(application: Application) : AndroidViewModel(applicat
     fun resetBrokenStreakToZero() {
         com.example.util.DailyStreakManager.dismissAndResetBrokenStreak(context)
         _streakFeedbackMessage.value = com.example.util.AppStrings.trText(
-            "Streak reset to 0 days. Launch a game with Boost or HUD today to start a new streak!",
-            "Racha reiniciada a 0 días. ¡Inicia un juego con Impulso o HUD hoy para comenzar una nueva racha!"
+            "Streak reset to 0 days. Launch a game with Focus Mode or HUD today to start a new streak!",
+            "Racha reiniciada a 0 días. ¡Inicia un juego con Modo Enfoque o HUD hoy para comenzar una nueva racha!"
         )
         syncOverlayService(context)
         scheduleCloudSettingsSync()
@@ -650,9 +750,9 @@ class GameBoosterViewModel(application: Application) : AndroidViewModel(applicat
         scheduleCloudSettingsSync()
     }
 
-    // Automatic Big Screen Mode when turning the device to landscape (enabled by default)
+    // Automatic Big Screen Mode when turning the device to landscape (disabled by default so Console Mode only starts when tapped)
     private val _autoBigScreenLandscape = MutableStateFlow(
-        hubPrefs.getBoolean("hub_auto_big_screen_landscape", true)
+        hubPrefs.getBoolean("hub_auto_big_screen_landscape", false)
     )
     val autoBigScreenLandscape: StateFlow<Boolean> = _autoBigScreenLandscape.asStateFlow()
 
@@ -762,11 +862,13 @@ class GameBoosterViewModel(application: Application) : AndroidViewModel(applicat
             return
         }
         updateAndPersistControllerOverlay { it.copy(isEnabled = enabled) }
+        com.example.util.AppAnalyticsManager.logControllerOverlayToggled(context, enabled)
         if (enabled) {
             com.example.util.SmartNotificationManager.onOverlayUsed(
                 context = context,
                 showClockEnabled = _overlayConfig.value.showClock
             )
+            com.example.util.RivalsManager.recordOverlayActivation(context)
         }
         if (enabled && !com.example.service.ControllerOverlayService.canRenderSystemOverlay(context)) {
             com.example.util.SystemSettingsHelper.openOverlayPermissionSettings(context)
@@ -908,6 +1010,8 @@ class GameBoosterViewModel(application: Application) : AndroidViewModel(applicat
 
     init {
         try { com.example.util.AppStrings.init(context) } catch (_: Exception) {}
+        try { com.example.util.SquadReferralManager.initialize(context) } catch (_: Exception) {}
+        try { com.example.util.RivalsManager.initialize(context) } catch (_: Exception) {}
         try { com.example.util.DailyStreakManager.switchAccount(context, getAccountKey()) } catch (_: Exception) {}
         try { com.example.util.EfpsEngine.init(context) } catch (_: Exception) {}
         try { com.example.util.EfpsEngine.start(context) } catch (_: Exception) {}
@@ -922,14 +1026,29 @@ class GameBoosterViewModel(application: Application) : AndroidViewModel(applicat
             val normalizedCap = if (savedCap in com.example.util.EfpsEngine.SUPPORTED_CAP_MODES) savedCap else "AUTO"
             val savedRamPct = hudPrefs.getBoolean("hud_show_ram_pct", true)
             val savedClock = hudPrefs.getBoolean("hud_show_clock", true)
+            val savedNetSpeed = hudPrefs.getBoolean(com.example.util.ConfigCodeCodec.KEY_HUD_SHOW_NET_SPEED, true)
             val savedAutoScale = hudPrefs.getBoolean("hud_auto_scale", true)
+            val tickerCfg = com.example.service.NotificationTickerOverlayService.loadConfig(context)
+            com.example.service.GamingVolumeLockManager.init(context)
+            com.example.service.HardcoreCallBlockerManager.init(context)
+            val volLockState = com.example.service.GamingVolumeLockManager.state.value
+            val hardcoreState = com.example.service.HardcoreCallBlockerManager.state.value
+            val speedrunEnabled = com.example.service.SpeedrunTimerOverlayService.loadSavedEnabled(context)
             _overlayConfig.value = _overlayConfig.value.copy(
                 fpsMode = normalizedMode,
                 targetCapMode = normalizedCap,
                 showRamPct = savedRamPct,
                 showClock = savedClock,
+                showNetSpeed = savedNetSpeed,
+                showNotificationTicker = tickerCfg.isEnabled,
+                tickerDurationSeconds = tickerCfg.countdownSeconds,
+                gamingVolumeLockEnabled = volLockState.isEnabled,
+                gamingVolumeLockPercent = volLockState.lockedVolumePercent,
+                hardcoreModeEnabled = hardcoreState.isEnabled,
+                speedrunTimerEnabled = speedrunEnabled,
                 autoScaleSmallScreens = savedAutoScale
             )
+            context.getSharedPreferences("gmax_quick_browser_prefs", Context.MODE_PRIVATE).edit().clear().apply()
         } catch (_: Exception) {}
 
         // Load remembered target game
@@ -946,12 +1065,9 @@ class GameBoosterViewModel(application: Application) : AndroidViewModel(applicat
         // Load library games
         _libraryPackages.value = boosterSessionManager.getLibraryGamePackages()
 
-        // Restore saved boost mode and applied option IDs
+        // Ensure 1h 30m profile and applied option IDs are restored
         try {
-            val savedBoostMode = hubPrefs.getString("hub_selected_boost_mode", BoostMode.GAMING.name)
-            if (savedBoostMode != null) {
-                _selectedBoostMode.value = BoostMode.valueOf(savedBoostMode)
-            }
+            _selectedBoostMode.value = BoostMode.BEAST
             val savedApplied = hubPrefs.getStringSet("hub_applied_option_ids", null)
             if (!savedApplied.isNullOrEmpty()) {
                 _appliedOptionIds.value = savedApplied.toSet()
@@ -977,21 +1093,17 @@ class GameBoosterViewModel(application: Application) : AndroidViewModel(applicat
                 }
             } catch (_: Exception) {}
 
-            // Restore Tactical Crosshair if previously enabled by user
+            // Ensure legacy Tactical Crosshair state is permanently disabled
             try {
-                val savedCrosshair = com.example.service.CrosshairOverlayService.getSavedConfig(context)
-                if (savedCrosshair.isEnabled) {
-                    _overlaySettings.value = savedCrosshair
-                    val currentApplied = _appliedOptionIds.value.toMutableSet()
-                    currentApplied.add("tweak_crosshair")
+                _overlaySettings.value = _overlaySettings.value.copy(isEnabled = false)
+                val currentApplied = _appliedOptionIds.value.toMutableSet()
+                if (currentApplied.remove("tweak_crosshair")) {
                     _appliedOptionIds.value = currentApplied
-                    if (SystemSettingsHelper.canDrawOverlays(context)) {
-                        val intent = Intent(context, com.example.service.CrosshairOverlayService::class.java).apply {
-                            action = com.example.service.CrosshairOverlayService.ACTION_RESTORE
-                        }
-                        context.startService(intent)
-                    }
                 }
+                com.example.service.CrosshairOverlayService.saveSettingsObject(
+                    context = context,
+                    settings = _overlaySettings.value.copy(isEnabled = false)
+                )
             } catch (_: Exception) {}
         }
 
@@ -1004,28 +1116,63 @@ class GameBoosterViewModel(application: Application) : AndroidViewModel(applicat
         viewModelScope.launch {
             gamepadDetector.connectionAlerts.collect { alert ->
                 _controllerAlert.value = alert
+                if (alert != null) {
+                    val connType = if (com.example.util.ControllerHealthManager.isWiredControllerConnected(context)) "USB_WIRED" else "BLUETOOTH"
+                    com.example.util.AppAnalyticsManager.logControllerConnection(
+                        context = context,
+                        connected = alert.isConnected,
+                        controllerName = alert.controllerName,
+                        connectionType = connType
+                    )
+                }
                 refreshGamepads()
             }
         }
 
-        // Auto-remove active overlays if device loses internet connection (except Normal Boost overlay)
+        // Sync connected gamepads list whenever ControllerHealthManager binds/unbinds a controller via live input
+        viewModelScope.launch {
+            var lastControllerId = -2
+            controllerHealthState.collect { state ->
+                if (state.controllerId != lastControllerId) {
+                    lastControllerId = state.controllerId
+                    try {
+                        _gamepads.value = gamepadDetector.getConnectedGamepads()
+                    } catch (_: Exception) {}
+                }
+            }
+        }
+
+        // Listen for USB controller hot-plug attach/detach broadcasts
+        try {
+            val usbFilter = android.content.IntentFilter().apply {
+                addAction(android.hardware.usb.UsbManager.ACTION_USB_DEVICE_ATTACHED)
+                addAction(android.hardware.usb.UsbManager.ACTION_USB_DEVICE_DETACHED)
+            }
+            val usbReceiver = object : android.content.BroadcastReceiver() {
+                override fun onReceive(ctx: Context?, intent: Intent?) {
+                    refreshGamepads()
+                }
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                context.registerReceiver(usbReceiver, usbFilter, Context.RECEIVER_NOT_EXPORTED)
+            } else {
+                context.registerReceiver(usbReceiver, usbFilter)
+            }
+        } catch (_: Exception) {}
+
+        // Auto-remove non-session overlays if device loses internet connection
         viewModelScope.launch {
             var wasOnline = com.example.util.NetworkConnectivityMonitor.isCurrentlyOnline(context)
             com.example.util.NetworkConnectivityMonitor.observeConnectivity(context).collect { isOnline ->
                 if (wasOnline && !isOnline) {
-                    val isNormalBoostSession = boosterSessionManager.isSessionActive() &&
-                        boosterSessionManager.getActiveMode() == BoostMode.GAMING
+                    val isSessionActive = boosterSessionManager.isSessionActive()
 
                     var anyRemoved = false
-                    if (_overlaySettings.value.isEnabled) {
-                        setCrosshairEnabled(context, false)
-                        anyRemoved = true
-                    }
                     if (_controllerOverlayConfig.value.isEnabled) {
                         setControllerOverlayEnabled(false)
                         anyRemoved = true
                     }
-                    if (!isNormalBoostSession && (_overlayConfig.value.isEnabled || GamingOverlayService.isServiceRunning)) {
+                    if (!isSessionActive && (_overlayConfig.value.isEnabled || GamingOverlayService.isServiceRunning)) {
                         _overlayConfig.value = _overlayConfig.value.copy(isEnabled = false)
                         val currentApplied = _appliedOptionIds.value.toMutableSet()
                         currentApplied.remove("ctrl_overlay_hud")
@@ -1036,7 +1183,7 @@ class GameBoosterViewModel(application: Application) : AndroidViewModel(applicat
                         anyRemoved = true
                     }
                     if (anyRemoved) {
-                        _boostFeedback.value = "Internet connection lost: Active overlays automatically removed (Normal Boost HUD exempt)."
+                        _boostFeedback.value = "Internet connection lost: Non-session overlays paused."
                     }
                 }
                 wasOnline = isOnline
@@ -1089,6 +1236,9 @@ class GameBoosterViewModel(application: Application) : AndroidViewModel(applicat
         )
         _gamingSessionActive.value = isActive
         if (wasActive && !isActive) {
+            _overlayConfig.value = _overlayConfig.value.copy(isEnabled = false)
+            setOptionAppliedState("ctrl_overlay_hud", false)
+            syncOverlayService(context)
             com.example.util.AppReviewManager.onBoostSessionEnded(context)
         }
     }
@@ -1114,14 +1264,16 @@ class GameBoosterViewModel(application: Application) : AndroidViewModel(applicat
         boosterSessionManager.stopSession()
         networkTester.setLowLatencyWifiLock(false)
         SystemSettingsHelper.setDoNotDisturb(context, false)
+        _overlayConfig.value = _overlayConfig.value.copy(isEnabled = false)
+        setOptionAppliedState("ctrl_overlay_hud", false)
         updateSessionState()
         syncOverlayService(context)
         com.example.util.SmartNotificationManager.triggerPostSessionWrapUp(context)
         com.example.util.AppReviewManager.onBoostSessionEnded(context)
-        _boostFeedback.value = "Booster active session ended. Default system scheduler, DND, and locks restored."
+        _boostFeedback.value = "Overlay and Focus Mode Timer ended. Default system scheduler, DND, and overlay restored."
         com.example.ui.components.ActionFeedbackController.emitFeedback(
             context = context,
-            message = "Boost Session Stopped • Locks Released"
+            message = "Overlay & Focus Mode Stopped"
         )
     }
 
@@ -1130,8 +1282,14 @@ class GameBoosterViewModel(application: Application) : AndroidViewModel(applicat
      * whenever the user minimizes the app and no active Boost or HUD overlay session is running.
      */
     fun onAppPausedOrStopped() {
+        if (_overlaySettings.value.isEnabled) {
+            com.example.service.CrosshairOverlayService.syncService(context)
+        }
         val sessionActive = boosterSessionManager.isSessionActive()
         val overlayActive = _overlayConfig.value.isEnabled && GamingOverlayService.isServiceRunning
+        if (sessionActive || _overlayConfig.value.gamingVolumeLockEnabled) {
+            com.example.service.GamingVolumeLockManager.setGameInForeground(context, true)
+        }
         if (!sessionActive && !overlayActive) {
             com.example.util.AppMemoryManager.setBackgroundIdlePaused(true)
             com.example.util.EfpsEngine.pauseForIdle()
@@ -1224,6 +1382,7 @@ class GameBoosterViewModel(application: Application) : AndroidViewModel(applicat
 
     fun refreshGamepads() {
         try {
+            controllerHealthManager.scanActiveController()
             _gamepads.value = gamepadDetector.getConnectedGamepads()
             if (_controllerOverlayConfig.value.isEnabled &&
                 !com.example.util.ControllerHealthManager.isWiredControllerConnected(context)
@@ -1306,6 +1465,11 @@ class GameBoosterViewModel(application: Application) : AndroidViewModel(applicat
     fun onAppResumed() {
         com.example.util.AppMemoryManager.setBackgroundIdlePaused(false)
         com.example.util.EfpsEngine.resumeFromIdle(context)
+        com.example.service.GamingVolumeLockManager.setGameInForeground(context, false)
+        com.example.service.HardcoreCallBlockerManager.onUserReturnedToHubCheckPostMatchSummary(context)
+        if (_overlaySettings.value.isEnabled) {
+            com.example.service.CrosshairOverlayService.syncService(context)
+        }
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 thermalMonitor.start()
@@ -1454,13 +1618,60 @@ class GameBoosterViewModel(application: Application) : AndroidViewModel(applicat
 
     fun boostAndLaunchFocusedGame(): InstalledApp? {
         val target = resolveFocusedOrDefaultGame()
-        quickBoost(targetApp = target, mode = _selectedBoostMode.value)
+        quickBoost(targetApp = target, mode = BoostMode.BEAST)
         return target
     }
 
-    fun quickBoost(targetApp: InstalledApp? = null, mode: BoostMode? = null) {
-        if (mode != null) {
-            _selectedBoostMode.value = mode
+    fun stageOverlayConfigForPreLaunch(context: Context, stagedConfig: com.example.model.OverlayHudConfig) {
+        if (stagedConfig.isEnabled && !SystemSettingsHelper.canDrawOverlays(context)) {
+            SystemSettingsHelper.openOverlayPermissionSettings(context)
+        }
+        _overlayConfig.value = stagedConfig
+        com.example.service.NotificationTickerOverlayService.setEnabled(context, stagedConfig.showNotificationTicker)
+        com.example.service.NotificationTickerOverlayService.setCountdownSeconds(context, stagedConfig.tickerDurationSeconds)
+        com.example.service.GamingVolumeLockManager.setEnabled(context, stagedConfig.gamingVolumeLockEnabled)
+        com.example.service.GamingVolumeLockManager.setLockedVolumePercent(context, stagedConfig.gamingVolumeLockPercent)
+        com.example.service.HardcoreCallBlockerManager.setEnabled(context, stagedConfig.hardcoreModeEnabled)
+        context.getSharedPreferences("gmax_hud_prefs", Context.MODE_PRIVATE).edit()
+            .putBoolean("hud_show_ram_pct", stagedConfig.showRamPct)
+            .putBoolean("hud_show_clock", stagedConfig.showClock)
+            .putBoolean("hud_auto_scale", stagedConfig.autoScaleSmallScreens)
+            .apply()
+        // Ensure the floating overlay service does NOT appear while the user is still configuring the popup;
+        // it will be launched when the user presses "Open Game".
+        try {
+            val stopIntent = Intent(context, GamingOverlayService::class.java).apply {
+                action = GamingOverlayService.ACTION_STOP
+            }
+            context.stopService(stopIntent)
+        } catch (_: Exception) {}
+    }
+
+    fun quickBoost(
+        targetApp: InstalledApp? = null,
+        @Suppress("UNUSED_PARAMETER") mode: BoostMode? = null,
+        chosenOverlayConfig: com.example.model.OverlayHudConfig? = null
+    ) {
+        _selectedBoostMode.value = BoostMode.BEAST
+        if (chosenOverlayConfig != null) {
+            _overlayConfig.value = chosenOverlayConfig
+            com.example.service.NotificationTickerOverlayService.setEnabled(context, chosenOverlayConfig.showNotificationTicker)
+            com.example.service.NotificationTickerOverlayService.setCountdownSeconds(context, chosenOverlayConfig.tickerDurationSeconds)
+            com.example.service.GamingVolumeLockManager.setEnabled(context, chosenOverlayConfig.gamingVolumeLockEnabled)
+            com.example.service.GamingVolumeLockManager.setLockedVolumePercent(context, chosenOverlayConfig.gamingVolumeLockPercent)
+            com.example.service.HardcoreCallBlockerManager.setEnabled(context, chosenOverlayConfig.hardcoreModeEnabled)
+            com.example.service.SpeedrunTimerOverlayService.setEnabled(
+                context = context,
+                enabled = chosenOverlayConfig.speedrunTimerEnabled,
+                gamePackage = targetApp?.packageName,
+                gameName = targetApp?.appName
+            )
+            context.getSharedPreferences("gmax_hud_prefs", Context.MODE_PRIVATE).edit()
+                .putBoolean("hud_show_ram_pct", chosenOverlayConfig.showRamPct)
+                .putBoolean("hud_show_clock", chosenOverlayConfig.showClock)
+                .putBoolean(com.example.util.ConfigCodeCodec.KEY_HUD_SHOW_NET_SPEED, chosenOverlayConfig.showNetSpeed)
+                .putBoolean("hud_auto_scale", chosenOverlayConfig.autoScaleSmallScreens)
+                .apply()
         }
         val resolvedTarget = targetApp ?: resolveFocusedOrDefaultGame()
         if (resolvedTarget != null) {
@@ -1469,13 +1680,13 @@ class GameBoosterViewModel(application: Application) : AndroidViewModel(applicat
 
         val target = _selectedTargetGame.value
         if (target == null) {
-            _boostFeedback.value = "Add a game to your Launcher library to boost and launch."
+            _boostFeedback.value = "Add a game to your Launcher library to launch with Focus Mode."
             return
         }
 
         com.example.ui.components.ActionFeedbackController.emitFeedback(
             context = context,
-            message = "Boosting ${target.appName}...",
+            message = "Launching ${target.appName} with Focus Mode...",
             accentColorArgb = 0xFF00E676L,
             isProcessStart = true,
             playHaptic = true
@@ -1483,14 +1694,13 @@ class GameBoosterViewModel(application: Application) : AndroidViewModel(applicat
 
         viewModelScope.launch {
             _isBoosting.value = true
-            val activeMode = _selectedBoostMode.value
 
-            // Complete Daily Engagement Streak requirement immediately when game launches with GMAX optimizing it
+            // Complete Daily Engagement Streak requirement immediately when game launches
             try {
                 val (streakAfterLaunch, didIncrementStreak) =
                     com.example.util.DailyStreakManager.recordDailyRequirementCompleted(
                         context = context,
-                        sourceLabel = "GMAX ${activeMode.title} Launch"
+                        sourceLabel = "GMAX Focus Mode Launch"
                     )
                 if (didIncrementStreak) {
                     val streakMsg = com.example.util.AppStrings.trText(
@@ -1502,111 +1712,70 @@ class GameBoosterViewModel(application: Application) : AndroidViewModel(applicat
                 }
             } catch (_: Exception) {}
 
-            // Start Post-Match Performance Recap session automatically on boost/launch
+            // Start Post-Match Performance Recap session automatically on launch
             startManualMatchRecap(target.appName)
 
-            if (activeMode == BoostMode.GAMING) {
-                _boostFeedback.value = "Gaming Mode: Optimizing buffers, Wi-Fi latency & audio path for ${target.appName}..."
-                val trimResult = com.example.util.AppMemoryManager.performAutoTrim(
-                    context = context,
-                    reason = "Gaming Mode Boost Start",
-                    cleanBackgroundProcesses = true,
-                    force = true
-                )
-                val freedMb = trimResult.ramFreedMb
-                val exactSummary = com.example.util.AppMemoryManager.formatExactTrimSummary(trimResult)
-                if (trimResult.totalFreedBytes > 0L) {
-                    com.example.util.SmartNotificationManager.recordClearedRamBytes(context, trimResult.totalFreedBytes)
-                }
-
-                // 1. Acquire low-latency Wi-Fi radio lock (WIFI_MODE_FULL_LOW_LATENCY) to reduce ping jitter
-                networkTester.setLowLatencyWifiLock(true)
-
-                // 2. Apply low-latency audio session hints
-                try {
-                    val audioMgr = context.getSystemService(Context.AUDIO_SERVICE) as? android.media.AudioManager
-                    audioMgr?.setParameters("game_mode=1;low_latency=1")
-                } catch (_: Exception) {}
-
-                // 3. Engage Priority DND if granted
-                if (SystemSettingsHelper.isNotificationPolicyAccessGranted(context)) {
-                    SystemSettingsHelper.setDoNotDisturb(context, true, fullSilence = false)
-                }
-
-                // 4. Start persistent 3-hour session
-                com.example.util.AppReviewManager.onNewBoostSessionStarted(context)
-                boosterSessionManager.startSession(BoostMode.GAMING, target.packageName, target.appName)
-                updateSessionState()
-                syncOverlayService(context)
-
-                delay(240)
-                withContext(Dispatchers.IO) { refreshMetrics() }
-                _isBoosting.value = false
-                com.example.util.SmartNotificationManager.onBoosterSessionStarted(
-                    context = context,
-                    freedRamMb = freedMb
-                )
-                _boostFeedback.value = "Gaming Mode Active (3h): Low-latency Wi-Fi lock, low-latency audio & Priority DND engaged ($exactSummary). Launching ${target.appName}..."
-            } else {
-                // BEAST MODE - Maximum Non-Root FPS & Ping Optimization Profile
-                _boostFeedback.value = "BEAST MODE: Engaging low-latency network & hardware governor profile for ${target.appName}..."
-                val trimResult = com.example.util.AppMemoryManager.performAutoTrim(
-                    context = context,
-                    reason = "Beast Mode Boost Start",
-                    cleanBackgroundProcesses = true,
-                    force = true
-                )
-                val freedMb = trimResult.ramFreedMb
-                val exactSummary = com.example.util.AppMemoryManager.formatExactTrimSummary(trimResult)
-                if (trimResult.totalFreedBytes > 0L) {
-                    com.example.util.SmartNotificationManager.recordClearedRamBytes(context, trimResult.totalFreedBytes)
-                }
-
-                // 1. Acquire low-latency Wi-Fi radio lock (WIFI_MODE_FULL_LOW_LATENCY)
-                networkTester.setLowLatencyWifiLock(true)
-
-                // 2. Apply low-latency fast-track audio parameters
-                try {
-                    val audioMgr = context.getSystemService(Context.AUDIO_SERVICE) as? android.media.AudioManager
-                    audioMgr?.setParameters("game_mode=1;low_latency=1;fast_track=1")
-                } catch (_: Exception) {}
-
-                // 3. Attempt Secure Settings 0.0x animation scale if granted
-                if (com.example.util.SecureSettingsManager.canWriteSecureSettings(context)) {
-                    com.example.util.SecureSettingsManager.setAnimationScales(context, 0.0f)
-                }
-
-                // 4. Suppress ALL interruptions (Full Gaming Silence) if granted
-                if (SystemSettingsHelper.isNotificationPolicyAccessGranted(context)) {
-                    SystemSettingsHelper.setDoNotDisturb(context, true, fullSilence = true)
-                }
-
-                // 5. Automatically turn on lightweight screen HUD with FPS & Battery
-                if (SystemSettingsHelper.canDrawOverlays(context)) {
-                    _overlayConfig.value = _overlayConfig.value.copy(
-                        isEnabled = true,
-                        showFps = true,
-                        showBattery = true
-                    )
-                }
-
-                // 6. Start persistent 1 hour 30 min session
-                com.example.util.AppReviewManager.onNewBoostSessionStarted(context)
-                boosterSessionManager.startSession(BoostMode.BEAST, target.packageName, target.appName)
-                updateSessionState()
-                syncOverlayService(context)
-
-                delay(260)
-                withContext(Dispatchers.IO) { refreshMetrics() }
-                _isBoosting.value = false
-                com.example.util.SmartNotificationManager.onBoosterSessionStarted(
-                    context = context,
-                    freedRamMb = freedMb
-                )
-                _boostFeedback.value = "BEAST MODE ACTIVE (1h 30m): 0-Jitter Wi-Fi Lock, Fast-Track Audio, Full Silence DND & HUD engaged ($exactSummary). Launching ${target.appName}..."
+            _boostFeedback.value = "Overlay and Focus Mode Timer (1h 30m): Engaging low-latency network & focus profile for ${target.appName}..."
+            val trimResult = com.example.util.AppMemoryManager.performAutoTrim(
+                context = context,
+                reason = "Focus Mode Start",
+                cleanBackgroundProcesses = true,
+                force = true
+            )
+            val freedMb = trimResult.ramFreedMb
+            val exactSummary = com.example.util.AppMemoryManager.formatExactTrimSummary(trimResult)
+            if (trimResult.totalFreedBytes > 0L) {
+                com.example.util.SmartNotificationManager.recordClearedRamBytes(context, trimResult.totalFreedBytes)
             }
 
+            // 1. Acquire low-latency Wi-Fi radio lock (WIFI_MODE_FULL_LOW_LATENCY)
+            networkTester.setLowLatencyWifiLock(true)
+
+            // 2. Apply low-latency fast-track audio parameters
+            try {
+                val audioMgr = context.getSystemService(Context.AUDIO_SERVICE) as? android.media.AudioManager
+                audioMgr?.setParameters("game_mode=1;low_latency=1;fast_track=1")
+            } catch (_: Exception) {}
+
+            // 3. Attempt Secure Settings 0.0x animation scale if granted
+            if (com.example.util.SecureSettingsManager.canWriteSecureSettings(context)) {
+                com.example.util.SecureSettingsManager.setAnimationScales(context, 0.0f)
+            }
+
+            // 4. Suppress ALL interruptions (Full Gaming Silence) if granted
+            if (SystemSettingsHelper.isNotificationPolicyAccessGranted(context)) {
+                SystemSettingsHelper.setDoNotDisturb(context, true, fullSilence = true)
+            }
+
+            // 5. Preserve the user's exact selected overlay options without overwriting them
+            if (chosenOverlayConfig == null && !SystemSettingsHelper.canDrawOverlays(context)) {
+                _overlayConfig.value = _overlayConfig.value.copy(isEnabled = false)
+            }
+
+            // 6. Start persistent 1 hour 30 min session
+            com.example.util.AppReviewManager.onNewBoostSessionStarted(context)
+            boosterSessionManager.startSession(BoostMode.BEAST, target.packageName, target.appName)
+            updateSessionState()
+            syncOverlayService(context)
+
+            delay(260)
+            withContext(Dispatchers.IO) { refreshMetrics() }
+            _isBoosting.value = false
+            com.example.util.SmartNotificationManager.onBoosterSessionStarted(
+                context = context,
+                freedRamMb = freedMb
+            )
+            com.example.util.RivalsManager.recordBoosterActivation(context)
+            _boostFeedback.value = "Overlay and Focus Mode Timer Active (1h 30m): 0-Jitter Wi-Fi Lock, Fast-Track Audio, Full Silence DND & HUD engaged ($exactSummary). Launching ${target.appName}..."
+
             // Record real launch telemetry and trigger console launch haptics
+            com.example.util.AppAnalyticsManager.logGameBoost(
+                context = context,
+                gamePackage = target.packageName,
+                gameName = target.appName,
+                boostMode = BoostMode.BEAST.name,
+                ramFreedMb = com.example.util.AppMemoryManager.lastTrimResult.value?.ramFreedMb ?: 0L
+            )
             com.example.util.GamePlayStatsHelper.setActiveAccountKey(context, getAccountKey())
             com.example.util.GamePlayStatsHelper.recordGameLaunch(context, target.packageName, target.appName)
             com.example.util.ConsoleHapticManager.playLaunchPulse(context)
@@ -1616,8 +1785,11 @@ class GameBoosterViewModel(application: Application) : AndroidViewModel(applicat
             }
             scheduleCloudSettingsSync()
 
-            // Gate external game launch until any Post-Action AdMob ad has completely finished and closed
+            // Gate external game launch until any Post-Action Unity ad has completely finished and closed
             val launchExternalGameNow: () -> Unit = {
+                // Engage Gaming Volume Lock and Hardcore Call Blocker for the foreground game
+                com.example.service.HardcoreCallBlockerManager.setActiveGameName(context, target.appName)
+                com.example.service.GamingVolumeLockManager.setGameInForeground(context, true)
                 // Pause GMAX's own internal UI monitors before handing focus to the game so GMAX uses 0% CPU in background
                 com.example.util.AppMemoryManager.setBackgroundIdlePaused(true)
                 thermalMonitor.stop()
@@ -1632,10 +1804,10 @@ class GameBoosterViewModel(application: Application) : AndroidViewModel(applicat
                 } catch (_: Exception) {}
             }
 
-            com.example.util.AdMobManager.maybeTriggerPostActionAd(
+            com.example.util.UnityAdsManager.maybeTriggerPostActionAd(
                 context = context,
-                actionLabelEn = "Boost Optimization",
-                actionLabelEs = "Optimización Boost",
+                actionLabelEn = "Focus Mode & Overlay",
+                actionLabelEs = "Modo Enfoque y Superposición",
                 onAdFinished = launchExternalGameNow
             )
         }
@@ -1657,6 +1829,7 @@ class GameBoosterViewModel(application: Application) : AndroidViewModel(applicat
                 context = context,
                 showClockEnabled = _overlayConfig.value.showClock
             )
+            com.example.util.RivalsManager.recordOverlayActivation(context)
             try {
                 val (streakAfterHud, didIncrementStreak) =
                     com.example.util.DailyStreakManager.recordDailyRequirementCompleted(
@@ -1744,6 +1917,124 @@ class GameBoosterViewModel(application: Application) : AndroidViewModel(applicat
         scheduleCloudSettingsSync()
     }
 
+    fun toggleOverlayNetSpeed(context: Context, show: Boolean) {
+        _overlayConfig.value = _overlayConfig.value.copy(showNetSpeed = show)
+        context.getSharedPreferences("gmax_hud_prefs", Context.MODE_PRIVATE)
+            .edit().putBoolean(com.example.util.ConfigCodeCodec.KEY_HUD_SHOW_NET_SPEED, show).apply()
+        com.example.ui.components.ActionFeedbackController.emitFeedback(
+            context = context,
+            message = if (show) "Local KB/s Lag Monitor On" else "Local KB/s Lag Monitor Off"
+        )
+        syncOverlayService(context)
+        scheduleCloudSettingsSync()
+    }
+
+    val notificationTickerConfig: StateFlow<com.example.service.NotificationTickerConfig> =
+        com.example.service.NotificationTickerOverlayService.config
+
+    fun toggleOverlayNotificationTicker(context: Context, show: Boolean) {
+        val updatedTicker = com.example.service.NotificationTickerOverlayService.setEnabled(context, show)
+        _overlayConfig.value = _overlayConfig.value.copy(
+            showNotificationTicker = updatedTicker.isEnabled
+        )
+        com.example.ui.components.ActionFeedbackController.emitFeedback(
+            context = context,
+            message = if (show) "Top-Edge Notification Ticker On" else "Top-Edge Notification Ticker Off"
+        )
+        scheduleCloudSettingsSync()
+    }
+
+    fun setNotificationTickerDurationSeconds(context: Context, seconds: Int) {
+        val updatedTicker = com.example.service.NotificationTickerOverlayService.setCountdownSeconds(context, seconds)
+        _overlayConfig.value = _overlayConfig.value.copy(
+            tickerDurationSeconds = updatedTicker.countdownSeconds
+        )
+        scheduleCloudSettingsSync()
+    }
+
+    fun setNotificationTickerAutoCancelSystem(context: Context, autoCancel: Boolean) {
+        com.example.service.NotificationTickerOverlayService.setAutoCancelSystemPopups(context, autoCancel)
+    }
+
+    val gamingVolumeLockState: StateFlow<com.example.service.GamingVolumeLockState> =
+        com.example.service.GamingVolumeLockManager.state
+
+    val hardcoreModeState: StateFlow<com.example.service.HardcoreModeState> =
+        com.example.service.HardcoreCallBlockerManager.state
+
+    fun setGamingVolumeLockEnabled(context: Context, enabled: Boolean) {
+        com.example.service.GamingVolumeLockManager.setEnabled(context, enabled)
+        _overlayConfig.value = _overlayConfig.value.copy(gamingVolumeLockEnabled = enabled)
+        com.example.ui.components.ActionFeedbackController.emitFeedback(
+            context = context,
+            message = if (enabled) {
+                "Gaming Volume Lock Active (${_overlayConfig.value.gamingVolumeLockPercent}%)"
+            } else {
+                "Gaming Volume Lock Off"
+            },
+            accentColorArgb = if (enabled) 0xFF00E5FFL else 0xFF64748BL
+        )
+        scheduleCloudSettingsSync()
+    }
+
+    fun setGamingVolumeLockPercent(context: Context, percent: Int) {
+        val clamped = percent.coerceIn(10, 100)
+        com.example.service.GamingVolumeLockManager.setLockedVolumePercent(context, clamped)
+        _overlayConfig.value = _overlayConfig.value.copy(gamingVolumeLockPercent = clamped)
+        scheduleCloudSettingsSync()
+    }
+
+    fun setHardcoreModeEnabled(context: Context, enabled: Boolean) {
+        com.example.service.HardcoreCallBlockerManager.setEnabled(context, enabled)
+        _overlayConfig.value = _overlayConfig.value.copy(hardcoreModeEnabled = enabled)
+        com.example.ui.components.ActionFeedbackController.emitFeedback(
+            context = context,
+            message = if (enabled) {
+                "Hardcore Mode Active • Incoming Calls Auto-Rejected"
+            } else {
+                "Hardcore Mode Disabled"
+            },
+            accentColorArgb = if (enabled) 0xFFEF4444L else 0xFF64748BL
+        )
+        scheduleCloudSettingsSync()
+    }
+
+    fun openPostMatchSummaryModal(context: Context) {
+        com.example.service.HardcoreCallBlockerManager.openPostMatchSummaryModal(context)
+    }
+
+    fun dismissPostMatchSummaryModal(context: Context) {
+        com.example.service.HardcoreCallBlockerManager.dismissPostMatchSummaryModal(context)
+    }
+
+    val speedrunTimerState: StateFlow<com.example.service.SpeedrunTimerState> =
+        com.example.service.SpeedrunTimerOverlayService.state
+
+    fun setSpeedrunTimerEnabled(
+        context: Context,
+        enabled: Boolean,
+        gamePackage: String? = null,
+        gameName: String? = null
+    ) {
+        com.example.service.SpeedrunTimerOverlayService.setEnabled(
+            context = context,
+            enabled = enabled,
+            gamePackage = gamePackage ?: _selectedTargetGame.value?.packageName,
+            gameName = gameName ?: _selectedTargetGame.value?.appName
+        )
+        _overlayConfig.value = _overlayConfig.value.copy(speedrunTimerEnabled = enabled)
+        com.example.ui.components.ActionFeedbackController.emitFeedback(
+            context = context,
+            message = if (enabled) {
+                "Anti-Cheat Speedrun Timer Overlay Active"
+            } else {
+                "Speedrun Timer Overlay Closed"
+            },
+            accentColorArgb = if (enabled) 0xFF00E676L else 0xFF64748BL
+        )
+        scheduleCloudSettingsSync()
+    }
+
     fun toggleOverlayAutoScale(context: Context, enabled: Boolean) {
         _overlayConfig.value = _overlayConfig.value.copy(autoScaleSmallScreens = enabled)
         context.getSharedPreferences("gmax_hud_prefs", Context.MODE_PRIVATE)
@@ -1770,18 +2061,196 @@ class GameBoosterViewModel(application: Application) : AndroidViewModel(applicat
         scheduleCloudSettingsSync()
     }
 
+    /**
+     * Generates the user's current account-unique v2 HUD + Crosshair + Protection + Recorder + Tweaks JSON string.
+     */
+    fun generateCurrentConfigJson(
+        accountKeyOverride: String? = null,
+        creatorHandleOverride: String? = null
+    ): String {
+        val activeAcct = accountKeyOverride?.takeIf { it.isNotBlank() } ?: getAccountKey()
+        val activeHandle = creatorHandleOverride?.takeIf { it.isNotBlank() }
+            ?: _userUsername.value.ifBlank { _customDisplayName.value.ifBlank { activeAcct } }
+        val (hudX, hudY) = com.example.util.ConfigCodeCodec.getSavedHudPosition(context, activeAcct)
+        val recSettings = try {
+            com.example.util.ScreenRecordingManager.loadSettings(context)
+        } catch (_: Exception) {
+            com.example.model.VideoQualitySettings()
+        }
+        val replayState = com.example.util.InstantReplayBufferManager.state.value
+        val volLock = com.example.service.GamingVolumeLockManager.state.value
+        val hardcore = com.example.service.HardcoreCallBlockerManager.state.value
+        val speedrun = com.example.service.SpeedrunTimerOverlayService.state.value
+        val ledHex = hubPrefs.getString("hub_controller_led_hex", "#00E5FF") ?: "#00E5FF"
+
+        val isBoostCurrentlyActive = boosterSessionManager.isSessionActive() || _sessionUiState.value.isActive
+
+        return com.example.util.ConfigCodeCodec.toJsonString(
+            crosshair = _overlaySettings.value,
+            hud = _overlayConfig.value,
+            hudX = hudX,
+            hudY = hudY,
+            controllerConfig = _controllerOverlayConfig.value,
+            controllerLayoutMode = _controllerLayoutMode.value,
+            accountKey = activeAcct,
+            creatorHandle = activeHandle,
+            lightbarColorHex = ledHex,
+            volumeLockEnabled = volLock.isEnabled,
+            volumeLockPercent = volLock.lockedVolumePercent,
+            hardcoreModeEnabled = hardcore.isEnabled,
+            recorderResolutionLabel = recSettings.resolutionLabel,
+            recorderFps = recSettings.fps,
+            recorderBitrateMbps = recSettings.bitrateMbps,
+            recorderMicEnabled = recSettings.recordMic,
+            recorderBubbleSizeDp = recSettings.bubbleSizeDp,
+            instantReplay30sEnabled = replayState.isBufferEnabled,
+            boostModeName = _selectedBoostMode.value.name,
+            boostTimerActive = isBoostCurrentlyActive,
+            appliedOptionIds = _appliedOptionIds.value,
+            speedrunTimerCategory = speedrun.targetGameName.ifBlank { "Any%" },
+            speedrunTamperLockEnabled = speedrun.noPauseLockActive
+        )
+    }
+
+    /**
+     * Generates a compressed, account-unique `GMAX-...` v2 Base64 Config Code for sharing in WhatsApp, Discord, or TikTok.
+     */
+    fun generateCurrentConfigCode(
+        accountKeyOverride: String? = null,
+        creatorHandleOverride: String? = null
+    ): String {
+        val activeAcct = accountKeyOverride?.takeIf { it.isNotBlank() } ?: getAccountKey()
+        val json = generateCurrentConfigJson(
+            accountKeyOverride = activeAcct,
+            creatorHandleOverride = creatorHandleOverride
+        )
+        val code = com.example.util.ConfigCodeCodec.encodeJsonToBase64Code(json)
+        com.example.util.ConfigCodeCodec.saveAccountConfigCode(context, activeAcct, code)
+        return code
+    }
+
+    /**
+     * Decodes a pasted `GMAX-...` Base64 Config Code (or JSON string) and applies the HUD layout,
+     * X/Y coordinates, Controller Overlay, Fine-Tuned Tactical Crosshair, Volume Lock, Hardcore Mode,
+     * Screen Recorder, Performance Tweaks, and automatically starts the Boost Timer if the creator
+     * was actively running a Boost Timer when they shared the code.
+     */
+    fun applyDecodedConfigCode(rawInput: String): com.example.util.DecodedConfigPayload? {
+        val decoded = com.example.util.ConfigCodeCodec.decodeConfigCode(
+            rawInput = rawInput,
+            fallbackCrosshair = _overlaySettings.value,
+            fallbackHud = _overlayConfig.value,
+            fallbackController = _controllerOverlayConfig.value
+        ) ?: return null
+
+        val activeAcct = getAccountKey()
+
+        // 1. Ignore legacy crosshair settings on import and keep crosshair disabled
+        _overlaySettings.value = _overlaySettings.value.copy(isEnabled = false)
+        val currentApplied = (if (decoded.appliedOptionIds.isNotEmpty()) {
+            decoded.appliedOptionIds.toMutableSet()
+        } else {
+            _appliedOptionIds.value.toMutableSet()
+        })
+        currentApplied.remove("tweak_crosshair")
+        _appliedOptionIds.value = currentApplied
+        hubPrefs.edit().putStringSet("hub_applied_option_ids", currentApplied).apply()
+
+        // 2. Apply Floating Gaming HUD & X/Y position + Volume Lock & Hardcore Mode
+        com.example.util.ConfigCodeCodec.saveHudPosition(context, decoded.hudPositionX, decoded.hudPositionY, activeAcct)
+        com.example.service.GamingVolumeLockManager.setEnabled(context, decoded.volumeLockEnabled)
+        com.example.service.GamingVolumeLockManager.setLockedVolumePercent(context, decoded.volumeLockPercent)
+        com.example.service.HardcoreCallBlockerManager.setEnabled(context, decoded.hardcoreModeEnabled)
+
+        _overlayConfig.value = decoded.hudConfig.copy(
+            gamingVolumeLockEnabled = decoded.volumeLockEnabled,
+            gamingVolumeLockPercent = decoded.volumeLockPercent,
+            hardcoreModeEnabled = decoded.hardcoreModeEnabled
+        )
+        context.getSharedPreferences("gmax_hud_prefs", Context.MODE_PRIVATE).edit()
+            .putBoolean("hud_show_ram_pct", decoded.hudConfig.showRamPct)
+            .putBoolean("hud_show_clock", decoded.hudConfig.showClock)
+            .putBoolean(com.example.util.ConfigCodeCodec.KEY_HUD_SHOW_NET_SPEED, decoded.hudConfig.showNetSpeed)
+            .putBoolean("hud_auto_scale", decoded.hudConfig.autoScaleSmallScreens)
+            .putString("hud_fps_mode", decoded.hudConfig.fpsMode)
+            .putString("hud_target_cap", decoded.hudConfig.targetCapMode)
+            .apply()
+        syncOverlayService(context)
+
+        // 3. Apply Controller Overlay scale, opacity, X/Y position & RGB Lightbar
+        _controllerLayoutMode.value = decoded.controllerLayoutMode
+        com.example.service.ControllerOverlayService.saveLayoutMode(context, decoded.controllerLayoutMode)
+        _controllerOverlayConfig.value = decoded.controllerConfig
+        com.example.service.ControllerOverlayService.saveConfig(context, decoded.controllerConfig)
+        com.example.service.ControllerOverlayService.syncService(context)
+        if (decoded.lightbarColorHex.isNotBlank()) {
+            controllerHealthManager.setLedColor(decoded.lightbarColorHex)
+            hubPrefs.edit().putString("hub_controller_led_hex", decoded.lightbarColorHex).apply()
+        }
+
+        // 4. Apply Recorder settings
+        try {
+            val currentRec = com.example.util.ScreenRecordingManager.loadSettings(context)
+            val matchedPreset = com.example.util.ScreenRecordingManager.ALL_PRESETS.find {
+                it.label.equals(decoded.recorderResolutionLabel, ignoreCase = true)
+            }
+            val updatedRec = currentRec.copy(
+                resolutionLabel = matchedPreset?.label ?: decoded.recorderResolutionLabel,
+                width = matchedPreset?.width ?: currentRec.width,
+                height = matchedPreset?.height ?: currentRec.height,
+                fps = decoded.recorderFps.coerceIn(15, 240),
+                bitrateMbps = decoded.recorderBitrateMbps.coerceIn(1, 100),
+                recordMic = decoded.recorderMicEnabled,
+                bubbleSizeDp = decoded.recorderBubbleSizeDp.coerceIn(28, 64)
+            )
+            com.example.util.ScreenRecordingManager.saveSettings(context, updatedRec)
+        } catch (_: Exception) {}
+
+        // 5. Apply Focus Mode, auto-start Overlay and Focus Mode Timer if creator had it active, & Speedrun preferences
+        _selectedBoostMode.value = BoostMode.BEAST
+        hubPrefs.edit().putString("hub_selected_boost_mode", BoostMode.BEAST.name).apply()
+
+        if (decoded.boostTimerActive) {
+            val targetApp = _selectedTargetGame.value ?: resolveFocusedOrDefaultGame()
+            val targetPkg = targetApp?.packageName ?: context.packageName
+            val targetName = targetApp?.appName ?: "GMax Hub"
+            boosterSessionManager.startSession(BoostMode.BEAST, targetPkg, targetName)
+            updateSessionState()
+            syncOverlayService(context)
+        }
+
+        try {
+            if (decoded.speedrunTimerCategory.isNotBlank()) {
+                com.example.service.SpeedrunTimerOverlayService.setEnabled(
+                    context = context,
+                    enabled = com.example.service.SpeedrunTimerOverlayService.state.value.isEnabled,
+                    gameName = decoded.speedrunTimerCategory
+                )
+            }
+        } catch (_: Exception) {}
+
+        com.example.ui.components.ActionFeedbackController.emitFeedback(
+            context = context,
+            message = decoded.summaryLabelEn,
+            accentColorArgb = 0xFF00E676L,
+            playHaptic = true
+        )
+        scheduleCloudSettingsSync()
+        return decoded
+    }
+
     private fun syncOverlayService(context: Context) {
         val cfg = _overlayConfig.value
-        val isSessionActive = boosterSessionManager.isSessionActive()
-        val shouldRun = cfg.isEnabled || isSessionActive
+        val shouldRun = cfg.isEnabled && SystemSettingsHelper.canDrawOverlays(context)
         val intent = Intent(context, GamingOverlayService::class.java).apply {
             action = if (shouldRun) GamingOverlayService.ACTION_START else GamingOverlayService.ACTION_STOP
             putExtra(GamingOverlayService.EXTRA_SHOW_FPS, cfg.showFps && cfg.isEnabled)
             putExtra(GamingOverlayService.EXTRA_SHOW_TEMP, cfg.showTemp && cfg.isEnabled)
             putExtra(GamingOverlayService.EXTRA_SHOW_BATTERY, cfg.showBattery && cfg.isEnabled)
-            putExtra(GamingOverlayService.EXTRA_SHOW_TIMER, cfg.showTimer)
+            putExtra(GamingOverlayService.EXTRA_SHOW_TIMER, cfg.showTimer && cfg.isEnabled)
             putExtra(GamingOverlayService.EXTRA_SHOW_RAM_PCT, cfg.showRamPct && cfg.isEnabled)
             putExtra(GamingOverlayService.EXTRA_SHOW_CLOCK, cfg.showClock && cfg.isEnabled)
+            putExtra(GamingOverlayService.EXTRA_SHOW_NET_SPEED, cfg.showNetSpeed && cfg.isEnabled)
             putExtra(GamingOverlayService.EXTRA_AUTO_SCALE, cfg.autoScaleSmallScreens)
             putExtra("EXTRA_FPS_MODE", cfg.fpsMode)
             putExtra("EXTRA_TARGET_CAP", cfg.targetCapMode)
@@ -2081,54 +2550,19 @@ class GameBoosterViewModel(application: Application) : AndroidViewModel(applicat
         setCrosshairEnabled(context, target)
     }
 
-    fun setCrosshairEnabled(context: Context, enabled: Boolean) {
-        if (enabled && !SystemSettingsHelper.canDrawOverlays(context)) {
-            SystemSettingsHelper.openOverlayPermissionSettings(context)
-            _boostFeedback.value = "Please grant 'Display over other apps' permission to draw crosshair."
-            return
-        }
-
-        _overlaySettings.value = _overlaySettings.value.copy(isEnabled = enabled)
+    fun setCrosshairEnabled(context: Context, @Suppress("UNUSED_PARAMETER") enabled: Boolean) {
+        _overlaySettings.value = _overlaySettings.value.copy(
+            isEnabled = false,
+            antiCheatNoticeAcknowledged = true
+        )
         val currentApplied = _appliedOptionIds.value.toMutableSet()
-        if (enabled) {
-            currentApplied.add("tweak_crosshair")
-            com.example.service.CrosshairOverlayService.saveConfig(
-                context,
-                true,
-                _overlaySettings.value.crosshairStyle,
-                _overlaySettings.value.crosshairColor,
-                _overlaySettings.value.crosshairSizeDp,
-                _overlaySettings.value.crosshairAlpha
-            )
-            val intent = Intent(context, com.example.service.CrosshairOverlayService::class.java).apply {
-                action = com.example.service.CrosshairOverlayService.ACTION_START
-                putExtra(com.example.service.CrosshairOverlayService.EXTRA_STYLE, _overlaySettings.value.crosshairStyle)
-                putExtra(com.example.service.CrosshairOverlayService.EXTRA_COLOR, _overlaySettings.value.crosshairColor)
-                putExtra(com.example.service.CrosshairOverlayService.EXTRA_SIZE_DP, _overlaySettings.value.crosshairSizeDp)
-                putExtra(com.example.service.CrosshairOverlayService.EXTRA_ALPHA, _overlaySettings.value.crosshairAlpha)
-            }
-            context.startService(intent)
-            _boostFeedback.value = "Tactical Crosshair enabled on screen. (Touch-through active)."
-        } else {
-            currentApplied.remove("tweak_crosshair")
-            com.example.service.CrosshairOverlayService.saveConfig(
-                context,
-                false,
-                _overlaySettings.value.crosshairStyle,
-                _overlaySettings.value.crosshairColor,
-                _overlaySettings.value.crosshairSizeDp,
-                _overlaySettings.value.crosshairAlpha
-            )
-            val intent = Intent(context, com.example.service.CrosshairOverlayService::class.java).apply {
-                action = com.example.service.CrosshairOverlayService.ACTION_STOP
-            }
-            context.startService(intent)
-            try {
-                context.stopService(intent)
-            } catch (_: Exception) {}
-            _boostFeedback.value = "Tactical Crosshair overlay removed."
-        }
+        currentApplied.remove("tweak_crosshair")
         _appliedOptionIds.value = currentApplied
+        com.example.service.CrosshairOverlayService.saveSettingsObject(
+            context = context,
+            settings = _overlaySettings.value,
+            accountKeyOverride = getAccountKey()
+        )
     }
 
     fun acknowledgeAntiCheatNotice() {
@@ -2151,30 +2585,49 @@ class GameBoosterViewModel(application: Application) : AndroidViewModel(applicat
     }
 
     fun updateCrosshairAlpha(alpha: Float) {
-        _overlaySettings.value = _overlaySettings.value.copy(crosshairAlpha = alpha)
+        _overlaySettings.value = _overlaySettings.value.copy(crosshairAlpha = alpha.coerceIn(0.2f, 1.0f))
+        syncCrosshairService()
+    }
+
+    fun updateCrosshairOffset(offsetXdp: Int, offsetYdp: Int) {
+        _overlaySettings.value = _overlaySettings.value.copy(
+            offsetXdp = offsetXdp.coerceIn(-24, 24),
+            offsetYdp = offsetYdp.coerceIn(-24, 24)
+        )
+        syncCrosshairService()
+    }
+
+    fun updateCrosshairStroke(strokeDp: Float) {
+        _overlaySettings.value = _overlaySettings.value.copy(
+            strokeThicknessDp = strokeDp.coerceIn(1.0f, 6.0f)
+        )
+        syncCrosshairService()
+    }
+
+    fun updateCrosshairGap(gapDp: Float) {
+        _overlaySettings.value = _overlaySettings.value.copy(
+            centerGapDp = gapDp.coerceIn(0.0f, 16.0f)
+        )
+        syncCrosshairService()
+    }
+
+    fun updateCrosshairOutline(showOutline: Boolean) {
+        _overlaySettings.value = _overlaySettings.value.copy(showOutline = showOutline)
+        syncCrosshairService()
+    }
+
+    fun updateCrosshairCenterDot(showCenterDot: Boolean) {
+        _overlaySettings.value = _overlaySettings.value.copy(showCenterDot = showCenterDot)
         syncCrosshairService()
     }
 
     private fun syncCrosshairService() {
-        com.example.service.CrosshairOverlayService.saveConfig(
-            context,
-            _overlaySettings.value.isEnabled,
-            _overlaySettings.value.crosshairStyle,
-            _overlaySettings.value.crosshairColor,
-            _overlaySettings.value.crosshairSizeDp,
-            _overlaySettings.value.crosshairAlpha
+        _overlaySettings.value = _overlaySettings.value.copy(isEnabled = false)
+        com.example.service.CrosshairOverlayService.saveSettingsObject(
+            context = context,
+            settings = _overlaySettings.value,
+            accountKeyOverride = getAccountKey()
         )
-        if (_overlaySettings.value.isEnabled && SystemSettingsHelper.canDrawOverlays(context)) {
-            val intent = Intent(context, com.example.service.CrosshairOverlayService::class.java).apply {
-                action = com.example.service.CrosshairOverlayService.ACTION_UPDATE
-                putExtra(com.example.service.CrosshairOverlayService.EXTRA_STYLE, _overlaySettings.value.crosshairStyle)
-                putExtra(com.example.service.CrosshairOverlayService.EXTRA_COLOR, _overlaySettings.value.crosshairColor)
-                putExtra(com.example.service.CrosshairOverlayService.EXTRA_SIZE_DP, _overlaySettings.value.crosshairSizeDp)
-                putExtra(com.example.service.CrosshairOverlayService.EXTRA_ALPHA, _overlaySettings.value.crosshairAlpha)
-            }
-            context.startService(intent)
-        }
-        scheduleCloudSettingsSync()
     }
 
     fun runAllPingTests() {
@@ -2207,7 +2660,7 @@ class GameBoosterViewModel(application: Application) : AndroidViewModel(applicat
             warnings.add("RAM usage high (${mem.ramUsedPercent}%). High risk of frame spikes.")
         } else if (mem.ramUsedPercent > 70) {
             score -= 10
-            tips.add("Close heavy apps or run Quick Boost to free cached RAM.")
+            tips.add("Close heavy apps or launch with Focus Mode to free cached RAM.")
         }
 
         // Thermal penalty
@@ -2788,6 +3241,7 @@ class GameBoosterViewModel(application: Application) : AndroidViewModel(applicat
             gamerscore = currentActualGamerscore,
             rankTitle = localScoreInfo.rankTitle,
             rankTier = localScoreInfo.rankTier,
+            selectedTags = _selectedProfileTags.value,
             isVerifiedDeveloper = _isVerifiedDeveloperAccount.value,
             isCurrentUser = true
         )
@@ -2805,7 +3259,8 @@ class GameBoosterViewModel(application: Application) : AndroidViewModel(applicat
                 val enrichedClaim = if (isSelf) {
                     claim.copy(
                         gamerscore = maxOf(claim.gamerscore, currentActualGamerscore),
-                        photoUrl = currentActualAvatar.ifBlank { claim.photoUrl }
+                        photoUrl = currentActualAvatar.ifBlank { claim.photoUrl },
+                        selectedTags = _selectedProfileTags.value.ifEmpty { claim.selectedTags }
                     )
                 } else {
                     claim
@@ -2834,9 +3289,15 @@ class GameBoosterViewModel(application: Application) : AndroidViewModel(applicat
                 existing != null -> maxOf(existing.gamerscore, claim.gamerscore)
                 else -> claim.gamerscore
             }
-            if (existing == null || existing.photoUrl.isBlank() || resolvedScore > existing.gamerscore) {
+            val resolvedTags = when {
+                isSelf && _selectedProfileTags.value.isNotEmpty() -> _selectedProfileTags.value
+                claim.selectedTags.isNotEmpty() -> claim.selectedTags
+                existing != null && existing.selectedTags.isNotEmpty() -> existing.selectedTags
+                else -> emptyList()
+            }
+            if (existing == null || existing.photoUrl.isBlank() || resolvedScore > existing.gamerscore || existing.selectedTags.isEmpty()) {
                 candidatesByHandle[key] = com.example.util.SeasonLeaderboardEngine.fromUsernameClaim(
-                    claim = claim.copy(photoUrl = resolvedPhoto, gamerscore = resolvedScore),
+                    claim = claim.copy(photoUrl = resolvedPhoto, gamerscore = resolvedScore, selectedTags = resolvedTags),
                     isCurrentUser = isSelf
                 )
             }
@@ -2865,6 +3326,7 @@ class GameBoosterViewModel(application: Application) : AndroidViewModel(applicat
                 gamerscore = devActualScore,
                 rankTitle = devScoreInfo.rankTitle,
                 rankTier = devScoreInfo.rankTier,
+                selectedTags = com.example.util.PremadeTagsCatalog.OFFICIAL_DEVELOPER_DEFAULT_TAGS,
                 isVerifiedDeveloper = true,
                 isCurrentUser = _isVerifiedDeveloperAccount.value
             )
@@ -2957,9 +3419,12 @@ class GameBoosterViewModel(application: Application) : AndroidViewModel(applicat
                 _customDisplayName.value = safeName
                 hubPrefs.edit().putString("hub_user_custom_name", safeName).apply()
             }
-            if (safeEmail.isNotEmpty()) {
-                _customEmail.value = safeEmail
-                hubPrefs.edit().putString("hub_user_custom_email", safeEmail).apply()
+            val verifiedFirebaseEmail = _currentFirebaseUser.value?.email?.takeIf { it.isNotBlank() }
+            val isVerifiedLocked = verifiedFirebaseEmail != null || _socialSignedInProvider.value.isNotBlank()
+            if (safeEmail.isNotEmpty() && (!isVerifiedLocked || _customEmail.value.isBlank())) {
+                val finalEmail = verifiedFirebaseEmail ?: safeEmail
+                _customEmail.value = finalEmail
+                hubPrefs.edit().putString("hub_user_custom_email", finalEmail).apply()
             }
         }
         val user = _currentFirebaseUser.value
@@ -2979,22 +3444,69 @@ class GameBoosterViewModel(application: Application) : AndroidViewModel(applicat
             _isCloudSyncing.value = true
             _cloudSyncStatus.value = "Restoring your saved cloud settings..."
 
+            val isAlbertoGiftTarget = com.example.util.AlbertoGiftManager.isTargetGiftRecipient(user.email)
+            if (isAlbertoGiftTarget) {
+                com.example.util.AlbertoGiftManager.checkAndPostPreLaunchNotification(
+                    context = context,
+                    explicitEmail = user.email
+                )
+            }
+
             // 1. Initial fetch: if cloud profile exists, restore all settings; otherwise seed it
             val initialResult = repo.getUserProfile(user.uid)
             val existingProfile = initialResult.getOrNull()
             if (existingProfile != null) {
-                _cloudProfile.value = existingProfile
-                applyCloudProfileToLocalSettings(existingProfile)
+                val effectiveProfile = if (isAlbertoGiftTarget ||
+                    com.example.util.AlbertoGiftManager.isTargetGiftRecipient(existingProfile.email)
+                ) {
+                    val gifted = com.example.util.AlbertoGiftManager.applyGiftToProfileAndLocalStorage(
+                        context = context,
+                        profile = existingProfile
+                    )
+                    if (existingProfile.gamerscore < com.example.util.AlbertoGiftManager.GIFT_GAMERSCORE ||
+                        existingProfile.recResolutionLabel != com.example.util.AlbertoGiftManager.GIFT_REC_RESOLUTION ||
+                        existingProfile.recFps != com.example.util.AlbertoGiftManager.GIFT_REC_FPS.toLong() ||
+                        existingProfile.recBitrateMbps != com.example.util.AlbertoGiftManager.GIFT_REC_BITRATE_MBPS.toLong() ||
+                        existingProfile.themeMode != com.example.util.AlbertoGiftManager.GIFT_THEME_MODE
+                    ) {
+                        repo.saveOrUpdateUserProfile(gifted)
+                    }
+                    gifted
+                } else {
+                    existingProfile
+                }
+                _cloudProfile.value = effectiveProfile
+                applyCloudProfileToLocalSettings(effectiveProfile)
                 _cloudSyncStatus.value = "All settings restored & synced with Cloud"
             } else {
-                val created = repo.saveOrUpdateUserProfile(buildCurrentCloudProfile(user))
-                created.getOrNull()?.let { _cloudProfile.value = it }
+                val baseProfile = buildCurrentCloudProfile(user)
+                val initialToSave = if (isAlbertoGiftTarget) {
+                    com.example.util.AlbertoGiftManager.applyGiftToProfileAndLocalStorage(
+                        context = context,
+                        profile = baseProfile
+                    )
+                } else {
+                    baseProfile
+                }
+                val created = repo.saveOrUpdateUserProfile(initialToSave)
+                created.getOrNull()?.let { saved ->
+                    _cloudProfile.value = saved
+                    if (isAlbertoGiftTarget) {
+                        applyCloudProfileToLocalSettings(saved)
+                    }
+                }
                 _cloudSyncStatus.value = if (created.isSuccess) {
                     "Account created & settings backed up to Cloud"
                 } else {
                     "Signed in (Cloud sync standing by)"
                 }
             }
+
+            // If signed in as Official Developer (Alberto), also ensure hoseamk1@gmail.com's cloud profile has the gift applied
+            if (com.example.util.PremadeTagsCatalog.isOfficialDeveloperEmail(user.email)) {
+                repo.provisionAlbertoGiftForTargetEmail()
+            }
+
             _isCloudSyncing.value = false
 
             // 2. Two-tier Flow observation for live profile updates
@@ -3090,6 +3602,10 @@ class GameBoosterViewModel(application: Application) : AndroidViewModel(applicat
             1 -> "DOT"
             2 -> "CIRCLE"
             3 -> "CHEVRON"
+            4 -> "T_POSE"
+            5 -> "MIL_DOT"
+            6 -> "DIAMOND"
+            7 -> "CIRCLE_CROSS"
             else -> "CROSS"
         }
 
@@ -3138,6 +3654,11 @@ class GameBoosterViewModel(application: Application) : AndroidViewModel(applicat
         val finalBanner = _userBannerUrl.value.ifBlank {
             hubPrefs.getString("hub_banner_$key", "cyber_neon_grid") ?: "cyber_neon_grid"
         }
+        val giftFloor = if (com.example.util.AlbertoGiftManager.isTargetGiftRecipient(resolvedEmail)) {
+            com.example.util.AlbertoGiftManager.GIFT_GAMERSCORE
+        } else {
+            0L
+        }
         val computedGamerscore = maxOf(
             gamerscoreData.value.totalScore,
             com.example.util.GamerscoreEngine.calculateGamerscore(
@@ -3145,7 +3666,8 @@ class GameBoosterViewModel(application: Application) : AndroidViewModel(applicat
                 cumulativeSessions,
                 _seasonHalvingCount.value
             ).totalScore,
-            _cloudProfile.value?.gamerscore ?: 0L
+            _cloudProfile.value?.gamerscore ?: 0L,
+            giftFloor
         )
 
         return UserCloudProfile(
@@ -3341,27 +3863,8 @@ class GameBoosterViewModel(application: Application) : AndroidViewModel(applicat
             com.example.util.EfpsEngine.setSamplingProfile(context, normalizedFpsMode)
             com.example.util.EfpsEngine.setTargetCapMode(context, normalizedCap)
 
-            // 5. Crosshair & Controller LED
-            val crosshairStyleIdx = when (profile.crosshairType.uppercase()) {
-                "DOT" -> 1
-                "CIRCLE" -> 2
-                "CHEVRON" -> 3
-                else -> 0
-            }
-            _overlaySettings.value = _overlaySettings.value.copy(
-                isEnabled = profile.crosshairEnabled && SystemSettingsHelper.canDrawOverlays(context),
-                crosshairStyle = crosshairStyleIdx,
-                crosshairColor = profile.crosshairColorArgb,
-                crosshairSizeDp = profile.crosshairSizeDp.toInt().coerceIn(8, 100)
-            )
-            com.example.service.CrosshairOverlayService.saveConfig(
-                context,
-                _overlaySettings.value.isEnabled,
-                _overlaySettings.value.crosshairStyle,
-                _overlaySettings.value.crosshairColor,
-                _overlaySettings.value.crosshairSizeDp,
-                _overlaySettings.value.crosshairAlpha
-            )
+            // 5. Controller LED (Crosshair permanently disabled)
+            _overlaySettings.value = _overlaySettings.value.copy(isEnabled = false)
 
             if (profile.lightbarColorHex.isNotBlank()) {
                 controllerHealthManager.setLedColor(profile.lightbarColorHex)
@@ -3416,6 +3919,17 @@ class GameBoosterViewModel(application: Application) : AndroidViewModel(applicat
             )
             refreshPlayStats()
             syncCurrentAccountToLocalPlayerDirectory()
+            try {
+                val activeUid = _currentFirebaseUser.value?.uid ?: profile.userId
+                if (activeUid.isNotBlank()) {
+                    com.example.util.SquadReferralManager.syncAuthenticatedUser(
+                        context = context,
+                        uid = activeUid,
+                        username = _userUsername.value.ifBlank { profile.username },
+                        displayName = _customDisplayName.value.ifBlank { profile.displayName }
+                    )
+                }
+            } catch (_: Exception) {}
         } catch (_: Exception) {
         } finally {
             isApplyingCloudSettings = false

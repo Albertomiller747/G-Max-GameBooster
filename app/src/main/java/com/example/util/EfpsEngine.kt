@@ -45,14 +45,14 @@ enum class EfpsSamplingProfile(
         label = "Fast (200ms)",
         intervalMs = 200L,
         kalmanProcessNoise = 0.42,
-        description = "Instant micro-stutter & 1% low responsiveness"
+        description = "Instant frame drop & 1% low responsiveness"
     ),
     BALANCED(
         key = "BALANCED",
         label = "Balanced (350ms)",
         intervalMs = 350L,
         kalmanProcessNoise = 0.26,
-        description = "Optimal 96% to 98% accuracy 6-way hardware sensor fusion"
+        description = "Optimal 96% to 98% accuracy hardware sensor fusion"
     ),
     SMOOTH(
         key = "SMOOTH",
@@ -101,10 +101,10 @@ object EfpsEngine : Choreographer.FrameCallback {
 
     const val NON_ROOT_EXPLANATION_TITLE = "Why 100% Exact FPS Is Impossible Without Root"
     const val NON_ROOT_EXPLANATION_BODY =
-        "Android's security sandbox blocks non-root apps from directly reading another game's private GPU frame buffer without a PC ADB tether. Instead, G Max Gaming Hub combines live display refresh tracking, frame pacing, and hardware load sensors to estimate real-time EFPS at 96% to 98% accuracy."
+        "Android's security sandbox blocks standard apps from directly reading another game's private GPU frame buffer without a PC ADB tether. Instead, G Max Gaming Hub combines live display refresh tracking, frame pacing, and hardware load sensors to estimate live EFPS at 96% to 98% accuracy."
 
     const val SENSOR_FUSION_SUMMARY_BODY =
-        "Our 6-way sensor fusion blends live DisplayHz, VSYNC timing, GPU render lag, game cap detection, CPU/RAM load, and thermal headroom through a real-time Kalman filter. This delivers responsive frame rate and 1% Low readouts, including sub-30 FPS drops, without root access or battery drain."
+        "Our sensor fusion blends live DisplayHz, VSYNC timing, GPU render lag, game cap detection, CPU/RAM load, and thermal headroom through a live Kalman filter. This delivers responsive frame rate and 1% Low readouts, including heavy frame drops, without root access or battery drain."
 
     private var appContext: Context? = null
     private var displayManager: DisplayManager? = null
@@ -113,7 +113,7 @@ object EfpsEngine : Choreographer.FrameCallback {
     private var activityManager: ActivityManager? = null
     private var attachedView: View? = null
 
-    private val ioScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val ioScope = CoroutineScope(SupervisorJob() + Dispatchers.IO + AppCrashGuard.coroutineExceptionHandler)
     private var hardwareProbeJob: Job? = null
 
     @Volatile

@@ -222,8 +222,10 @@ class MemoryHelper(private val context: Context) {
     suspend fun clearAppInternalCache(): Long = withContext(Dispatchers.IO) {
         var freed = 0L
         try {
+            AppMemoryManager.ensureWebViewCacheDirectories(context)
             val cacheDir = context.cacheDir
             freed = deleteDirContents(cacheDir)
+            AppMemoryManager.ensureWebViewCacheDirectories(context)
             context.externalCacheDir?.let {
                 freed += deleteDirContents(it)
             }
@@ -237,6 +239,14 @@ class MemoryHelper(private val context: Context) {
         val files = dir.listFiles() ?: return 0L
         for (f in files) {
             if (f.isDirectory) {
+                val name = f.name
+                if (name.equals("WebView", ignoreCase = true) ||
+                    name.equals("Crashpad", ignoreCase = true) ||
+                    name.startsWith("org.chromium", ignoreCase = true) ||
+                    name.contains("webview", ignoreCase = true)
+                ) {
+                    continue
+                }
                 size += deleteDirContents(f)
                 f.delete()
             } else {

@@ -116,10 +116,10 @@ object AdbCommandsRepository {
         AdbCommandTweak(
             id = "grant_secure_settings",
             category = "System Grant",
-            title = "Grant WRITE_SECURE_SETTINGS to G MAX Booster",
+            title = "Grant WRITE_SECURE_SETTINGS to G MAX Gaming Hub",
             command = "pm grant com.aistudio.gamebooster.kxmpzq android.permission.WRITE_SECURE_SETTINGS",
             revertCommand = "pm revoke com.aistudio.gamebooster.kxmpzq android.permission.WRITE_SECURE_SETTINGS",
-            description = "Permits G MAX Booster to toggle animations, private DNS, and display parameters directly on supported devices.",
+            description = "Permits G MAX Gaming Hub to toggle animations, private DNS, and display parameters directly on supported devices.",
             impactRating = "Safe"
         )
     )

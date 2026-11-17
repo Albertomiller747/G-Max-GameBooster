@@ -91,7 +91,7 @@ fun IntegrityViolationScreen(
             Spacer(modifier = Modifier.height(24.dp))
 
             Text(
-                text = "INTEGRITY VIOLATION",
+                text = com.example.util.tr("INTEGRITY VIOLATION", "VIOLACIÓN DE INTEGRIDAD"),
                 color = ElectricCrimson,
                 fontSize = 22.sp,
                 fontWeight = FontWeight.Black,
@@ -103,7 +103,7 @@ fun IntegrityViolationScreen(
             Spacer(modifier = Modifier.height(8.dp))
 
             Text(
-                text = "Unauthorized Modification Detected",
+                text = com.example.util.tr("Unauthorized Modification Detected", "Modificación No Autorizada Detectada"),
                 color = TextPrimary,
                 fontSize = 16.sp,
                 fontWeight = FontWeight.SemiBold,
@@ -130,7 +130,7 @@ fun IntegrityViolationScreen(
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = "SECURITY DIAGNOSTIC",
+                            text = com.example.util.tr("SECURITY DIAGNOSTIC", "DIAGNÓSTICO DE SEGURIDAD"),
                             color = ThermalCritical,
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Bold,
@@ -141,7 +141,13 @@ fun IntegrityViolationScreen(
                     Spacer(modifier = Modifier.height(8.dp))
 
                     Text(
-                        text = violationReason ?: "The application package signature or runtime environment has been modified or tampered with.",
+                        text = com.example.util.AppStrings.autoTranslateDynamic(
+                            violationReason ?: com.example.util.tr(
+                                "The application package signature or runtime environment has been modified or tampered with.",
+                                "La firma del paquete de la aplicación o el entorno de ejecución ha sido modificado o alterado."
+                            ),
+                            com.example.util.currentAppLanguage()
+                        ),
                         color = TextSecondary,
                         fontSize = 13.sp,
                         lineHeight = 18.sp
@@ -150,7 +156,10 @@ fun IntegrityViolationScreen(
                     Spacer(modifier = Modifier.height(10.dp))
 
                     Text(
-                        text = "To protect system stability, kernel performance options, and prevent online gaming bans, G MAX Booster features are locked on modified packages.",
+                        text = com.example.util.tr(
+                            "To protect system stability, kernel performance options, and prevent online gaming bans, G MAX Gaming Hub features are locked on modified packages.",
+                            "Para proteger la estabilidad del sistema y evitar bloqueos en juegos en línea, las funciones de G MAX Gaming Hub están bloqueadas en paquetes modificados."
+                        ),
                         color = TextMuted,
                         fontSize = 12.sp,
                         lineHeight = 16.sp
@@ -177,7 +186,7 @@ fun IntegrityViolationScreen(
                 Icon(imageVector = Icons.Default.ExitToApp, contentDescription = null)
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
-                    text = "Close Application",
+                    text = com.example.util.tr("Close Application", "Cerrar Aplicación"),
                     fontWeight = FontWeight.Bold,
                     fontSize = 15.sp
                 )

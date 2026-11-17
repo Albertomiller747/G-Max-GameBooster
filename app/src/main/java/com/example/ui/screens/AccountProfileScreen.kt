@@ -228,7 +228,6 @@ fun AccountProfileScreen(
     var isDeletingAccount by remember { mutableStateOf(false) }
     var isSigningIn by remember { mutableStateOf(false) }
     var authError by remember { mutableStateOf<String?>(null) }
-    var activeProfileSocialPickerProvider by remember { mutableStateOf<String?>(null) }
 
     // Android Zero-Permission Photo Pickers for Avatar and Banner
     val avatarPickerLauncher = rememberLauncherForActivityResult(
@@ -248,7 +247,7 @@ fun AccountProfileScreen(
         }
     }
 
-    val isSignedIn = currentUser != null || isVerifiedDeveloper || socialSignedInProvider.isNotBlank()
+    val isSignedIn = currentUser != null || isVerifiedDeveloper || socialSignedInProvider.isNotBlank() || customEmail.isNotBlank()
     val rawDisplayName = customDisplayName.takeIf { it.isNotBlank() }
         ?: currentUser?.displayName?.takeIf { it.isNotBlank() }
         ?: cloudProfile?.displayName?.takeIf { it.isNotBlank() }
@@ -320,7 +319,7 @@ fun AccountProfileScreen(
         !cloudProfile?.mostPlayedGameName.isNullOrBlank() &&
             cloudProfile?.mostPlayedGameName != "No games played yet" &&
             cloudProfile?.mostPlayedGameName != "All Games" -> cloudProfile?.mostPlayedGameName.orEmpty()
-        selectedTargetGame != null && selectedTargetGame!!.appName.isNotBlank() -> selectedTargetGame!!.appName
+        !selectedTargetGame?.appName.isNullOrBlank() -> selectedTargetGame?.appName.orEmpty()
         libraryGames.isNotEmpty() -> libraryGames.first().appName
         installedApps.any { it.isGame } -> installedApps.first { it.isGame }.appName
         else -> "No games played yet"
@@ -360,7 +359,7 @@ fun AccountProfileScreen(
     }
     val mostPlayedMinutes = when {
         topLocalStat != null -> (topLocalStat.totalPlayTimeMs / 60_000L).coerceAtLeast(1L)
-        (cloudProfile?.mostPlayedMinutes ?: 0L) > 0L -> cloudProfile!!.mostPlayedMinutes
+        (cloudProfile?.mostPlayedMinutes ?: 0L) > 0L -> cloudProfile?.mostPlayedMinutes ?: 0L
         else -> 0L
     }
     val formattedPlayTime = remember(mostPlayedMinutes) {
@@ -399,9 +398,10 @@ fun AccountProfileScreen(
         val scale = (maxWidth.value / 390f).coerceIn(0.82f, 1.22f)
         val horizontalPad = 16.scaledDp(scale)
 
-        if (selectedExternalProfile != null) {
+        val currentExternalProfile = selectedExternalProfile
+        if (currentExternalProfile != null) {
             com.example.ui.components.ExternalUserProfileScreen(
-                profile = selectedExternalProfile!!,
+                profile = currentExternalProfile,
                 scale = scale,
                 onBack = { selectedExternalProfile = null },
                 modifier = Modifier.fillMaxSize()
@@ -438,18 +438,14 @@ fun AccountProfileScreen(
                                 viewModel.onUserSignedInSuccess("Google")
                                 Toast.makeText(context, "Google Account verified & linked!", Toast.LENGTH_SHORT).show()
                             },
-                            onAuthError = {
+                            onAuthError = { errMsg ->
                                 isSigningIn = false
-                                activeProfileSocialPickerProvider = "Google"
+                                Toast.makeText(context, errMsg, Toast.LENGTH_LONG).show()
                             },
                             scope = coroutineScope,
                             onAuthCancelled = {
                                 isSigningIn = false
-                                Toast.makeText(context, "Email saved to profile", Toast.LENGTH_SHORT).show()
-                            },
-                            onRequireFallbackPicker = {
-                                isSigningIn = false
-                                activeProfileSocialPickerProvider = "Google"
+                                Toast.makeText(context, "Google Sign-In cancelled", Toast.LENGTH_SHORT).show()
                             }
                         )
                     } else {
@@ -457,7 +453,13 @@ fun AccountProfileScreen(
                     }
                 },
                 onSaveProfileChanges = { newName, newNickname, newEmail, newBio, newDob ->
-                    viewModel.setCustomProfileCredentials(newName, newEmail)
+                    val isVerifiedEmail = currentUser?.isEmailVerified == true || isSignedIn
+                    val effectiveEmail = if (isVerifiedEmail) {
+                        currentUser?.email ?: customEmail.ifBlank { newEmail }
+                    } else {
+                        newEmail
+                    }
+                    viewModel.setCustomProfileCredentials(newName, effectiveEmail)
                     viewModel.setUserBio(newBio)
                     viewModel.setUserDateOfBirth(newDob.ifBlank { "Not Set" })
                     if (newNickname.isNotBlank() && !newNickname.equals(resolvedUsername, ignoreCase = true)) {
@@ -723,9 +725,10 @@ fun AccountProfileScreen(
                                 }
                             }
 
-                            if (!usernameSearchError.isNullOrBlank()) {
+                            val currentSearchError = usernameSearchError
+                            if (!currentSearchError.isNullOrBlank()) {
                                 Text(
-                                    text = usernameSearchError!!,
+                                    text = currentSearchError,
                                     style = MaterialTheme.typography.labelSmall.copy(
                                         color = RecorderCoral,
                                         fontWeight = FontWeight.SemiBold
@@ -756,14 +759,14 @@ fun AccountProfileScreen(
                         )
                         HorizontalDivider(color = Color(0xFF1A2639))
                         com.example.ui.components.ProfileSettingActionRow(
-                            icon = if (currentUser != null) Icons.Default.CloudDone else Icons.Default.CloudSync,
-                            iconTint = if (currentUser != null) LaunchGreen else HubBlue,
-                            title = if (currentUser != null) {
+                            icon = if (isSignedIn) Icons.Default.CloudDone else Icons.Default.CloudSync,
+                            iconTint = if (isSignedIn) LaunchGreen else HubBlue,
+                            title = if (isSignedIn) {
                                 com.example.util.tr("Google Account Connected", "Cuenta de Google Conectada")
                             } else {
                                 com.example.util.tr("Connect Google Account", "Conectar Cuenta de Google")
                             },
-                            subtitle = if (currentUser != null) {
+                            subtitle = if (isSignedIn) {
                                 com.example.util.tr(
                                     "${currentUser?.email ?: emailText} • Tap to sync settings to cloud",
                                     "${currentUser?.email ?: emailText} • Toca para sincronizar ajustes en la nube"
@@ -774,12 +777,12 @@ fun AccountProfileScreen(
                                     "Inicia sesión con Google para respaldo en la nube e identidad verificada en clasificación"
                                 )
                             },
-                            badgeText = if (currentUser != null) com.example.util.tr("LINKED", "VINCULADO") else com.example.util.tr("SIGN IN", "ENTRAR"),
-                            badgeColor = if (currentUser != null) LaunchGreen else HubBlue,
+                            badgeText = if (isSignedIn) com.example.util.tr("LINKED", "VINCULADO") else com.example.util.tr("SIGN IN", "ENTRAR"),
+                            badgeColor = if (isSignedIn) LaunchGreen else HubBlue,
                             scale = scale,
                             testTag = "general_google_account_row",
                             onClick = {
-                                if (currentUser != null) {
+                                if (isSignedIn) {
                                     viewModel.syncAllSettingsToCloudNow()
                                     Toast.makeText(
                                         context,
@@ -807,17 +810,14 @@ fun AccountProfileScreen(
                                                 Toast.LENGTH_SHORT
                                             ).show()
                                         },
-                                        onAuthError = {
+                                        onAuthError = { errMsg ->
                                             isSigningIn = false
-                                            activeProfileSocialPickerProvider = "Google"
+                                            authError = errMsg
+                                            Toast.makeText(context, errMsg, Toast.LENGTH_LONG).show()
                                         },
                                         scope = coroutineScope,
                                         onAuthCancelled = {
                                             isSigningIn = false
-                                        },
-                                        onRequireFallbackPicker = {
-                                            isSigningIn = false
-                                            activeProfileSocialPickerProvider = "Google"
                                         }
                                     )
                                 }
@@ -1202,6 +1202,14 @@ fun AccountProfileScreen(
                     }
                 }
 
+                // 7b. Base64 HUD & Crosshair Config Codes (Shareable in WhatsApp, Discord & TikTok)
+                item(key = "profile_base64_config_codes_card") {
+                    Base64ConfigCodesProfileCard(
+                        viewModel = viewModel,
+                        scale = scale
+                    )
+                }
+
                 // 8. Account & Cloud Sync Card
                 item {
                     CyberCard {
@@ -1355,7 +1363,7 @@ fun AccountProfileScreen(
                                 }
                             }
 
-                            if (currentUser == null) {
+                            if (!isSignedIn) {
                                 Spacer(modifier = Modifier.height(10.scaledDp(scale)))
                                 Button(
                                     onClick = {
@@ -1376,17 +1384,14 @@ fun AccountProfileScreen(
                                                     Toast.LENGTH_SHORT
                                                 ).show()
                                             },
-                                            onAuthError = {
+                                            onAuthError = { errMsg ->
                                                 isSigningIn = false
-                                                activeProfileSocialPickerProvider = "Google"
+                                                authError = errMsg
+                                                Toast.makeText(context, errMsg, Toast.LENGTH_LONG).show()
                                             },
                                             scope = coroutineScope,
                                             onAuthCancelled = {
                                                 isSigningIn = false
-                                            },
-                                            onRequireFallbackPicker = {
-                                                isSigningIn = false
-                                                activeProfileSocialPickerProvider = "Google"
                                             }
                                         )
                                     },
@@ -1463,17 +1468,14 @@ fun AccountProfileScreen(
                                                 isSigningIn = false
                                                 viewModel.onUserSignedInSuccess("Google")
                                             },
-                                            onAuthError = {
+                                            onAuthError = { errMsg ->
                                                 isSigningIn = false
-                                                activeProfileSocialPickerProvider = "Google"
+                                                authError = errMsg
+                                                Toast.makeText(context, errMsg, Toast.LENGTH_LONG).show()
                                             },
                                             scope = coroutineScope,
                                             onAuthCancelled = {
                                                 isSigningIn = false
-                                            },
-                                            onRequireFallbackPicker = {
-                                                isSigningIn = false
-                                                activeProfileSocialPickerProvider = "Google"
                                             }
                                         )
                                     },
@@ -1559,20 +1561,6 @@ fun AccountProfileScreen(
             },
             onDismiss = {
                 showProfileStreakLostModal = false
-            }
-        )
-    }
-
-    activeProfileSocialPickerProvider?.let { provider ->
-        SocialAccountPickerFallbackDialog(
-            providerName = provider,
-            initialName = customDisplayName,
-            initialEmail = customEmail,
-            onDismiss = { activeProfileSocialPickerProvider = null },
-            onConfirmAccount = { chosenName, chosenEmail ->
-                activeProfileSocialPickerProvider = null
-                viewModel.onSocialAccountSignedIn(provider, chosenName, chosenEmail)
-                Toast.makeText(context, "Signed in with $provider as $chosenName", Toast.LENGTH_SHORT).show()
             }
         )
     }
@@ -3452,8 +3440,9 @@ private fun PremadeTagPickerDialog(
                         .heightIn(max = 310.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    val categoriesToShow = if (selectedCategory != null) {
-                        listOf(selectedCategory!!)
+                    val activeCategory = selectedCategory
+                    val categoriesToShow = if (activeCategory != null) {
+                        listOf(activeCategory)
                     } else {
                         ProfileTagCategory.entries
                     }
@@ -3587,7 +3576,7 @@ private fun EditBioDialog(
                 OutlinedTextField(
                     value = draftBio,
                     onValueChange = { if (it.length <= 300) draftBio = it },
-                    placeholder = { Text("e.g. 120Hz FPS & MOBA player • Beast Mode main") },
+                    placeholder = { Text("e.g. 120Hz FPS & MOBA player • Console Controller main") },
                     maxLines = 4,
                     modifier = Modifier
                         .fillMaxWidth()
@@ -3675,3 +3664,398 @@ private fun SyncedCategoryRow(
         }
     }
 }
+
+@Composable
+private fun Base64ConfigCodesProfileCard(
+    viewModel: GameBoosterViewModel,
+    scale: Float
+) {
+    val context = LocalContext.current
+    val overlaySettings by viewModel.overlaySettings.collectAsState()
+    val overlayConfig by viewModel.overlayConfig.collectAsState()
+    val controllerOverlayConfig by viewModel.controllerOverlayConfig.collectAsState()
+    val controllerLayoutMode by viewModel.controllerLayoutMode.collectAsState()
+    val currentFirebaseUser by viewModel.currentFirebaseUser.collectAsState()
+    val userUsername by viewModel.userUsername.collectAsState()
+    val appliedOptionIds by viewModel.appliedOptionIds.collectAsState()
+    val selectedBoostMode by viewModel.selectedBoostMode.collectAsState()
+
+    val activeAccountKey = remember(currentFirebaseUser, userUsername) {
+        viewModel.getAccountKey()
+    }
+    val accountHash = remember(activeAccountKey) {
+        com.example.util.ConfigCodeCodec.computeAccountUidHash(activeAccountKey)
+    }
+    val creatorTag = remember(userUsername, activeAccountKey) {
+        val raw = userUsername.ifBlank { activeAccountKey }.removePrefix("@")
+        "@$raw"
+    }
+
+    val currentCode = remember(
+        overlaySettings,
+        overlayConfig,
+        controllerOverlayConfig,
+        controllerLayoutMode,
+        activeAccountKey,
+        userUsername,
+        appliedOptionIds,
+        selectedBoostMode
+    ) {
+        viewModel.generateCurrentConfigCode()
+    }
+    val currentJson = remember(
+        overlaySettings,
+        overlayConfig,
+        controllerOverlayConfig,
+        controllerLayoutMode,
+        activeAccountKey,
+        userUsername,
+        appliedOptionIds,
+        selectedBoostMode
+    ) {
+        viewModel.generateCurrentConfigJson()
+    }
+
+    var showJsonPreview by rememberSaveable { mutableStateOf(false) }
+    var importCodeInput by rememberSaveable { mutableStateOf("") }
+    var statusMessage by rememberSaveable { mutableStateOf<String?>(null) }
+    var isStatusError by rememberSaveable { mutableStateOf(false) }
+
+    CyberCard(
+        modifier = Modifier.testTag("profile_base64_config_card"),
+        borderColor = HubBlue.copy(alpha = 0.45f)
+    ) {
+        SectionTitle(
+            title = com.example.util.tr(
+                "Base64 HUD & Crosshair Config Codes",
+                "Códigos Base64 de HUD y Mira"
+            ),
+            subtitle = com.example.util.tr(
+                "Account-unique creator-signed v2 code bundling HUD X/Y, Controller, Volume Lock, Hardcore Mode, Recorder, Tweaks & Overlay and Focus Mode Timer Auto-Start",
+                "Código v2 único por cuenta con HUD X/Y, Control, Bloqueo de Volumen, Modo Hardcore, Grabadora, Ajustes y Auto-Inicio de Temporizador de Superposición y Modo Enfoque"
+            ),
+            badge = "V2 • #$accountHash",
+            badgeColor = HubBlue
+        )
+
+        Spacer(modifier = Modifier.height(10.scaledDp(scale)))
+
+        // Account Creator Signature Pill
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(10.dp))
+                .background(LaunchGreen.copy(alpha = 0.12f))
+                .border(1.dp, LaunchGreen.copy(alpha = 0.4f), RoundedCornerShape(10.dp))
+                .padding(horizontal = 10.dp, vertical = 7.dp)
+                .testTag("config_code_account_signature_badge"),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = com.example.util.tr(
+                    "Creator Signed: $creatorTag • ID #$accountHash",
+                    "Firmado por: $creatorTag • ID #$accountHash"
+                ),
+                style = MaterialTheme.typography.labelSmall.copy(
+                    color = LaunchGreen,
+                    fontWeight = FontWeight.ExtraBold,
+                    fontSize = 11.scaledSp(scale)
+                )
+            )
+            Text(
+                text = "${36 + appliedOptionIds.size} Settings",
+                style = MaterialTheme.typography.labelSmall.copy(
+                    color = SolarGold,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 10.scaledSp(scale)
+                )
+            )
+        }
+
+        Spacer(modifier = Modifier.height(10.scaledDp(scale)))
+
+        // 1. Live Generated GMAX-... Config Code Box
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(12.scaledDp(scale)),
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
+            ),
+            border = BorderStroke(1.dp, HubBlue.copy(alpha = 0.45f))
+        ) {
+            Column(modifier = Modifier.padding(12.scaledDp(scale))) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = com.example.util.tr("YOUR ACTIVE CONFIG CODE", "TU CÓDIGO DE CONFIGURACIÓN ACTIVO"),
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            color = HubBlue,
+                            fontWeight = FontWeight.ExtraBold,
+                            fontSize = 10.scaledSp(scale)
+                        )
+                    )
+                    Text(
+                        text = if (showJsonPreview) {
+                            com.example.util.tr("Hide JSON", "Ocultar JSON")
+                        } else {
+                            com.example.util.tr("View JSON", "Ver JSON")
+                        },
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            color = SolarGold,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 10.scaledSp(scale)
+                        ),
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .clickable { showJsonPreview = !showJsonPreview }
+                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                            .testTag("toggle_config_json_preview_button")
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(6.dp))
+
+                Text(
+                    text = currentCode,
+                    style = MaterialTheme.typography.bodySmall.copy(
+                        color = MaterialTheme.colorScheme.onSurface,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 11.scaledSp(scale)
+                    ),
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.testTag("generated_gmax_config_code_text")
+                )
+
+                AnimatedVisibility(visible = showJsonPreview) {
+                    Column {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(Color(0xFF0A0F1D))
+                                .border(1.dp, HubBlue.copy(alpha = 0.3f), RoundedCornerShape(8.dp))
+                                .padding(8.dp)
+                        ) {
+                            Text(
+                                text = currentJson,
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    color = Color(0xFF38BDF8),
+                                    fontSize = 10.sp
+                                ),
+                                modifier = Modifier.testTag("generated_gmax_config_json_text")
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(10.scaledDp(scale)))
+
+        // 2. Copy & Share Action Buttons Row
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.scaledDp(scale))
+        ) {
+            Button(
+                onClick = {
+                    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+                    clipboard?.setPrimaryClip(ClipData.newPlainText("GMAX Config Code", currentCode))
+                    isStatusError = false
+                    statusMessage = com.example.util.AppStrings.trText(
+                        "Copied GMAX Config Code to clipboard!",
+                        "¡Código GMAX copiado al portapapeles!"
+                    )
+                    com.example.ui.components.ActionFeedbackController.emitFeedback(
+                        context = context,
+                        message = "Config Code Copied",
+                        accentColorArgb = 0xFF00E5FFL
+                    )
+                },
+                modifier = Modifier
+                    .weight(1f)
+                    .height(46.dp)
+                    .testTag("copy_config_code_button"),
+                shape = RoundedCornerShape(12.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = HubBlue,
+                    contentColor = Color(0xFF081018)
+                )
+            ) {
+                Icon(
+                    imageVector = Icons.Default.ContentCopy,
+                    contentDescription = null,
+                    modifier = Modifier.size(16.dp)
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(
+                    text = com.example.util.tr("Copy Code", "Copiar Código"),
+                    fontWeight = FontWeight.ExtraBold,
+                    fontSize = 12.scaledSp(scale)
+                )
+            }
+
+            OutlinedButton(
+                onClick = {
+                    val shareText = "Check out my G-Max HUD & Crosshair loadout! Paste this code in Account Profile:\n$currentCode"
+                    val sendIntent = Intent(Intent.ACTION_SEND).apply {
+                        type = "text/plain"
+                        putExtra(Intent.EXTRA_TEXT, shareText)
+                    }
+                    try {
+                        context.startActivity(
+                            Intent.createChooser(sendIntent, "Share G-Max Config Code").apply {
+                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            }
+                        )
+                    } catch (_: Exception) {}
+                },
+                modifier = Modifier
+                    .weight(1f)
+                    .height(46.dp)
+                    .testTag("share_config_code_button"),
+                shape = RoundedCornerShape(12.dp),
+                border = BorderStroke(1.dp, LaunchGreen.copy(alpha = 0.7f))
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Link,
+                    contentDescription = null,
+                    tint = LaunchGreen,
+                    modifier = Modifier.size(16.dp)
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(
+                    text = com.example.util.tr("Share Code", "Compartir"),
+                    color = LaunchGreen,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 12.scaledSp(scale)
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(14.scaledDp(scale)))
+        HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.25f))
+        Spacer(modifier = Modifier.height(12.scaledDp(scale)))
+
+        // 3. Paste & Decode Another Player's GMAX-... Code
+        Text(
+            text = com.example.util.tr(
+                "Import Squadmate's Config Code",
+                "Importar Código de Compañero"
+            ),
+            style = MaterialTheme.typography.titleSmall.copy(
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurface,
+                fontSize = 13.scaledSp(scale)
+            )
+        )
+        Spacer(modifier = Modifier.height(6.dp))
+
+        OutlinedTextField(
+            value = importCodeInput,
+            onValueChange = {
+                importCodeInput = it
+                statusMessage = null
+            },
+            singleLine = true,
+            placeholder = {
+                Text(
+                    text = com.example.util.tr(
+                        "Paste GMAX-8f7B2... code or JSON string",
+                        "Pega el código GMAX-8f7B2... o JSON"
+                    ),
+                    fontSize = 12.sp
+                )
+            },
+            trailingIcon = {
+                TextButton(
+                    onClick = {
+                        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+                        val clipText = clipboard?.primaryClip?.getItemAt(0)?.coerceToText(context)?.toString().orEmpty()
+                        if (clipText.isNotBlank()) {
+                            importCodeInput = clipText.trim()
+                        }
+                    }
+                ) {
+                    Text(
+                        text = com.example.util.tr("Paste", "Pegar"),
+                        color = HubBlue,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 11.sp
+                    )
+                }
+            },
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag("paste_config_code_input"),
+            shape = RoundedCornerShape(12.dp)
+        )
+
+        Spacer(modifier = Modifier.height(10.dp))
+
+        Button(
+            onClick = {
+                val decoded = viewModel.applyDecodedConfigCode(importCodeInput)
+                if (decoded != null) {
+                    isStatusError = false
+                    statusMessage = com.example.util.AppStrings.trText(
+                        "✅ ${decoded.summaryLabelEn}",
+                        "✅ ${decoded.summaryLabelEs}"
+                    )
+                } else {
+                    isStatusError = true
+                    statusMessage = com.example.util.AppStrings.trText(
+                        "Invalid GMAX-... config code. Make sure you copied the full code.",
+                        "Código GMAX-... inválido. Asegúrate de copiar el código completo."
+                    )
+                }
+            },
+            enabled = importCodeInput.isNotBlank(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(48.dp)
+                .testTag("apply_config_code_button"),
+            shape = RoundedCornerShape(12.dp),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = LaunchGreen,
+                contentColor = Color(0xFF081018)
+            )
+        ) {
+            Icon(
+                imageVector = Icons.Default.CheckCircle,
+                contentDescription = null,
+                modifier = Modifier.size(18.dp)
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+                text = com.example.util.tr(
+                    "Decode & Apply Layout Instantly",
+                    "Decodificar y Aplicar al Instante"
+                ),
+                fontWeight = FontWeight.ExtraBold,
+                fontSize = 13.scaledSp(scale)
+            )
+        }
+
+        AnimatedVisibility(visible = statusMessage != null) {
+            Text(
+                text = statusMessage.orEmpty(),
+                style = MaterialTheme.typography.bodySmall.copy(
+                    color = if (isStatusError) RecorderCoral else LaunchGreen,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 12.scaledSp(scale)
+                ),
+                modifier = Modifier
+                    .padding(top = 8.dp)
+                    .testTag("config_code_status_message")
+            )
+        }
+    }
+}
+

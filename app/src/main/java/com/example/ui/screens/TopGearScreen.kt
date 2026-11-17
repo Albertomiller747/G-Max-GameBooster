@@ -121,9 +121,12 @@ fun TopGearScreen(
 
     val isOnlineLive by rememberIsDeviceOnline()
     var retryTrigger by remember { mutableIntStateOf(0) }
-    val isDeviceOnline = remember(isOnlineLive, retryTrigger) {
-        isOnlineLive || NetworkConnectivityMonitor.isCurrentlyOnline(context)
+    LaunchedEffect(retryTrigger) {
+        if (retryTrigger > 0) {
+            NetworkConnectivityMonitor.triggerImmediateRecheck(context)
+        }
     }
+    val isDeviceOnline = isOnlineLive
 
     var selectedCategory by rememberSaveable { mutableStateOf("All") }
     var rawProducts by remember { mutableStateOf<List<TopGearProduct>>(emptyList()) }
@@ -198,7 +201,7 @@ fun TopGearScreen(
                         .padding(horizontal = 20.dp)
                 ) {
                     Text(
-                        text = "Top Gear",
+                        text = com.example.util.tr("Top Gear", "Top Gear"),
                         style = MaterialTheme.typography.headlineMedium.copy(
                             fontWeight = FontWeight.ExtraBold,
                             letterSpacing = (-0.5).sp,
@@ -208,7 +211,7 @@ fun TopGearScreen(
                     )
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        text = "Hand-picked gear for mobile gamers",
+                        text = com.example.util.tr("Hand-picked gear for mobile gamers", "Equipo seleccionado para gamers móviles"),
                         style = MaterialTheme.typography.bodyLarge.copy(
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             fontWeight = FontWeight.Medium
@@ -234,13 +237,16 @@ fun TopGearScreen(
                         ) {
                             Icon(
                                 imageVector = Icons.Default.Info,
-                                contentDescription = "Affiliate Disclosure",
+                                contentDescription = com.example.util.tr("Affiliate Disclosure", "Aviso de Afiliado"),
                                 tint = HubBlue,
                                 modifier = Modifier.size(15.dp)
                             )
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
-                                text = "As an Amazon Associate I earn from qualifying purchases.",
+                                text = com.example.util.tr(
+                                    "As an Amazon Associate I earn from qualifying purchases.",
+                                    "Como Afiliado de Amazon, obtengo ingresos por las compras adscritas que cumplen los requisitos."
+                                ),
                                 style = MaterialTheme.typography.labelMedium.copy(
                                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.9f),
                                     fontWeight = FontWeight.Medium
@@ -289,7 +295,7 @@ fun TopGearScreen(
                             contentAlignment = Alignment.Center
                         ) {
                             Text(
-                                text = category,
+                                text = com.example.util.AppStrings.autoTranslateDynamic(category, com.example.util.currentAppLanguage()),
                                 style = MaterialTheme.typography.labelLarge.copy(
                                     fontWeight = if (isSelected) FontWeight.ExtraBold else FontWeight.SemiBold,
                                     color = if (isSelected) HubBlue else MaterialTheme.colorScheme.onSurfaceVariant,
@@ -455,7 +461,7 @@ private fun ProductGroupSection(
         ) {
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = group.groupTitle,
+                    text = com.example.util.AppStrings.autoTranslateDynamic(group.groupTitle, com.example.util.currentAppLanguage()),
                     style = MaterialTheme.typography.titleLarge.copy(
                         fontWeight = FontWeight.ExtraBold,
                         color = MaterialTheme.colorScheme.onBackground,
@@ -464,7 +470,7 @@ private fun ProductGroupSection(
                 )
                 Spacer(modifier = Modifier.height(3.dp))
                 Text(
-                    text = group.whyThisMatters,
+                    text = com.example.util.AppStrings.autoTranslateDynamic(group.whyThisMatters, com.example.util.currentAppLanguage()),
                     style = MaterialTheme.typography.bodyMedium.copy(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         lineHeight = 19.sp
@@ -494,13 +500,13 @@ private fun ProductGroupSection(
                     ) {
                         Icon(
                             imageVector = Icons.Default.CompareArrows,
-                            contentDescription = "Compare Tiers",
+                            contentDescription = com.example.util.tr("Compare Tiers", "Comparar Niveles"),
                             tint = if (isCompareExpanded) HubBlue else MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.size(16.dp)
                         )
                         Spacer(modifier = Modifier.width(5.dp))
                         Text(
-                            text = if (isCompareExpanded) "Hide Compare" else "Compare",
+                            text = if (isCompareExpanded) com.example.util.tr("Hide Compare", "Ocultar") else com.example.util.tr("Compare", "Comparar"),
                             style = MaterialTheme.typography.labelMedium.copy(
                                 fontWeight = FontWeight.Bold,
                                 color = if (isCompareExpanded) HubBlue else MaterialTheme.colorScheme.onSurface
@@ -693,7 +699,7 @@ private fun FeaturedSingleProductCard(
                     )
                     Spacer(modifier = Modifier.height(6.dp))
                     Text(
-                        text = product.benefitLine,
+                        text = com.example.util.AppStrings.autoTranslateDynamic(product.benefitLine, com.example.util.currentAppLanguage()),
                         style = MaterialTheme.typography.bodyMedium.copy(
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             lineHeight = 19.sp
@@ -749,12 +755,13 @@ private fun TierProductCard(
     onClickPairsWith: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val tierLabel = product.displayTierLabel()
-    val badgeLabel = if (isHighlightedBestPick) {
+    val activeLang = com.example.util.currentAppLanguage()
+    val tierLabel = com.example.util.AppStrings.autoTranslateDynamic(product.displayTierLabel(), activeLang)
+    val badgeLabel = (if (isHighlightedBestPick) {
         product.badge?.takeIf { it.isNotBlank() } ?: "Best Pick"
     } else {
         product.badge?.takeIf { it.isNotBlank() }
-    }
+    })?.let { com.example.util.AppStrings.autoTranslateDynamic(it, activeLang) }
 
     val borderStroke = if (isHighlightedBestPick) {
         BorderStroke(2.dp, HubBlue)
@@ -877,7 +884,7 @@ private fun TierProductCard(
 
             // One-Line Benefit
             Text(
-                text = product.benefitLine,
+                text = com.example.util.AppStrings.autoTranslateDynamic(product.benefitLine, activeLang),
                 style = MaterialTheme.typography.bodySmall.copy(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     lineHeight = 18.sp
@@ -1028,6 +1035,7 @@ private fun PriceLevelPill(priceLevel: String) {
 
 @Composable
 private fun BenefitBulletRow(text: String) {
+    val activeLang = com.example.util.currentAppLanguage()
     Row(
         modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.Top
@@ -1042,7 +1050,7 @@ private fun BenefitBulletRow(text: String) {
         )
         Spacer(modifier = Modifier.width(7.dp))
         Text(
-            text = text,
+            text = com.example.util.AppStrings.autoTranslateDynamic(text, activeLang),
             style = MaterialTheme.typography.bodySmall.copy(
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.9f),
                 lineHeight = 17.sp
@@ -1058,6 +1066,7 @@ private fun PairsWithFeatureChip(
     pairsWithLabel: String,
     onClick: () -> Unit
 ) {
+    val activeLang = com.example.util.currentAppLanguage()
     val chipIcon = when {
         pairsWithLabel.contains("temperature", ignoreCase = true) -> Icons.Default.Thermostat
         pairsWithLabel.contains("Console", ignoreCase = true) -> Icons.Default.SportsEsports
@@ -1088,7 +1097,7 @@ private fun PairsWithFeatureChip(
             )
             Spacer(modifier = Modifier.width(6.dp))
             Text(
-                text = pairsWithLabel,
+                text = com.example.util.AppStrings.autoTranslateDynamic(pairsWithLabel, activeLang),
                 style = MaterialTheme.typography.labelSmall.copy(
                     fontWeight = FontWeight.Bold,
                     color = HubBlue
@@ -1121,13 +1130,13 @@ private fun AmazonExternalActionButton(
             ) {
                 Icon(
                     imageVector = Icons.Default.WarningAmber,
-                    contentDescription = "Unavailable",
+                    contentDescription = com.example.util.tr("Unavailable", "No disponible"),
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.size(16.dp)
                 )
                 Spacer(modifier = Modifier.width(6.dp))
                 Text(
-                    text = "This product may be unavailable",
+                    text = com.example.util.tr("This product may be unavailable", "Este producto puede no estar disponible"),
                     style = MaterialTheme.typography.labelMedium.copy(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         fontWeight = FontWeight.SemiBold
@@ -1152,7 +1161,7 @@ private fun AmazonExternalActionButton(
             .testTag("view_on_amazon_${product.id}")
     ) {
         Text(
-            text = "View on Amazon",
+            text = com.example.util.tr("View on Amazon", "Ver en Amazon"),
             style = MaterialTheme.typography.labelLarge.copy(
                 fontWeight = FontWeight.ExtraBold
             )
@@ -1160,7 +1169,7 @@ private fun AmazonExternalActionButton(
         Spacer(modifier = Modifier.width(6.dp))
         Icon(
             imageVector = Icons.AutoMirrored.Filled.OpenInNew,
-            contentDescription = "Opens in external browser",
+            contentDescription = com.example.util.tr("Opens in external browser", "Abre en navegador externo"),
             modifier = Modifier.size(15.dp)
         )
     }
@@ -1186,7 +1195,7 @@ private fun SideBySideTierCompareTable(
     ) {
         Column(modifier = Modifier.padding(14.dp)) {
             Text(
-                text = "Side-by-Side Tier Comparison",
+                text = com.example.util.tr("Side-by-Side Tier Comparison", "Comparación de Niveles Lado a Lado"),
                 style = MaterialTheme.typography.labelLarge.copy(
                     fontWeight = FontWeight.ExtraBold,
                     color = HubBlue
@@ -1213,7 +1222,7 @@ private fun SideBySideTierCompareTable(
                             .padding(8.dp)
                     ) {
                         Text(
-                            text = product.displayTierLabel(),
+                            text = com.example.util.AppStrings.autoTranslateDynamic(product.displayTierLabel(), com.example.util.currentAppLanguage()),
                             style = MaterialTheme.typography.labelSmall.copy(
                                 fontWeight = FontWeight.ExtraBold,
                                 color = if (isBestPick) HubBlue else MaterialTheme.colorScheme.onSurfaceVariant
@@ -1238,24 +1247,24 @@ private fun SideBySideTierCompareTable(
             Spacer(modifier = Modifier.height(8.dp))
 
             CompareRowSection(
-                label = "Price Level",
+                label = com.example.util.tr("Price Level", "Nivel de Precio"),
                 values = products.map { it.priceLevel },
                 highlightColor = LaunchGreen
             )
             Spacer(modifier = Modifier.height(8.dp))
             CompareRowSection(
-                label = "Main Benefit",
-                values = products.map { it.benefitLine }
+                label = com.example.util.tr("Main Benefit", "Beneficio Principal"),
+                values = products.map { com.example.util.AppStrings.autoTranslateDynamic(it.benefitLine, com.example.util.currentAppLanguage()) }
             )
             Spacer(modifier = Modifier.height(8.dp))
             CompareRowSection(
-                label = "Best For",
-                values = products.map { it.bestFor }
+                label = com.example.util.tr("Best For", "Ideal Para"),
+                values = products.map { com.example.util.AppStrings.autoTranslateDynamic(it.bestFor, com.example.util.currentAppLanguage()) }
             )
             Spacer(modifier = Modifier.height(8.dp))
             CompareRowSection(
-                label = "Trade-off",
-                values = products.map { it.tradeOff }
+                label = com.example.util.tr("Trade-off", "Compromiso"),
+                values = products.map { com.example.util.AppStrings.autoTranslateDynamic(it.tradeOff, com.example.util.currentAppLanguage()) }
             )
         }
     }
@@ -1310,17 +1319,21 @@ private fun ProductDetailBottomSheetContent(
     onClickPairsWith: (String) -> Unit,
     onClose: () -> Unit
 ) {
-    val badgeOrTierText = if (isSingleProductGroup) {
-        product.badge?.takeIf { it.isNotBlank() } ?: "Editor's Pick"
-    } else {
-        buildString {
-            append(product.displayTierLabel())
-            if (!product.badge.isNullOrBlank()) {
-                append(" • ")
-                append(product.badge)
+    val activeLang = com.example.util.currentAppLanguage()
+    val badgeOrTierText = com.example.util.AppStrings.autoTranslateDynamic(
+        if (isSingleProductGroup) {
+            product.badge?.takeIf { it.isNotBlank() } ?: "Editor's Pick"
+        } else {
+            buildString {
+                append(product.displayTierLabel())
+                if (!product.badge.isNullOrBlank()) {
+                    append(" • ")
+                    append(product.badge)
+                }
             }
-        }
-    }
+        },
+        activeLang
+    )
 
     Column(
         modifier = Modifier
@@ -1374,7 +1387,7 @@ private fun ProductDetailBottomSheetContent(
                 )
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
-                    text = product.benefitLine,
+                    text = com.example.util.AppStrings.autoTranslateDynamic(product.benefitLine, activeLang),
                     style = MaterialTheme.typography.bodyMedium.copy(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -1387,7 +1400,7 @@ private fun ProductDetailBottomSheetContent(
         Spacer(modifier = Modifier.height(14.dp))
 
         Text(
-            text = "Key Benefits",
+            text = com.example.util.tr("Key Benefits", "Beneficios Clave"),
             style = MaterialTheme.typography.labelLarge.copy(
                 fontWeight = FontWeight.ExtraBold,
                 color = MaterialTheme.colorScheme.onSurface
@@ -1411,7 +1424,7 @@ private fun ProductDetailBottomSheetContent(
         ) {
             Column(modifier = Modifier.padding(12.dp)) {
                 Text(
-                    text = "BEST FOR",
+                    text = com.example.util.tr("BEST FOR", "IDEAL PARA"),
                     style = MaterialTheme.typography.labelSmall.copy(
                         fontWeight = FontWeight.ExtraBold,
                         color = LaunchGreen,
@@ -1420,7 +1433,7 @@ private fun ProductDetailBottomSheetContent(
                 )
                 Spacer(modifier = Modifier.height(3.dp))
                 Text(
-                    text = product.bestFor,
+                    text = com.example.util.AppStrings.autoTranslateDynamic(product.bestFor, activeLang),
                     style = MaterialTheme.typography.bodySmall.copy(
                         color = MaterialTheme.colorScheme.onSurface
                     )
@@ -1439,7 +1452,7 @@ private fun ProductDetailBottomSheetContent(
         ) {
             Column(modifier = Modifier.padding(12.dp)) {
                 Text(
-                    text = "TRADE-OFF",
+                    text = com.example.util.tr("TRADE-OFF", "COMPROMISO"),
                     style = MaterialTheme.typography.labelSmall.copy(
                         fontWeight = FontWeight.ExtraBold,
                         color = SolarGold,
@@ -1448,7 +1461,7 @@ private fun ProductDetailBottomSheetContent(
                 )
                 Spacer(modifier = Modifier.height(3.dp))
                 Text(
-                    text = product.tradeOff,
+                    text = com.example.util.AppStrings.autoTranslateDynamic(product.tradeOff, activeLang),
                     style = MaterialTheme.typography.bodySmall.copy(
                         color = MaterialTheme.colorScheme.onSurface
                     )
@@ -1479,7 +1492,7 @@ private fun ProductDetailBottomSheetContent(
             shape = RoundedCornerShape(12.dp),
             modifier = Modifier.fillMaxWidth()
         ) {
-            Text("Close")
+            Text(com.example.util.tr("Close", "Cerrar"))
         }
     }
 }
@@ -1508,13 +1521,16 @@ private fun OfflineCatalogBanner(
             ) {
                 Icon(
                     imageVector = Icons.Default.CloudOff,
-                    contentDescription = "Offline Mode",
+                    contentDescription = com.example.util.tr("Offline Mode", "Modo sin conexión"),
                     tint = SolarGold,
                     modifier = Modifier.size(18.dp)
                 )
                 Spacer(modifier = Modifier.width(10.dp))
                 Text(
-                    text = "You're offline. Showing locally cached Top Gear picks.",
+                    text = com.example.util.tr(
+                        "You're offline. Showing locally cached Top Gear picks.",
+                        "Estás sin conexión. Mostrando selecciones locales de Top Gear."
+                    ),
                     style = MaterialTheme.typography.bodySmall.copy(
                         color = MaterialTheme.colorScheme.onSurface,
                         fontWeight = FontWeight.Medium
@@ -1530,12 +1546,12 @@ private fun OfflineCatalogBanner(
             ) {
                 Icon(
                     imageVector = Icons.Default.Refresh,
-                    contentDescription = "Retry",
+                    contentDescription = com.example.util.tr("Retry", "Reintentar"),
                     modifier = Modifier.size(14.dp)
                 )
                 Spacer(modifier = Modifier.width(4.dp))
                 Text(
-                    text = "Retry",
+                    text = com.example.util.tr("Retry", "Reintentar"),
                     style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold)
                 )
             }
@@ -1565,7 +1581,10 @@ private fun EmptyCategoryStateCard(
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Text(
-                text = "No active gear in \"$category\" right now",
+                text = com.example.util.AppStrings.autoTranslateDynamic(
+                    "No active gear in \"$category\" right now",
+                    com.example.util.currentAppLanguage()
+                ),
                 style = MaterialTheme.typography.titleMedium.copy(
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.onSurface
@@ -1573,7 +1592,10 @@ private fun EmptyCategoryStateCard(
             )
             Spacer(modifier = Modifier.height(6.dp))
             Text(
-                text = "Try browsing all categories to see our current curated mobile gaming picks.",
+                text = com.example.util.tr(
+                    "Try browsing all categories to see our current curated mobile gaming picks.",
+                    "Intenta explorar todas las categorías para ver nuestras selecciones de gaming móvil."
+                ),
                 style = MaterialTheme.typography.bodySmall.copy(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -1587,7 +1609,7 @@ private fun EmptyCategoryStateCard(
                 ),
                 shape = RoundedCornerShape(50)
             ) {
-                Text("Show All Gear", fontWeight = FontWeight.Bold)
+                Text(com.example.util.tr("Show All Gear", "Ver Todo el Equipo"), fontWeight = FontWeight.Bold)
             }
         }
     }
@@ -1654,7 +1676,7 @@ private fun AnonymousAnalyticsToggleCard(
         ) {
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = "Anonymous Gear Tap Logging",
+                    text = com.example.util.tr("Anonymous Gear Tap Logging", "Registro Anónimo de Toques"),
                     style = MaterialTheme.typography.labelLarge.copy(
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onSurface
@@ -1662,7 +1684,10 @@ private fun AnonymousAnalyticsToggleCard(
                 )
                 Spacer(modifier = Modifier.height(2.dp))
                 Text(
-                    text = "Logs only product ID and tier (no personal data) to see which tiers perform best.",
+                    text = com.example.util.tr(
+                        "Logs only product ID and tier (no personal data) to see which tiers perform best.",
+                        "Registra solo ID de producto y nivel (sin datos personales) para mejorar las recomendaciones."
+                    ),
                     style = MaterialTheme.typography.bodySmall.copy(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         fontSize = 11.sp,

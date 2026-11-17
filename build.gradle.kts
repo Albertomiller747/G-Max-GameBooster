@@ -7,24 +7,28 @@ plugins {
   alias(libs.plugins.google.services) apply false
 }
 
-private object AppPublishConfig {
+private class RootAndroidConfig {
   var namespace = "com.example"
+  var compileSdk = 36
   var applicationId = "com.aistudio.gamebooster.kxmpzq"
   var minSdk = 24
   var targetSdk = 36
-  var versionCode = 14
-  var versionName = "1.14"
-  fun android(block: AppPublishConfig.() -> Unit) = this.block()
-  fun defaultConfig(block: AppPublishConfig.() -> Unit) = this.block()
+  var versionCode = 18
+  var versionName = "18.0"
+  fun defaultConfig(block: RootAndroidConfig.() -> Unit) = this.block()
 }
 
-AppPublishConfig.android {
+private fun android(block: RootAndroidConfig.() -> Unit) = RootAndroidConfig().apply(block)
+
+android {
   namespace = "com.example"
+  compileSdk = 36
+
   defaultConfig {
     applicationId = "com.aistudio.gamebooster.kxmpzq"
     minSdk = 24
     targetSdk = 36
-    versionCode = 14
-    versionName = "1.14"
+    versionCode = 19
+    versionName = "19.0"
   }
 }

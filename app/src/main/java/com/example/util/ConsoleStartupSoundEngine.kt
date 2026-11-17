@@ -17,7 +17,7 @@ import kotlin.math.sin
  */
 object ConsoleStartupSoundEngine {
 
-    private val audioScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val audioScope = CoroutineScope(SupervisorJob() + Dispatchers.Default + AppCrashGuard.coroutineExceptionHandler)
     private const val SAMPLE_RATE = 44100
 
     /**

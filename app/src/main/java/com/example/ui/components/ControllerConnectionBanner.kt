@@ -65,11 +65,15 @@ fun ControllerConnectionBanner(
     ) {
         if (alert != null) {
             val accentColor = if (alert.isConnected) LaunchGreen else RecorderCoral
-            val statusTitle = if (alert.isConnected) "Controller Connected" else "Controller Disconnected"
-            val statusSub = if (alert.isConnected) {
-                "${alert.controllerName} is ready for navigation & gaming"
+            val statusTitle = if (alert.isConnected) {
+                com.example.util.tr("Controller Connected", "Control Conectado")
             } else {
-                "${alert.controllerName} was disconnected"
+                com.example.util.tr("Controller Disconnected", "Control Desconectado")
+            }
+            val statusSub = if (alert.isConnected) {
+                "${alert.controllerName} ${com.example.util.tr("is ready for navigation & gaming", "está listo para navegar y jugar")}"
+            } else {
+                "${alert.controllerName} ${com.example.util.tr("was disconnected", "fue desconectado")}"
             }
 
             Box(

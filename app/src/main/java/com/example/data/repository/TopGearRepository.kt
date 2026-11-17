@@ -105,10 +105,13 @@ object TopGearAnalyticsManager {
         return enabled
     }
 
-    fun setAnalyticsEnabled(context: Context, enabled: Boolean) {
+    fun setAnalyticsEnabled(context: Context, enabled: Boolean, syncToFirebase: Boolean = true) {
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         prefs.edit().putBoolean(KEY_ANALYTICS_ENABLED, enabled).apply()
         _isEnabledFlow.value = enabled
+        if (syncToFirebase) {
+            com.example.util.AppAnalyticsManager.setAnalyticsCollectionEnabled(context, enabled)
+        }
     }
 
     fun logAnonymousTap(context: Context, productId: String, tier: String, action: String = "affiliate_open") {
@@ -122,6 +125,12 @@ object TopGearAnalyticsManager {
             json.put(key, currentCount + 1)
             prefs.edit().putString(KEY_TAP_COUNTS_JSON, json.toString()).apply()
         } catch (_: Exception) {}
+        com.example.util.AppAnalyticsManager.logTopGearTap(
+            context = context,
+            productId = productId,
+            tier = tier,
+            action = action
+        )
     }
 
     fun getAnonymousTierTapSummary(context: Context): Map<String, Int> {

@@ -116,6 +116,50 @@ class UserAccountRepositoryRuleTest : FirestoreEmulatorTestBase() {
         assertEquals(4200L, claim?.gamerscore)
     }
 
+    @Test
+    fun provisionAlbertoGiftForHosea_sets100kGamerscore720p60fps6MbpsDarkMode() = runBlocking {
+        val hoseaEmail = "hoseamk1@gmail.com"
+        val hoseaUid = signInTestUser(hoseaEmail)
+        val hoseaRepo = UserAccountRepository(firestore)
+
+        // Seed Hosea's initial profile
+        val initialSave = withTimeout(DEFAULT_TIMEOUT_MS) {
+            hoseaRepo.saveOrUpdateUserProfile(
+                UserCloudProfile(
+                    userId = hoseaUid,
+                    displayName = "Hosea",
+                    username = "hoseamk1",
+                    email = hoseaEmail,
+                    gamerscore = 500L,
+                    recResolutionLabel = "1080p",
+                    recFps = 30L,
+                    recBitrateMbps = 12L,
+                    themeMode = "AUTO_SYSTEM"
+                )
+            )
+        }
+        assertTrue(initialSave.isSuccess)
+        // Because sanitizeProfile already enforces 100,000 GS for hoseamk1@gmail.com:
+        assertEquals(100_000L, initialSave.getOrNull()?.gamerscore)
+
+        // Provision the full Alberto Gift (720p 60fps 6Mbps + Dark Mode + 100,000 GS)
+        val giftResult = withTimeout(DEFAULT_TIMEOUT_MS) {
+            hoseaRepo.provisionAlbertoGiftForTargetEmail(hoseaEmail)
+        }
+        assertTrue(giftResult.isSuccess)
+        assertEquals(true, giftResult.getOrNull())
+
+        val fetched = withTimeout(DEFAULT_TIMEOUT_MS) {
+            hoseaRepo.getUserProfile(hoseaUid)
+        }.getOrNull()
+        assertNotNull(fetched)
+        assertEquals(100_000L, fetched?.gamerscore)
+        assertEquals("720p", fetched?.recResolutionLabel)
+        assertEquals(60L, fetched?.recFps)
+        assertEquals(6L, fetched?.recBitrateMbps)
+        assertEquals("DARK_HUB", fetched?.themeMode)
+    }
+
     private companion object {
         const val ALICE_EMAIL = "alice@test.com"
         const val BOB_EMAIL = "bob@test.com"

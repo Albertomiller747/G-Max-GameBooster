@@ -139,8 +139,8 @@ private fun WelcomeStepContent(
 ) {
     val highlights = listOf(
         WelcomeFeatureHighlight(
-            badge = com.example.util.tr("BOOST", "IMPULSO"),
-            summary = com.example.util.tr("Maximize frame rates and cool hardware", "Maximiza los FPS y enfría el hardware"),
+            badge = com.example.util.tr("FOCUS MODE", "MODO ENFOQUE"),
+            summary = com.example.util.tr("Keep live HUD overlay and focus mode active", "Mantén el HUD en vivo y el modo enfoque activos"),
             icon = Icons.Default.RocketLaunch,
             accentColor = LaunchGreen
         ),
@@ -399,11 +399,11 @@ private fun UnifiedPermissionsStepContent(
         ),
         HubPermissionItem(
             id = "notifications",
-            title = com.example.util.tr("Recorder & Boost Notifications", "Notificaciones de Grabación e Impulso"),
+            title = com.example.util.tr("Recorder & Focus Notifications", "Notificaciones de Grabación y Enfoque"),
             featureBadge = com.example.util.tr("QUICK NOTIFICATION BAR", "BARRA DE NOTIFICACIÓN RÁPIDA"),
             whatItGrants = com.example.util.tr(
-                "Allows the quick-control recorder notification bar and active booster status alerts.",
-                "Permite la barra de notificación de control rápido de grabación y alertas de impulso activo."
+                "Allows the quick-control recorder notification bar and active Overlay and Focus Mode Timer alerts.",
+                "Permite la barra de notificación de control rápido de grabación y alertas de modo enfoque activo."
             ),
             whyFeatureNeedsIt = com.example.util.tr(
                 "Needed for the 1-tap notification bar ('Recorder is ready') to trigger recordings and screenshots anytime.",
@@ -448,8 +448,8 @@ private fun UnifiedPermissionsStepContent(
                 "Permite detectar qué juego se está ejecutando activamente en primer plano."
             ),
             whyFeatureNeedsIt = com.example.util.tr(
-                "Needed to automatically track game session duration, FPS match recaps, and active boost profiles.",
-                "Necesario para registrar automáticamente la duración de sesiones, resúmenes FPS y perfiles de impulso."
+                "Needed to automatically track game session duration, FPS match recaps, and active focus profiles.",
+                "Necesario para registrar automáticamente la duración de sesiones, resúmenes FPS y perfiles de enfoque."
             ),
             icon = Icons.Default.QueryStats,
             accentColor = Color(0xFFF59E0B),
@@ -513,7 +513,7 @@ private fun UnifiedPermissionsStepContent(
                     )
                 }
                 Spacer(modifier = Modifier.width(12.dp))
-                Column {
+                Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = com.example.util.tr("Permissions Overview", "Resumen de Permisos"),
                         style = MaterialTheme.typography.titleLarge,
@@ -531,7 +531,9 @@ private fun UnifiedPermissionsStepContent(
                 }
             }
 
-            // Top "Not Now" quick skip button
+            Spacer(modifier = Modifier.width(8.dp))
+
+            // Top "Not Now" quick skip button (single-line guaranteed)
             OutlinedButton(
                 onClick = onEnterHub,
                 shape = RoundedCornerShape(12.dp),
@@ -541,7 +543,9 @@ private fun UnifiedPermissionsStepContent(
                 Text(
                     text = com.example.util.tr("Not Now", "Ahora No"),
                     fontSize = 13.sp,
-                    fontWeight = FontWeight.Bold
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    softWrap = false
                 )
             }
         }
@@ -586,7 +590,9 @@ private fun UnifiedPermissionsStepContent(
                 Text(
                     text = com.example.util.tr("Not Now", "Ahora No"),
                     fontWeight = FontWeight.Bold,
-                    fontSize = 15.sp
+                    fontSize = 15.sp,
+                    maxLines = 1,
+                    softWrap = false
                 )
             }
 

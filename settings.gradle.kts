@@ -22,6 +22,6 @@ dependencyResolutionManagement {
   }
 }
 
-rootProject.name = "G Max Gaming Hub"
+rootProject.name = "GMAX Gaming Hub"
 
 include(":app")

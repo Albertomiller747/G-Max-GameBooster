@@ -94,6 +94,10 @@ fun SectionTitle(
     badgeColor: Color = CyberCyan,
     modifier: Modifier = Modifier
 ) {
+    val activeLang = com.example.util.currentAppLanguage()
+    val translatedTitle = com.example.util.AppStrings.autoTranslateDynamic(title, activeLang)
+    val translatedSubtitle = subtitle?.let { com.example.util.AppStrings.autoTranslateDynamic(it, activeLang) }
+    val translatedBadge = badge?.let { com.example.util.AppStrings.autoTranslateDynamic(it, activeLang) }
     Column(modifier = modifier.padding(vertical = 4.dp)) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
@@ -101,7 +105,7 @@ fun SectionTitle(
             modifier = Modifier.fillMaxWidth()
         ) {
             Text(
-                text = title,
+                text = translatedTitle,
                 style = MaterialTheme.typography.titleMedium.copy(
                     fontWeight = FontWeight.Bold,
                     letterSpacing = 0.2.sp,
@@ -111,7 +115,7 @@ fun SectionTitle(
                 overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f, fill = false)
             )
-            badge?.let {
+            translatedBadge?.let {
                 Spacer(modifier = Modifier.width(8.dp))
                 Box(
                     modifier = Modifier
@@ -133,7 +137,7 @@ fun SectionTitle(
                 }
             }
         }
-        subtitle?.let {
+        translatedSubtitle?.let {
             Spacer(modifier = Modifier.height(2.dp))
             Text(
                 text = it,
@@ -153,6 +157,10 @@ fun MetricGauge(
     icon: ImageVector,
     modifier: Modifier = Modifier
 ) {
+    val activeLang = com.example.util.currentAppLanguage()
+    val translatedLabel = com.example.util.AppStrings.autoTranslateDynamic(label, activeLang)
+    val translatedValue = com.example.util.AppStrings.autoTranslateDynamic(value, activeLang)
+    val translatedSubValue = com.example.util.AppStrings.autoTranslateDynamic(subValue, activeLang)
     Card(
         modifier = modifier
             .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(14.dp)),
@@ -171,13 +179,13 @@ fun MetricGauge(
                 ) {
                     Icon(
                         imageVector = icon,
-                        contentDescription = label,
+                        contentDescription = translatedLabel,
                         tint = barColor,
                         modifier = Modifier.size(18.dp)
                     )
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(
-                        text = label,
+                        text = translatedLabel,
                         style = MaterialTheme.typography.labelMedium.copy(
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             fontWeight = FontWeight.Medium
@@ -188,7 +196,7 @@ fun MetricGauge(
                 }
                 Spacer(modifier = Modifier.width(6.dp))
                 Text(
-                    text = value,
+                    text = translatedValue,
                     style = MaterialTheme.typography.titleSmall.copy(
                         color = MaterialTheme.colorScheme.onSurface,
                         fontWeight = FontWeight.Bold
@@ -216,7 +224,7 @@ fun MetricGauge(
             }
             Spacer(modifier = Modifier.height(6.dp))
             Text(
-                text = subValue,
+                text = translatedSubValue,
                 style = MaterialTheme.typography.labelSmall.copy(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     fontSize = 11.sp
@@ -233,6 +241,7 @@ fun AdbCommandItem(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    val activeLang = com.example.util.currentAppLanguage()
     val finalCommand = if (!currentPackage.isNullOrBlank()) {
         tweak.command.replace("<package>", currentPackage)
     } else {
@@ -244,6 +253,10 @@ fun AdbCommandItem(
         "Medium" -> SolarGold
         else -> NeonGreen
     }
+    val translatedImpact = com.example.util.AppStrings.autoTranslateDynamic("${tweak.impactRating} Impact", activeLang)
+    val translatedCategory = com.example.util.AppStrings.autoTranslateDynamic(tweak.category, activeLang)
+    val translatedTitle = com.example.util.AppStrings.autoTranslateDynamic(tweak.title, activeLang)
+    val translatedDesc = com.example.util.AppStrings.autoTranslateDynamic(tweak.description, activeLang)
 
     CyberCard(modifier = modifier, borderColor = DarkSurfaceBorder) {
         Row(
@@ -260,7 +273,7 @@ fun AdbCommandItem(
                             .padding(horizontal = 6.dp, vertical = 2.dp)
                     ) {
                         Text(
-                            text = "${tweak.impactRating} Impact",
+                            text = translatedImpact,
                             style = MaterialTheme.typography.labelSmall.copy(
                                 color = badgeColor,
                                 fontWeight = FontWeight.Bold,
@@ -270,13 +283,13 @@ fun AdbCommandItem(
                     }
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = tweak.category,
+                        text = translatedCategory,
                         style = MaterialTheme.typography.labelSmall.copy(color = TextMuted)
                     )
                 }
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
-                    text = tweak.title,
+                    text = translatedTitle,
                     style = MaterialTheme.typography.titleSmall.copy(
                         fontWeight = FontWeight.Bold,
                         color = TextPrimary
@@ -286,7 +299,11 @@ fun AdbCommandItem(
 
             IconButton(
                 onClick = {
-                    copyToClipboard(context, finalCommand, "ADB Command Copied!")
+                    copyToClipboard(
+                        context,
+                        finalCommand,
+                        com.example.util.AppStrings.trText("ADB Command Copied!", "¡Comando ADB Copiado!", languageOverride = activeLang)
+                    )
                 },
                 modifier = Modifier
                     .size(40.dp)
@@ -294,7 +311,7 @@ fun AdbCommandItem(
             ) {
                 Icon(
                     imageVector = Icons.Default.ContentCopy,
-                    contentDescription = "Copy Command",
+                    contentDescription = com.example.util.tr("Copy Command", "Copiar Comando"),
                     tint = CyberCyan,
                     modifier = Modifier.size(20.dp)
                 )
@@ -303,7 +320,7 @@ fun AdbCommandItem(
 
         Spacer(modifier = Modifier.height(6.dp))
         Text(
-            text = tweak.description,
+            text = translatedDesc,
             style = MaterialTheme.typography.bodySmall.copy(color = TextSecondary)
         )
 

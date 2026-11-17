@@ -35,6 +35,7 @@ import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.DeveloperMode
 import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.LightMode
+import androidx.compose.material.icons.filled.PrivacyTip
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Settings
@@ -73,6 +74,7 @@ import com.example.ui.theme.CuratedBackgroundPresets
 import com.example.ui.theme.HubBlue
 import com.example.ui.theme.LaunchGreen
 import com.example.ui.theme.RecorderCoral
+import com.example.ui.theme.SolarGold
 import com.example.util.SystemSettingsHelper
 import com.example.viewmodel.GameBoosterViewModel
 import java.util.Locale
@@ -187,7 +189,7 @@ fun SettingsScreen(
                                 text = if (isSignedIn) {
                                     currentFirebaseUser?.displayName?.takeIf { it.isNotBlank() }
                                         ?: currentFirebaseUser?.email
-                                        ?: com.example.util.tr("Signed-In Account", "Cuenta Conectada")
+                                        ?: com.example.util.tr("Signed In Account", "Cuenta Conectada")
                                 } else {
                                     com.example.util.tr("Guest Profile (Local Settings Only)", "Perfil de Invitado (Solo Ajustes Locales)")
                                 },
@@ -196,8 +198,9 @@ fun SettingsScreen(
                                     color = MaterialTheme.colorScheme.onSurface
                                 )
                             )
+                            val activeLang = com.example.util.currentAppLanguage()
                             Text(
-                                text = cloudSyncStatus,
+                                text = com.example.util.AppStrings.autoTranslateDynamic(cloudSyncStatus, activeLang),
                                 style = MaterialTheme.typography.bodySmall.copy(
                                     color = if (isSignedIn) LaunchGreen else MaterialTheme.colorScheme.onSurfaceVariant,
                                     fontSize = 11.sp
@@ -242,8 +245,8 @@ fun SettingsScreen(
                 SectionTitle(
                     title = com.example.util.tr("App Language & Region", "Idioma y Región de la App"),
                     subtitle = com.example.util.tr(
-                        "Auto-detects device language or choose English, Español (es-MX), Português (pt-BR), Indonesian, Vietnamese, or Tagalog",
-                        "Detecta automáticamente el idioma del dispositivo o elige Español (es-MX), Inglés, Portugués (Brasil), Indonesio, Vietnamita o Tagalo"
+                        "Detects device language or choose English, Español, Português, Indonesian, Vietnamese, or Tagalog",
+                        "Detecta automáticamente el idioma del dispositivo o elige Español, Inglés, Portugués, Indonesio, Vietnamita o Tagalo"
                     ),
                     badge = resolvedActiveLanguage.flagBadge,
                     badgeColor = LaunchGreen
@@ -310,7 +313,10 @@ fun SettingsScreen(
                                                 "Detecção Automática (Sistema)",
                                                 "Deteksi Otomatis (Sistem)",
                                                 "Tự động nhận diện (Hệ thống)",
-                                                "Auto-Detect (System)"
+                                                "Awtomatikong I-detect (Sistema)",
+                                                "Detección Automática (Sistema)",
+                                                "自動検出 (システム)",
+                                                "ऑटो-डिटेक्ट (सिस्टम)"
                                             )
                                         } else {
                                             langOption.nativeLabel
@@ -323,7 +329,7 @@ fun SettingsScreen(
                                         overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                                     )
                                     Text(
-                                        text = langOption.englishSubtitle,
+                                        text = com.example.util.AppStrings.autoTranslateDynamic(langOption.englishSubtitle, resolvedActiveLanguage),
                                         style = MaterialTheme.typography.bodySmall.copy(
                                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                                             fontSize = 11.sp
@@ -444,16 +450,17 @@ fun SettingsScreen(
 
                                     Spacer(modifier = Modifier.width(12.dp))
 
+                                    val activeThemeLang = com.example.util.currentAppLanguage()
                                     Column {
                                         Text(
-                                            text = themeOption.title,
+                                            text = com.example.util.AppStrings.autoTranslateDynamic(themeOption.title, activeThemeLang),
                                             style = MaterialTheme.typography.titleSmall.copy(
                                                 fontWeight = FontWeight.Bold,
                                                 color = MaterialTheme.colorScheme.onSurface
                                             )
                                         )
                                         Text(
-                                            text = themeOption.description,
+                                            text = com.example.util.AppStrings.autoTranslateDynamic(themeOption.description, activeThemeLang),
                                             style = MaterialTheme.typography.bodySmall.copy(
                                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                                 fontSize = 11.sp
@@ -472,7 +479,7 @@ fun SettingsScreen(
                                     ) {
                                         Icon(
                                             imageVector = Icons.Default.Check,
-                                            contentDescription = "Selected",
+                                            contentDescription = com.example.util.tr("Selected", "Seleccionado"),
                                             tint = Color.White,
                                             modifier = Modifier.size(16.dp)
                                         )
@@ -536,8 +543,9 @@ fun SettingsScreen(
                                         }
                                     }
                                     Spacer(modifier = Modifier.height(4.dp))
+                                    val activePresetLang = com.example.util.currentAppLanguage()
                                     Text(
-                                        text = preset.name,
+                                        text = com.example.util.AppStrings.autoTranslateDynamic(preset.name, activePresetLang),
                                         fontSize = 11.sp,
                                         fontWeight = if (isPresetSelected) FontWeight.Bold else FontWeight.Normal,
                                         color = MaterialTheme.colorScheme.onSurface
@@ -703,7 +711,7 @@ fun SettingsScreen(
                         )
                         Text(
                             text = if (reducedAnimations) {
-                                com.example.util.tr("Active: Instant transitions & 0-lag static tile focus", "Activo: Transiciones instantáneas y enfoque sin retraso")
+                                com.example.util.tr("Active: Instant transitions & fast static tile focus", "Activo: Transiciones instantáneas y enfoque sin retraso")
                             } else {
                                 com.example.util.tr("Off by default: Full console spring physics & startup animation", "Desactivado: Física completa de consola y animación de inicio")
                             },
@@ -745,8 +753,8 @@ fun SettingsScreen(
                         "Memoria, Caché y Consumo de Batería"
                     ),
                     subtitle = com.example.util.tr(
-                        "Auto-trim on launch, low-memory alerts & boost start • Auto-pause background telemetry when idle",
-                        "Limpieza automática al iniciar, alerta de memoria y al impulsar • Pausa automática en inactividad"
+                        "Smart trim on launch & focus mode • Idle battery saver",
+                        "Limpieza automática al iniciar • Ahorro en inactividad"
                     )
                 )
 
@@ -781,8 +789,12 @@ fun SettingsScreen(
                             val usagePct = if (memoryStats.totalRamMb > 0) {
                                 ((memoryStats.usedRamMb * 100L) / memoryStats.totalRamMb).toInt()
                             } else 0
+                            val activeMemLang = com.example.util.currentAppLanguage()
                             Text(
-                                text = "RAM: ${memoryStats.usedRamMb}MB / ${memoryStats.totalRamMb}MB (${usagePct}%) • Storage Free: ${String.format(Locale.US, "%.1f", memoryStats.internalStorageFreeGb)}GB",
+                                text = com.example.util.AppStrings.autoTranslateDynamic(
+                                    "RAM: ${memoryStats.usedRamMb}MB / ${memoryStats.totalRamMb}MB (${usagePct}%) • Storage Free: ${String.format(Locale.US, "%.1f", memoryStats.internalStorageFreeGb)}GB",
+                                    activeMemLang
+                                ),
                                 style = MaterialTheme.typography.bodySmall.copy(
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     fontSize = 11.sp
@@ -800,7 +812,7 @@ fun SettingsScreen(
                                 text = if (isBgPaused) {
                                     com.example.util.tr("IDLE SAVER ON", "AHORRO ACTIVO")
                                 } else {
-                                    com.example.util.tr("AUTO-GUARD ACTIVE", "GUARDIA ACTIVA")
+                                    com.example.util.tr("GUARD ACTIVE", "GUARDIA ACTIVA")
                                 },
                                 style = MaterialTheme.typography.labelSmall.copy(
                                     fontWeight = FontWeight.ExtraBold,
@@ -813,8 +825,8 @@ fun SettingsScreen(
 
                     Text(
                         text = com.example.util.tr(
-                            "• Battery Guard: Automatically pauses 120Hz Choreographer, CPU sysfs polling, and wake locks when minimized with no active game boost or HUD overlay.\n• Memory Guard: Automatically purges internal/external cache, trims bitmap pools, and prunes telemetry buffers on cold launch, system low-memory signals, and Game Boost start.",
-                            "• Guardia de Batería: Pausa automáticamente el muestreo de 120Hz, lecturas de CPU y wake locks al minimizar sin sesión activa.\n• Guardia de Memoria: Limpia caché interna/externa, pools de bitmaps y buffers al iniciar, ante poca memoria y al activar Game Boost."
+                            "Pauses idle sensors to save battery and clears app cache on game launch.",
+                            "Pausa sensores en inactividad para ahorrar batería y limpia caché al iniciar un juego."
                         ),
                         style = MaterialTheme.typography.bodySmall.copy(
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -822,13 +834,14 @@ fun SettingsScreen(
                         )
                     )
 
-                    if (lastTrimResult != null) {
-                        val res = lastTrimResult!!
+                    lastTrimResult?.let { res ->
                         val cacheKb = (res.cacheClearedBytes / 1024L).coerceAtLeast(0L)
+                        val activeMemLang = com.example.util.currentAppLanguage()
+                        val localizedReason = com.example.util.AppStrings.autoTranslateDynamic(res.reason, activeMemLang)
                         Text(
-                            text = com.example.util.tr(
-                                "Last Cleanup (${res.reason}): ${res.ramFreedMb} MB RAM freed • ${cacheKb} KB cache purged (${res.backgroundAppsTrimmed} bg apps trimmed)",
-                                "Última Limpieza (${res.reason}): ${res.ramFreedMb} MB RAM liberada • ${cacheKb} KB caché purgada (${res.backgroundAppsTrimmed} apps en 2do plano)"
+                            text = com.example.util.AppStrings.autoTranslateDynamic(
+                                "Last Cleanup ($localizedReason): ${res.ramFreedMb} MB RAM freed • ${cacheKb} KB cache purged (${res.backgroundAppsTrimmed} bg apps trimmed)",
+                                activeMemLang
                             ),
                             style = MaterialTheme.typography.labelSmall.copy(
                                 color = HubBlue,
@@ -969,8 +982,8 @@ fun SettingsScreen(
                             )
                             Text(
                                 text = com.example.util.tr(
-                                    "Show '${activeControllerGlyphs.southGlyph} Launch • ${activeControllerGlyphs.westGlyph} Boost • ${activeControllerGlyphs.northGlyph} Record • ${activeControllerGlyphs.leftBumper}/${activeControllerGlyphs.rightBumper}' legend bar when a controller is connected (enabled by default)",
-                                    "Muestra la barra '${activeControllerGlyphs.southGlyph} Iniciar • ${activeControllerGlyphs.westGlyph} Impulsar • ${activeControllerGlyphs.northGlyph} Grabar • ${activeControllerGlyphs.leftBumper}/${activeControllerGlyphs.rightBumper}' cuando hay un mando conectado"
+                                    "Show '${activeControllerGlyphs.southGlyph} Launch • ${activeControllerGlyphs.westGlyph} Focus Mode • ${activeControllerGlyphs.northGlyph} Record • ${activeControllerGlyphs.leftBumper}/${activeControllerGlyphs.rightBumper}' legend bar when a controller is connected (enabled by default)",
+                                    "Muestra la barra '${activeControllerGlyphs.southGlyph} Iniciar • ${activeControllerGlyphs.westGlyph} Modo Enfoque • ${activeControllerGlyphs.northGlyph} Grabar • ${activeControllerGlyphs.leftBumper}/${activeControllerGlyphs.rightBumper}' cuando hay un mando conectado"
                                 ),
                                 style = MaterialTheme.typography.bodySmall.copy(
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -1060,15 +1073,6 @@ fun SettingsScreen(
             }
         }
 
-        // 2d. Controller Layout Selector (PlayStation, Xbox, Nintendo Switch, Auto-Detect)
-        item {
-            com.example.ui.components.ControllerLayoutSelectorCard(
-                selectedMode = controllerLayoutMode,
-                resolvedGlyphs = activeControllerGlyphs,
-                onSelectMode = { viewModel.setControllerLayoutMode(it) }
-            )
-        }
-
         // 3. Unified Permissions Center Card
         item {
             CyberCard {
@@ -1143,6 +1147,136 @@ fun SettingsScreen(
                             checkedTrackColor = HubBlue
                         ),
                         modifier = Modifier.testTag("toggle_warning_switch")
+                    )
+                }
+            }
+        }
+
+        // 4b. Google Analytics & Anonymous Telemetry Toggle (Synced with Top Gear & Firebase Analytics)
+        item {
+            val analyticsEnabled by com.example.data.repository.TopGearAnalyticsManager.isEnabledFlow.collectAsState()
+            androidx.compose.runtime.LaunchedEffect(Unit) {
+                com.example.data.repository.TopGearAnalyticsManager.isAnalyticsEnabled(context)
+            }
+            CyberCard {
+                SectionTitle(
+                    title = com.example.util.tr("Google Analytics & Usage Telemetry", "Google Analytics y Telemetría de Uso"),
+                    subtitle = com.example.util.tr(
+                        "Anonymous feature usage, session performance, and Top Gear catalog analytics",
+                        "Uso anónimo de funciones, rendimiento de sesión y estadísticas de Top Gear"
+                    ),
+                    badge = if (analyticsEnabled) com.example.util.tr("ACTIVE", "ACTIVO") else com.example.util.tr("PAUSED", "PAUSADO"),
+                    badgeColor = if (analyticsEnabled) LaunchGreen else MaterialTheme.colorScheme.outline
+                )
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = com.example.util.tr(
+                                "Share Anonymous App & Feature Analytics",
+                                "Compartir Analíticas Anónimas de la App"
+                            ),
+                            style = MaterialTheme.typography.bodyMedium.copy(
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        )
+                        Text(
+                            text = com.example.util.tr(
+                                "Logs anonymous screen views, focus sessions, recording presets, controller connections, and Top Gear taps via Google Analytics",
+                                "Registra vistas de pantalla, sesiones de enfoque, grabaciones, mandos y toques en Top Gear mediante Google Analytics"
+                            ),
+                            style = MaterialTheme.typography.bodySmall.copy(
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                fontSize = 11.sp
+                            )
+                        )
+                    }
+
+                    Switch(
+                        checked = analyticsEnabled,
+                        onCheckedChange = { enabled ->
+                            com.example.data.repository.TopGearAnalyticsManager.setAnalyticsEnabled(context, enabled)
+                            com.example.util.ConsoleHapticManager.playSelectClick(context)
+                        },
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = Color.White,
+                            checkedTrackColor = LaunchGreen
+                        ),
+                        modifier = Modifier.testTag("settings_google_analytics_switch")
+                    )
+                }
+            }
+        }
+
+        // 4c. Unity Ads Privacy & Consent Preferences
+        item {
+            val isPersonalizedAds by com.example.util.UnityAdsManager.isPersonalizedAdsEnabled.collectAsState()
+            CyberCard {
+                SectionTitle(
+                    title = com.example.util.tr("Ad Privacy & Consent", "Privacidad y Consentimiento de Anuncios"),
+                    subtitle = com.example.util.tr(
+                        "Manage Unity Ads personalization and Advertising ID consent preferences",
+                        "Administra la personalización de anuncios de Unity Ads y tu ID de publicidad"
+                    ),
+                    badge = if (isPersonalizedAds) {
+                        com.example.util.tr("PERSONALIZED", "PERSONALIZADO")
+                    } else {
+                        com.example.util.tr("LIMITED", "LIMITADO")
+                    },
+                    badgeColor = if (isPersonalizedAds) LaunchGreen else SolarGold
+                )
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                Text(
+                    text = if (isPersonalizedAds) {
+                        com.example.util.tr(
+                            "Personalized gaming ads enabled via Unity Ads privacy consent.",
+                            "Anuncios de juegos personalizados activados mediante tu consentimiento de Unity Ads."
+                        )
+                    } else {
+                        com.example.util.tr(
+                            "Non-personalized ads only enabled via Unity Ads privacy consent.",
+                            "Solo anuncios no personalizados activados mediante tu consentimiento de Unity Ads."
+                        )
+                    },
+                    style = MaterialTheme.typography.bodySmall.copy(
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontSize = 11.5.sp
+                    )
+                )
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                OutlinedButton(
+                    onClick = {
+                        com.example.util.ConsoleHapticManager.playSelectClick(context)
+                        com.example.util.UnityAdsManager.openPrivacyConsentDialog()
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("settings_manage_ad_privacy_button"),
+                    shape = RoundedCornerShape(12.dp),
+                    border = BorderStroke(1.dp, HubBlue.copy(alpha = 0.6f))
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.PrivacyTip,
+                        contentDescription = null,
+                        tint = HubBlue,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = com.example.util.tr("Manage Ad Privacy Preferences", "Administrar Privacidad de Anuncios"),
+                        fontWeight = FontWeight.Bold,
+                        color = HubBlue
                     )
                 }
             }

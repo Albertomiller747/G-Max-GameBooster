@@ -124,6 +124,7 @@ class ControllerHealthManager(private val context: Context) : SensorEventListene
         // Shared across all ControllerHealthManager instances (MainActivity, AccessibilityService, OverlayService)
         private val keyHeldDpad = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
         private val keyHeldDpadTimestampMs = java.util.concurrent.ConcurrentHashMap<String, Long>()
+        private val keyHeldTriggers = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
         private val hatHeldDpad = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
         private val pulseHeldDpad = java.util.concurrent.ConcurrentHashMap<String, Long>()
         private val pulseHeldButtons = java.util.concurrent.ConcurrentHashMap<String, Long>()
@@ -131,6 +132,14 @@ class ControllerHealthManager(private val context: Context) : SensorEventListene
         private val faceButtonDownTimestampMs = java.util.concurrent.ConcurrentHashMap<String, Long>()
         @Volatile
         private var suppressedCompanionTriangleActive: Boolean = false
+        @Volatile
+        var isControllerStudioActive: Boolean = false
+            private set
+
+        fun setControllerStudioActive(active: Boolean) {
+            isControllerStudioActive = active
+        }
+
         @Volatile
         var lastMotionStickUpdateMs: Long = 0L
             private set
@@ -173,6 +182,7 @@ class ControllerHealthManager(private val context: Context) : SensorEventListene
         fun clearTransientHeldInputs() {
             keyHeldDpad.clear()
             keyHeldDpadTimestampMs.clear()
+            keyHeldTriggers.clear()
             hatHeldDpad.clear()
             pulseHeldDpad.clear()
             pulseHeldButtons.clear()
@@ -256,90 +266,355 @@ class ControllerHealthManager(private val context: Context) : SensorEventListene
         @Volatile
         var simulatedWiredOverrideForTests: Boolean? = null
 
+        @Volatile
+        var lastLiveControllerEventMs: Long = 0L
+            private set
+
+        val KNOWN_GAMEPAD_VENDORS = setOf(
+            0x054C, // Sony Interactive Entertainment (PS4 DualShock 4, PS5 DualSense, DualSense Edge)
+            0x045E, // Microsoft (Xbox Wireless / Elite / Series X|S)
+            0x057E, // Nintendo (Switch Pro Controller, Joy-Con)
+            0x28DE, // Valve (Steam Controller)
+            0x1532, // Razer (Kishi, Wolverine, Raiju)
+            0x2DC8, // 8BitDo
+            0x3537, // GameSir
+            0x27F8, // Backbone One
+            0x20D6, // PowerA / BDA
+            0x0F0D, // Hori
+            0x0738, // Mad Catz
+            0x046D, // Logitech
+            0x1038, // SteelSeries
+            0x24C6  // PowerA
+        )
+
+        fun isInternalPhoneDevice(device: InputDevice?): Boolean {
+            if (device == null || device.isVirtual || device.id < 0) return true
+            val lower = device.name.lowercase()
+            if (lower.isBlank() || lower == "virtual") return true
+            return lower.contains("qpnp") ||
+                lower.contains("gpio") ||
+                lower.contains("pmic") ||
+                lower.contains("pwrkey") ||
+                lower.contains("power_key") ||
+                lower.contains("pon") ||
+                lower.contains("fingerprint") ||
+                lower.contains("uinput-fpc") ||
+                lower.contains("uinput-goodix") ||
+                lower.contains("goodix_ts") ||
+                lower.contains("synaptics") ||
+                lower.contains("fts_ts") ||
+                lower.contains("sec_touchscreen") ||
+                lower.contains("touchscreen") ||
+                lower.contains("stylus") ||
+                lower.contains("s-pen") ||
+                lower.contains("headset") ||
+                lower.contains("jack") ||
+                lower.contains("snd-card") ||
+                lower.contains("audiocodec")
+        }
+
         /**
-         * Over Wired USB-C (and Android 12+ hid-playstation / hid-sony), PlayStation DualSense and
+         * Over Wired USB-C and Bluetooth (Android 12+ hid-playstation / hid-sony), PlayStation DualSense and
          * DualShock 4 controllers expose 3 separate InputDevice nodes:
-         * 1. "Wireless Controller" (actual gamepad)
+         * 1. "Wireless Controller" (primary gamepad)
          * 2. "Wireless Controller Motion Sensors" (250Hz IMU accelerometer/gyro tagged with SOURCE_JOYSTICK)
          * 3. "Wireless Controller Touchpad" (touchpad node)
-         * We must strictly ignore Motion Sensors and Touchpad nodes so 250Hz IMU zeroed axes never wipe out
-         * real thumbstick, D-Pad hat, or trigger states.
+         * We ignore 250Hz IMU axis frames from the Motion Sensors node inside onGenericMotionEvent(),
+         * while allowing sibling nodes to prove controller presence and provide gyro/battery/LED/rumble.
          */
-        fun isSubDeviceOrSensorNode(device: InputDevice?): Boolean {
+        fun isMotionSensorSubNode(device: InputDevice?): Boolean {
             if (device == null) return false
             val lower = device.name.lowercase()
             return lower.contains("motion sensor") ||
                 lower.contains("accelerometer") ||
-                lower.contains("gyroscope") ||
-                lower.contains("touchpad") ||
-                lower.contains("headset") ||
-                lower.contains("uinput") ||
-                lower.contains("fingerprint") ||
-                lower.contains("qpnp") ||
-                lower.contains("gpio") ||
-                lower.contains("pmic")
+                lower.contains("gyroscope")
+        }
+
+        fun isTouchpadOnlySubNode(device: InputDevice?): Boolean {
+            if (device == null) return false
+            val lower = device.name.lowercase()
+            if (!lower.contains("touchpad")) return false
+            val sources = device.sources
+            val hasGamepadOrDpad =
+                (sources and InputDevice.SOURCE_GAMEPAD) == InputDevice.SOURCE_GAMEPAD ||
+                    (sources and InputDevice.SOURCE_DPAD) == InputDevice.SOURCE_DPAD
+            return !hasGamepadOrDpad && !hasGamepadHardwareKeys(device)
+        }
+
+        fun isSubDeviceOrSensorNode(device: InputDevice?): Boolean {
+            if (device == null) return false
+            return isInternalPhoneDevice(device) || isMotionSensorSubNode(device)
+        }
+
+        fun hasKnownControllerName(name: String?): Boolean {
+            if (name.isNullOrBlank()) return false
+            val lower = name.lowercase()
+            return lower.contains("wireless controller") ||
+                lower.contains("dualsense") ||
+                lower.contains("dualshock") ||
+                lower.contains("playstation") ||
+                lower.contains("ps4") ||
+                lower.contains("ps5") ||
+                lower.contains("sony") ||
+                lower.contains("xbox") ||
+                lower.contains("nintendo") ||
+                lower.contains("pro controller") ||
+                lower.contains("joy-con") ||
+                lower.contains("joycon") ||
+                lower.contains("gamepad") ||
+                lower.contains("joystick") ||
+                lower.contains("8bitdo") ||
+                lower.contains("gamesir") ||
+                lower.contains("backbone") ||
+                lower.contains("kishi") ||
+                lower.contains("razer") ||
+                lower.contains("steelseries") ||
+                lower.contains("moga") ||
+                lower.contains("controller")
+        }
+
+        fun hasGamepadHardwareKeys(device: InputDevice?): Boolean {
+            if (device == null) return false
+            return try {
+                val keys = device.hasKeys(
+                    KeyEvent.KEYCODE_BUTTON_A,
+                    KeyEvent.KEYCODE_BUTTON_B,
+                    KeyEvent.KEYCODE_BUTTON_X,
+                    KeyEvent.KEYCODE_BUTTON_Y,
+                    KeyEvent.KEYCODE_BUTTON_L1,
+                    KeyEvent.KEYCODE_BUTTON_R1,
+                    KeyEvent.KEYCODE_BUTTON_START,
+                    KeyEvent.KEYCODE_BUTTON_SELECT,
+                    KeyEvent.KEYCODE_BUTTON_MODE,
+                    KeyEvent.KEYCODE_BUTTON_C,
+                    KeyEvent.KEYCODE_BUTTON_Z
+                )
+                keys.count { it } >= 2
+            } catch (_: Exception) {
+                false
+            }
+        }
+
+        fun hasDualStickOrHatAxes(device: InputDevice?): Boolean {
+            if (device == null) return false
+            return try {
+                val hasXY = device.getMotionRange(MotionEvent.AXIS_X) != null &&
+                    device.getMotionRange(MotionEvent.AXIS_Y) != null
+                val hasRightOrHat = device.getMotionRange(MotionEvent.AXIS_Z) != null ||
+                    device.getMotionRange(MotionEvent.AXIS_RZ) != null ||
+                    device.getMotionRange(MotionEvent.AXIS_RX) != null ||
+                    device.getMotionRange(MotionEvent.AXIS_HAT_X) != null
+                hasXY && hasRightOrHat
+            } catch (_: Exception) {
+                false
+            }
         }
 
         fun isActualGamepadInputDevice(device: InputDevice?): Boolean {
-            if (device == null || device.isVirtual) return false
-            if (isSubDeviceOrSensorNode(device)) return false
+            if (device == null || isInternalPhoneDevice(device)) return false
+            if (isMotionSensorSubNode(device) || isTouchpadOnlySubNode(device)) return false
             val sources = device.sources
-            return (sources and InputDevice.SOURCE_GAMEPAD) == InputDevice.SOURCE_GAMEPAD ||
-                (sources and InputDevice.SOURCE_JOYSTICK) == InputDevice.SOURCE_JOYSTICK
+            val hasGamepadOrJoystickSource =
+                (sources and InputDevice.SOURCE_GAMEPAD) == InputDevice.SOURCE_GAMEPAD ||
+                    (sources and InputDevice.SOURCE_JOYSTICK) == InputDevice.SOURCE_JOYSTICK ||
+                    (sources and InputDevice.SOURCE_CLASS_JOYSTICK) != 0 ||
+                    device.supportsSource(InputDevice.SOURCE_GAMEPAD) ||
+                    device.supportsSource(InputDevice.SOURCE_JOYSTICK)
+            if (hasGamepadOrJoystickSource) return true
+            if (device.vendorId in KNOWN_GAMEPAD_VENDORS) return true
+            if (hasKnownControllerName(device.name)) return true
+            if (hasGamepadHardwareKeys(device)) return true
+            if (hasDualStickOrHatAxes(device)) return true
+            return false
+        }
+
+        fun isCompanionControllerNode(device: InputDevice?): Boolean {
+            if (device == null || isInternalPhoneDevice(device)) return false
+            return device.vendorId in KNOWN_GAMEPAD_VENDORS || hasKnownControllerName(device.name)
+        }
+
+        fun normalizeControllerDisplayName(device: InputDevice): String {
+            val rawName = device.name.trim()
+            val cleaned = rawName
+                .replace(Regex("(?i)\\s*motion sensors$"), "")
+                .replace(Regex("(?i)\\s*touchpad$"), "")
+                .trim()
+            if (device.vendorId == 0x054C || hasKnownControllerName(cleaned) && cleaned.equals("Wireless Controller", ignoreCase = true)) {
+                return when (device.productId) {
+                    0x0CE6 -> "PS5 DualSense Wireless Controller"
+                    0x0DF2 -> "PS5 DualSense Edge Controller"
+                    0x05C4, 0x09CC -> "PS4 DualShock 4 Controller"
+                    else -> if (cleaned.equals("Wireless Controller", ignoreCase = true)) {
+                        "PlayStation Wireless Controller"
+                    } else {
+                        cleaned.ifBlank { "PlayStation Controller" }
+                    }
+                }
+            }
+            return cleaned.ifBlank { rawName.ifBlank { "Wireless Gamepad" } }
+        }
+
+        fun findConnectedUsbGamepadDevice(context: Context): android.hardware.usb.UsbDevice? {
+            if (simulatedWiredOverrideForTests == false) return null
+            return try {
+                val usbManager = context.getSystemService(Context.USB_SERVICE) as? android.hardware.usb.UsbManager
+                val usbDevices = usbManager?.deviceList?.values ?: return null
+                usbDevices.firstOrNull { usbDev ->
+                    usbDev.vendorId in KNOWN_GAMEPAD_VENDORS ||
+                        hasKnownControllerName(usbDev.productName)
+                } ?: usbDevices.firstOrNull { usbDev ->
+                    if (usbDev.deviceClass == android.hardware.usb.UsbConstants.USB_CLASS_HID) {
+                        true
+                    } else {
+                        var hasHid = false
+                        for (i in 0 until usbDev.interfaceCount) {
+                            if (usbDev.getInterface(i).interfaceClass == android.hardware.usb.UsbConstants.USB_CLASS_HID) {
+                                hasHid = true
+                                break
+                            }
+                        }
+                        hasHid
+                    }
+                }
+            } catch (_: Exception) {
+                null
+            }
+        }
+
+        fun resolveUsbControllerName(usbDev: android.hardware.usb.UsbDevice): String {
+            val prodName = try { usbDev.productName?.trim() } catch (_: Exception) { null }
+            if (usbDev.vendorId == 0x054C) {
+                return when (usbDev.productId) {
+                    0x0CE6 -> "PS5 DualSense Wireless Controller"
+                    0x0DF2 -> "PS5 DualSense Edge Controller"
+                    0x05C4, 0x09CC -> "PS4 DualShock 4 Controller"
+                    else -> prodName?.takeIf { it.isNotBlank() } ?: "PlayStation USB Controller"
+                }
+            }
+            return when (usbDev.vendorId) {
+                0x045E -> prodName?.takeIf { it.isNotBlank() } ?: "Xbox USB Controller"
+                0x057E -> prodName?.takeIf { it.isNotBlank() } ?: "Nintendo Switch Pro Controller"
+                else -> prodName?.takeIf { it.isNotBlank() } ?: "USB Gamepad Controller"
+            }
+        }
+
+        data class ProcBusControllerEntry(
+            val name: String,
+            val isWiredUsb: Boolean
+        )
+
+        fun findProcBusControllerInfo(): ProcBusControllerEntry? {
+            if (simulatedWiredOverrideForTests == false) return null
+            return try {
+                val procFile = java.io.File("/proc/bus/input/devices")
+                if (!procFile.exists() || !procFile.canRead()) return null
+                val blocks = procFile.readText().split("\n\n")
+                for (block in blocks) {
+                    val lower = block.lowercase()
+                    val isUsb = lower.contains("bus=0003")
+                    val isBt = lower.contains("bus=0005")
+                    if (!isUsb && !isBt) continue
+                    val matchesKnownVid = KNOWN_GAMEPAD_VENDORS.any { vid ->
+                        lower.contains(String.format("vendor=%04x", vid))
+                    }
+                    val nameLine = block.lines().firstOrNull { it.startsWith("N: Name=") }
+                    val extractedName = nameLine?.substringAfter("N: Name=")?.trim()?.removeSurrounding("\"") ?: ""
+                    if (matchesKnownVid || hasKnownControllerName(extractedName)) {
+                        if (extractedName.lowercase().contains("motion sensor")) continue
+                        val displayName = if (lower.contains("vendor=054c") && extractedName.equals("Wireless Controller", ignoreCase = true)) {
+                            "PlayStation Wireless Controller"
+                        } else {
+                            extractedName.ifBlank { "Wireless Controller" }
+                        }
+                        return ProcBusControllerEntry(name = displayName, isWiredUsb = isUsb)
+                    }
+                }
+                null
+            } catch (_: Exception) {
+                null
+            }
         }
 
         fun isDeviceWiredUsb(context: Context, device: InputDevice?): Boolean {
             simulatedWiredOverrideForTests?.let { return it }
-            if (device != null && (device.isVirtual || isSubDeviceOrSensorNode(device))) return false
-            return try {
+            if (device != null && isInternalPhoneDevice(device)) return false
+            try {
                 val usbManager = context.getSystemService(Context.USB_SERVICE) as? android.hardware.usb.UsbManager
-                val usbDevices = usbManager?.deviceList?.values ?: return false
-                if (usbDevices.isEmpty()) return false
+                val usbDevices = usbManager?.deviceList?.values
+                if (!usbDevices.isNullOrEmpty()) {
+                    val matchesVidPid = usbDevices.any { usbDev ->
+                        (device != null && device.vendorId > 0 && usbDev.vendorId == device.vendorId &&
+                            (device.productId <= 0 || usbDev.productId == device.productId)) ||
+                            (usbDev.vendorId in KNOWN_GAMEPAD_VENDORS)
+                    }
+                    if (matchesVidPid) return true
 
-                // Match by USB Vendor ID and Product ID, or known gamepad USB vendor
-                val knownGamepadVendors = setOf(0x054C, 0x045E, 0x057E, 0x28DE, 0x1532, 0x2DC8, 0x3537, 0x27F8)
-                val matchesVidPid = usbDevices.any { usbDev ->
-                    (device != null && device.vendorId > 0 && usbDev.vendorId == device.vendorId &&
-                        (device.productId <= 0 || usbDev.productId == device.productId)) ||
-                        (usbDev.vendorId in knownGamepadVendors)
+                    val hasUsbHid = usbDevices.any { usbDev ->
+                        if (usbDev.deviceClass == android.hardware.usb.UsbConstants.USB_CLASS_HID) {
+                            true
+                        } else {
+                            var hasHidInterface = false
+                            for (i in 0 until usbDev.interfaceCount) {
+                                val intf = usbDev.getInterface(i)
+                                if (intf.interfaceClass == android.hardware.usb.UsbConstants.USB_CLASS_HID) {
+                                    hasHidInterface = true
+                                    break
+                                }
+                            }
+                            hasHidInterface
+                        }
+                    }
+                    if (hasUsbHid) return true
                 }
-                if (matchesVidPid) return true
+            } catch (_: Exception) {}
 
-                // Also check if any attached USB device exposes a USB HID / Gamepad interface (Class 3 = USB_CLASS_HID)
-                usbDevices.any { usbDev ->
-                    if (usbDev.deviceClass == android.hardware.usb.UsbConstants.USB_CLASS_HID) {
-                        true
-                    } else {
-                        var hasHidInterface = false
-                        for (i in 0 until usbDev.interfaceCount) {
-                            val intf = usbDev.getInterface(i)
-                            if (intf.interfaceClass == android.hardware.usb.UsbConstants.USB_CLASS_HID) {
-                                hasHidInterface = true
-                                break
+            // Fallback: check /proc/bus/input/devices for Bus=0003 (USB) vs Bus=0005 (Bluetooth)
+            try {
+                val procFile = java.io.File("/proc/bus/input/devices")
+                if (procFile.exists() && procFile.canRead()) {
+                    val blocks = procFile.readText().split("\n\n")
+                    val devNameLower = device?.name?.lowercase() ?: ""
+                    for (block in blocks) {
+                        val lower = block.lowercase()
+                        if (lower.contains("bus=0003")) {
+                            if ((devNameLower.isNotBlank() && lower.contains(devNameLower)) ||
+                                (device != null && device.vendorId > 0 && lower.contains(String.format("vendor=%04x", device.vendorId)))
+                            ) {
+                                return true
                             }
                         }
-                        hasHidInterface
                     }
                 }
+            } catch (_: Exception) {}
+
+            return false
+        }
+
+        /**
+         * Returns true when ANY physical controller (Bluetooth / Wireless OR Wired USB) is connected.
+         * Honors `simulatedWiredOverrideForTests` when set by unit tests.
+         */
+        fun isAnyControllerConnected(context: Context): Boolean {
+            simulatedWiredOverrideForTests?.let { return it }
+            if (_sharedLiveState.value.controllerId >= 0) return true
+            return try {
+                val ids = InputDevice.getDeviceIds()
+                for (id in ids) {
+                    val dev = InputDevice.getDevice(id) ?: continue
+                    if (isActualGamepadInputDevice(dev) || isCompanionControllerNode(dev)) {
+                        return true
+                    }
+                }
+                if (findConnectedUsbGamepadDevice(context) != null) return true
+                if (findProcBusControllerInfo() != null) return true
+                false
             } catch (_: Exception) {
                 false
             }
         }
 
         fun isWiredControllerConnected(context: Context): Boolean {
-            simulatedWiredOverrideForTests?.let { return it }
-            return try {
-                val ids = InputDevice.getDeviceIds()
-                for (id in ids) {
-                    val dev = InputDevice.getDevice(id) ?: continue
-                    if (isActualGamepadInputDevice(dev) && isDeviceWiredUsb(context, dev)) {
-                        return true
-                    }
-                }
-                false
-            } catch (_: Exception) {
-                false
-            }
+            return isAnyControllerConnected(context)
         }
 
         fun isPhysicalGamepadPresent(): Boolean {
@@ -348,8 +623,8 @@ class ControllerHealthManager(private val context: Context) : SensorEventListene
                 val ids = InputDevice.getDeviceIds()
                 ids.any { id ->
                     val dev = InputDevice.getDevice(id)
-                    isActualGamepadInputDevice(dev)
-                }
+                    isActualGamepadInputDevice(dev) || isCompanionControllerNode(dev)
+                } || findProcBusControllerInfo() != null
             } catch (_: Exception) {
                 false
             }
@@ -415,63 +690,173 @@ class ControllerHealthManager(private val context: Context) : SensorEventListene
         scanActiveController()
     }
 
+    private fun getSiblingNodesForDevice(device: InputDevice): List<InputDevice> {
+        val result = mutableListOf(device)
+        try {
+            val baseName = normalizeControllerDisplayName(device).lowercase()
+            for (id in InputDevice.getDeviceIds()) {
+                if (id == device.id) continue
+                val other = InputDevice.getDevice(id) ?: continue
+                if (isInternalPhoneDevice(other)) continue
+                val sameVendor = device.vendorId > 0 && other.vendorId == device.vendorId
+                val sameBaseName = normalizeControllerDisplayName(other).lowercase() == baseName
+                if (sameVendor || sameBaseName) {
+                    result.add(other)
+                }
+            }
+        } catch (_: Exception) {}
+        return result
+    }
+
+    private fun ensureControllerBoundFromEvent(dev: InputDevice?, fallbackDeviceId: Int = -1) {
+        val nowMs = System.currentTimeMillis()
+        lastLiveControllerEventMs = nowMs
+        if (dev != null && !isInternalPhoneDevice(dev)) {
+            val bestDev = if (isMotionSensorSubNode(dev) || isTouchpadOnlySubNode(dev)) {
+                getSiblingNodesForDevice(dev).firstOrNull { isActualGamepadInputDevice(it) } ?: dev
+            } else {
+                dev
+            }
+            if (_state.value.controllerId != bestDev.id || _state.value.controllerId < 0) {
+                setupController(bestDev)
+            }
+            return
+        }
+        if (_state.value.controllerId < 0 && simulatedWiredOverrideForTests == null) {
+            scanActiveController()
+            if (_state.value.controllerId < 0 && (dev != null || fallbackDeviceId >= 0)) {
+                val resolvedName = dev?.name?.takeIf { it.isNotBlank() && !it.equals("Virtual", ignoreCase = true) }
+                    ?: "PlayStation Wireless Controller"
+                val isWired = isDeviceWiredUsb(context, dev)
+                val updated = _state.value.copy(
+                    activeControllerName = resolvedName,
+                    controllerId = (dev?.id ?: fallbackDeviceId).coerceAtLeast(1),
+                    isRumbleSupported = true,
+                    rumbleStatus = "Ready",
+                    isWiredConnection = isWired,
+                    connectionTypeLabel = if (isWired) "Wired USB" else "Bluetooth / Wireless"
+                )
+                _state.value = updated
+                updateSharedState(updated)
+            }
+        }
+    }
+
     fun scanActiveController() {
-        val deviceIds = InputDevice.getDeviceIds()
-        val candidates = mutableListOf<InputDevice>()
+        val deviceIds = try { InputDevice.getDeviceIds() } catch (_: Exception) { IntArray(0) }
+        val primaryCandidates = mutableListOf<InputDevice>()
+        val companionCandidates = mutableListOf<InputDevice>()
         for (id in deviceIds) {
             val dev = InputDevice.getDevice(id) ?: continue
             if (isActualGamepadInputDevice(dev)) {
-                candidates.add(dev)
+                primaryCandidates.add(dev)
+            } else if (isCompanionControllerNode(dev)) {
+                companionCandidates.add(dev)
             }
         }
 
-        // 1. Prefer a wired device that explicitly has SOURCE_GAMEPAD (buttons + sticks)
+        val candidates = if (primaryCandidates.isNotEmpty()) primaryCandidates else companionCandidates
+
+        // 1. Prefer a wired or Sony/Xbox/Switch device that explicitly has SOURCE_GAMEPAD
         val targetDevice = candidates.firstOrNull { dev ->
             (dev.sources and InputDevice.SOURCE_GAMEPAD) == InputDevice.SOURCE_GAMEPAD &&
                 isDeviceWiredUsb(context, dev)
         } ?: candidates.firstOrNull { dev ->
             (dev.sources and InputDevice.SOURCE_GAMEPAD) == InputDevice.SOURCE_GAMEPAD
+        } ?: candidates.firstOrNull { dev ->
+            dev.vendorId in KNOWN_GAMEPAD_VENDORS
         } ?: candidates.firstOrNull()
 
         if (targetDevice != null) {
             setupController(targetDevice)
-        } else {
-            val updated = ControllerHealthState(
-                activeControllerName = "No Gamepad Connected",
-                controllerId = -1,
-                pollingRateHz = 0,
-                peakPollingRateHz = 0,
-                batteryInfo = ControllerBatteryInfo(
-                    hasBattery = false,
-                    batteryCapacity = -1f,
-                    batteryStatus = "Disconnected",
-                    isLowBattery = false,
-                    lowBatteryAlert = null
-                ),
-                gyroReading = GyroReading(isSupported = false),
-                isLedSupported = false,
-                isRumbleSupported = false,
-                rumbleStatus = "Disconnected",
-                isWiredConnection = false,
-                connectionTypeLabel = "Disconnected"
+            return
+        }
+
+        // 2. Hardware fallback: check UsbManager for wired USB controllers
+        val usbGamepad = findConnectedUsbGamepadDevice(context)
+        if (usbGamepad != null) {
+            val usbName = resolveUsbControllerName(usbGamepad)
+            val usbId = usbGamepad.deviceId.coerceAtLeast(1)
+            val updated = _state.value.copy(
+                activeControllerName = usbName,
+                controllerId = usbId,
+                isRumbleSupported = true,
+                rumbleStatus = "Ready",
+                isWiredConnection = true,
+                connectionTypeLabel = "Wired USB"
             )
             _state.value = updated
             updateSharedState(updated)
+            return
         }
+
+        // 3. Kernel procfs fallback: check /proc/bus/input/devices for Bluetooth (Bus=0005) or USB (Bus=0003) controllers
+        val procEntry = findProcBusControllerInfo()
+        if (procEntry != null) {
+            val updated = _state.value.copy(
+                activeControllerName = procEntry.name,
+                controllerId = _state.value.controllerId.takeIf { it >= 0 } ?: 1,
+                isRumbleSupported = true,
+                rumbleStatus = "Ready",
+                isWiredConnection = procEntry.isWiredUsb,
+                connectionTypeLabel = if (procEntry.isWiredUsb) "Wired USB" else "Bluetooth / Wireless"
+            )
+            _state.value = updated
+            updateSharedState(updated)
+            return
+        }
+
+        // 4. Preserve active live-input controller if events were recently received and not forced off by tests
+        if (simulatedWiredOverrideForTests != false &&
+            _state.value.controllerId >= 0 &&
+            (System.currentTimeMillis() - lastLiveControllerEventMs) < 120_000L
+        ) {
+            return
+        }
+
+        val updated = ControllerHealthState(
+            activeControllerName = "No Gamepad Connected",
+            controllerId = -1,
+            pollingRateHz = 0,
+            peakPollingRateHz = 0,
+            batteryInfo = ControllerBatteryInfo(
+                hasBattery = false,
+                batteryCapacity = -1f,
+                batteryStatus = "Disconnected",
+                isLowBattery = false,
+                lowBatteryAlert = null
+            ),
+            gyroReading = GyroReading(isSupported = false),
+            isLedSupported = false,
+            isRumbleSupported = false,
+            rumbleStatus = "Disconnected",
+            isWiredConnection = false,
+            connectionTypeLabel = "Disconnected"
+        )
+        _state.value = updated
+        updateSharedState(updated)
     }
 
     private fun setupController(device: InputDevice) {
-        val hasVibe = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            device.vibratorManager?.defaultVibrator?.hasVibrator() ?: device.vibrator.hasVibrator()
-        } else {
-            @Suppress("DEPRECATION")
-            device.vibrator.hasVibrator()
+        val siblings = getSiblingNodesForDevice(device)
+        val hasVibe = siblings.any { node ->
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                node.vibratorManager?.defaultVibrator?.hasVibrator() == true ||
+                    node.vibratorManager?.vibratorIds?.isNotEmpty() == true ||
+                    node.vibrator.hasVibrator()
+            } else {
+                @Suppress("DEPRECATION")
+                node.vibrator.hasVibrator()
+            }
         }
 
-        val battery = queryBattery(device)
-        val hasLed = checkLedSupport(device)
-        val isWired = isDeviceWiredUsb(context, device)
-        setupGyro(device)
+        val battery = siblings.firstNotNullOfOrNull { node ->
+            queryBattery(node).takeIf { it.hasBattery }
+        } ?: queryBattery(device)
+
+        val hasLed = siblings.any { node -> checkLedSupport(node) }
+        val isWired = siblings.any { node -> isDeviceWiredUsb(context, node) }
+        setupGyroWithSiblings(siblings)
 
         if (isWired) {
             try {
@@ -480,10 +865,12 @@ class ControllerHealthManager(private val context: Context) : SensorEventListene
             } catch (_: Exception) {}
         }
 
+        val displayName = normalizeControllerDisplayName(device)
         val updated = _state.value.copy(
-            activeControllerName = device.name,
+            activeControllerName = displayName,
             controllerId = device.id,
             isRumbleSupported = hasVibe,
+            rumbleStatus = if (hasVibe) "Ready" else _state.value.rumbleStatus,
             batteryInfo = battery,
             isLedSupported = hasLed,
             isWiredConnection = isWired,
@@ -491,7 +878,7 @@ class ControllerHealthManager(private val context: Context) : SensorEventListene
         )
         _state.value = updated
         updateSharedState(updated)
-        Log.i(TAG, "Attached to controller: ${device.name} (ID ${device.id}, wired=$isWired)")
+        Log.i(TAG, "Attached to controller: $displayName (ID ${device.id}, wired=$isWired)")
     }
 
     private var lastBatteryQueryMs: Long = 0L
@@ -614,29 +1001,31 @@ class ControllerHealthManager(private val context: Context) : SensorEventListene
     private var hasLastAccel = false
     private var lastGyroEmitMs = 0L
 
-    private fun setupGyro(device: InputDevice) {
+    private fun setupGyroWithSiblings(siblings: List<InputDevice>) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            try {
-                val sensorManager = device.sensorManager
-                val gyro = sensorManager.getDefaultSensor(Sensor.TYPE_GYROSCOPE)
-                val accel = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
-                if (gyro != null || accel != null) {
-                    controllerSensorManager = sensorManager
-                    controllerGyroSensor = gyro
-                    if (gyro != null) {
-                        sensorManager.registerListener(this, gyro, SensorManager.SENSOR_DELAY_UI)
+            for (node in siblings) {
+                try {
+                    val sensorManager = node.sensorManager
+                    val gyro = sensorManager.getDefaultSensor(Sensor.TYPE_GYROSCOPE)
+                    val accel = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
+                    if (gyro != null || accel != null) {
+                        controllerSensorManager = sensorManager
+                        controllerGyroSensor = gyro
+                        if (gyro != null) {
+                            sensorManager.registerListener(this, gyro, SensorManager.SENSOR_DELAY_UI)
+                        }
+                        if (accel != null) {
+                            sensorManager.registerListener(this, accel, SensorManager.SENSOR_DELAY_UI)
+                        }
+                        _state.value = _state.value.copy(
+                            gyroReading = GyroReading(isSupported = true)
+                        )
+                        Log.i(TAG, "Controller motion sensors registered on ${node.name}")
+                        return
                     }
-                    if (accel != null) {
-                        sensorManager.registerListener(this, accel, SensorManager.SENSOR_DELAY_UI)
-                    }
-                    _state.value = _state.value.copy(
-                        gyroReading = GyroReading(isSupported = true)
-                    )
-                    Log.i(TAG, "Controller motion sensors registered successfully")
-                    return
+                } catch (e: Exception) {
+                    Log.w(TAG, "SensorManager setup failed on ${node.name}: ${e.message}")
                 }
-            } catch (e: Exception) {
-                Log.w(TAG, "SensorManager setup failed: ${e.message}")
             }
         }
         // Do NOT fall back to phone's built-in gyroscope/accelerometer; phone tilt must never move controller sticks.
@@ -651,6 +1040,10 @@ class ControllerHealthManager(private val context: Context) : SensorEventListene
     fun onGenericMotionEvent(event: MotionEvent): Boolean {
         val dev = event.device
         if (dev != null && isSubDeviceOrSensorNode(dev)) {
+            // Even if this is the Motion Sensors sub-node of a PlayStation controller, ensure the parent controller is bound!
+            if (isMotionSensorSubNode(dev) && _state.value.controllerId < 0) {
+                ensureControllerBoundFromEvent(dev, event.deviceId)
+            }
             return false
         }
         val src = event.source
@@ -665,9 +1058,7 @@ class ControllerHealthManager(private val context: Context) : SensorEventListene
 
         val nowMs = System.currentTimeMillis()
         measurePollingRate()
-        if (dev != null && dev.name.isNotBlank() && isActualGamepadInputDevice(dev) && _state.value.controllerId != dev.id) {
-            setupController(dev)
-        }
+        ensureControllerBoundFromEvent(dev, event.deviceId)
         refreshBatteryIfNeeded(dev)
         lastMotionStickUpdateMs = nowMs
         lastInGameActionMs = nowMs
@@ -684,50 +1075,52 @@ class ControllerHealthManager(private val context: Context) : SensorEventListene
         val lx = event.getAxisValue(MotionEvent.AXIS_X)
         val ly = event.getAxisValue(MotionEvent.AXIS_Y)
 
-        // Right Thumbstick:
-        // On PlayStation DualSense / DualShock 4 and standard Android gamepads, Right Stick is AXIS_Z (X) and AXIS_RZ (Y),
-        // while AXIS_RX / AXIS_RY are analog L2/R2 triggers resting at -1.0f when unpressed.
-        val hasAxisZ = isSonyController ||
-            dev?.getMotionRange(MotionEvent.AXIS_Z, src) != null ||
-            dev?.getMotionRange(MotionEvent.AXIS_Z) != null
-        val hasAxisRz = isSonyController ||
-            dev?.getMotionRange(MotionEvent.AXIS_RZ, src) != null ||
-            dev?.getMotionRange(MotionEvent.AXIS_RZ) != null
-
-        val rx = if (hasAxisZ) {
-            event.getAxisValue(MotionEvent.AXIS_Z)
-        } else {
-            event.getAxisValue(MotionEvent.AXIS_Z).takeIf { kotlin.math.abs(it) > 0.01f }
-                ?: event.getAxisValue(MotionEvent.AXIS_RX)
-        }
-        val ry = if (hasAxisRz) {
-            event.getAxisValue(MotionEvent.AXIS_RZ)
-        } else {
-            event.getAxisValue(MotionEvent.AXIS_RZ).takeIf { kotlin.math.abs(it) > 0.01f }
-                ?: event.getAxisValue(MotionEvent.AXIS_RY)
-        }
-
-        // Analog triggers (L2/LT: AXIS_BRAKE, AXIS_LTRIGGER, or Sony USB AXIS_RX; R2/RT: AXIS_GAS, AXIS_RTRIGGER, or Sony USB AXIS_RY)
-        val primaryLt = event.getAxisValue(MotionEvent.AXIS_BRAKE).coerceAtLeast(event.getAxisValue(MotionEvent.AXIS_LTRIGGER))
-        val primaryRt = event.getAxisValue(MotionEvent.AXIS_GAS).coerceAtLeast(event.getAxisValue(MotionEvent.AXIS_RTRIGGER))
+        // Right Thumbstick & Analog Triggers across both Wired USB and Bluetooth HID descriptors:
+        val axisZ = event.getAxisValue(MotionEvent.AXIS_Z)
+        val axisRz = event.getAxisValue(MotionEvent.AXIS_RZ)
         val rawRx = event.getAxisValue(MotionEvent.AXIS_RX)
         val rawRy = event.getAxisValue(MotionEvent.AXIS_RY)
-        val sonyUsbLt = if (isSonyController && primaryLt < 0.02f && rawRx != 0f) {
+
+        val primaryLt = event.getAxisValue(MotionEvent.AXIS_BRAKE)
+            .coerceAtLeast(event.getAxisValue(MotionEvent.AXIS_LTRIGGER))
+        val primaryRt = event.getAxisValue(MotionEvent.AXIS_GAS)
+            .coerceAtLeast(event.getAxisValue(MotionEvent.AXIS_RTRIGGER))
+
+        // On Sony USB/BT when AXIS_RX/AXIS_RY are analog triggers, they rest at -1.0f when unpressed.
+        // On generic Bluetooth / Xbox profiles where Right Stick is mapped to AXIS_RX/AXIS_RY, axisZ/axisRz stay 0f.
+        val rxRyLooksLikeRestingTriggers = isSonyController &&
+            (rawRx < -0.85f || rawRy < -0.85f || _sharedLiveState.value.pressedButtons.contains("L2") || _sharedLiveState.value.pressedButtons.contains("R2"))
+
+        val rx = if (kotlin.math.abs(axisZ) > 0.015f || kotlin.math.abs(axisRz) > 0.015f || rxRyLooksLikeRestingTriggers) {
+            axisZ
+        } else {
+            rawRx
+        }
+        val ry = if (kotlin.math.abs(axisZ) > 0.015f || kotlin.math.abs(axisRz) > 0.015f || rxRyLooksLikeRestingTriggers) {
+            axisRz
+        } else {
+            rawRy
+        }
+
+        val sonyUsbLt = if (isSonyController && primaryLt < 0.02f && rawRx != 0f && kotlin.math.abs(axisZ) >= kotlin.math.abs(rawRx).coerceAtMost(0.01f)) {
             if (rawRx < -0.05f || _sharedLiveState.value.pressedButtons.contains("L2")) {
                 ((rawRx + 1f) / 2f).coerceIn(0f, 1f)
-            } else {
+            } else if (kotlin.math.abs(axisZ) > 0.02f) {
                 rawRx.coerceIn(0f, 1f)
-            }
+            } else 0f
         } else 0f
-        val sonyUsbRt = if (isSonyController && primaryRt < 0.02f && rawRy != 0f) {
+        val sonyUsbRt = if (isSonyController && primaryRt < 0.02f && rawRy != 0f && kotlin.math.abs(axisRz) >= kotlin.math.abs(rawRy).coerceAtMost(0.01f)) {
             if (rawRy < -0.05f || _sharedLiveState.value.pressedButtons.contains("R2")) {
                 ((rawRy + 1f) / 2f).coerceIn(0f, 1f)
-            } else {
+            } else if (kotlin.math.abs(axisRz) > 0.02f) {
                 rawRy.coerceIn(0f, 1f)
-            }
+            } else 0f
         } else 0f
-        val lt = primaryLt.coerceAtLeast(sonyUsbLt)
-        val rt = primaryRt.coerceAtLeast(sonyUsbRt)
+
+        val rawLt = primaryLt.coerceAtLeast(sonyUsbLt)
+        val rawRt = primaryRt.coerceAtLeast(sonyUsbRt)
+        val lt = if (keyHeldTriggers.contains("L2")) maxOf(rawLt, 1f) else rawLt
+        val rt = if (keyHeldTriggers.contains("R2")) maxOf(rawRt, 1f) else rawRt
 
         // D-Pad Hat Axes (AXIS_HAT_X, AXIS_HAT_Y)
         val hatX = event.getAxisValue(MotionEvent.AXIS_HAT_X)
@@ -769,8 +1162,8 @@ class ControllerHealthManager(private val context: Context) : SensorEventListene
         val dpadRightActive = hatHeldDpad.contains("DPAD_RIGHT") || keyHeldDpad.contains("DPAD_RIGHT")
         val dpadUpActive = hatHeldDpad.contains("DPAD_UP") || keyHeldDpad.contains("DPAD_UP")
         val dpadDownActive = hatHeldDpad.contains("DPAD_DOWN") || keyHeldDpad.contains("DPAD_DOWN")
-        val l2Active = lt > 0.25f
-        val r2Active = rt > 0.25f
+        val l2Active = lt > 0.25f || keyHeldTriggers.contains("L2")
+        val r2Active = rt > 0.25f || keyHeldTriggers.contains("R2")
 
         val basePressed = baseState.pressedButtons
         val buttonsChanged =
@@ -842,16 +1235,19 @@ class ControllerHealthManager(private val context: Context) : SensorEventListene
      * Process key events from gamepad buttons, D-Pad, raw HID scanCodes, and directional stick translations.
      */
     fun onKeyEvent(event: KeyEvent): Boolean {
-        val isFallbackEvent = (event.flags and KeyEvent.FLAG_FALLBACK) != 0
-        // Inside GMAX Gaming Hub, MainActivity receives raw 120Hz MotionEvents directly, so reject fallback KeyEvents.
-        // Outside GMAX Gaming Hub (on the Home Screen or in games while the overlay is strictly FLAG_NOT_FOCUSABLE),
-        // Android's InputDispatcher/ViewRootImpl emits FLAG_FALLBACK directional KeyEvents when the user moves the
-        // physical analog stick — we use those passively to animate the overlay's left joystick!
-        if (isFallbackEvent && isAppInForeground) {
-            return false
-        }
         val dev = event.device
         if (dev != null && isSubDeviceOrSensorNode(dev)) {
+            return false
+        }
+        val isFallbackEvent = (event.flags and KeyEvent.FLAG_FALLBACK) != 0
+        // If a real external controller device emits even a FLAG_FALLBACK event while controllerId < 0,
+        // immediately bind the controller so the UI recognizes it as connected!
+        if ((dev != null && !isInternalPhoneDevice(dev) || event.deviceId >= 0) && _state.value.controllerId < 0) {
+            ensureControllerBoundFromEvent(dev, event.deviceId)
+        }
+        // When raw 120Hz MotionEvents are actively streaming (within 350ms), reject synthetic fallback KeyEvents
+        // so moving the analog thumbstick never falsely illuminates the D-Pad cross.
+        if (isFallbackEvent && (System.currentTimeMillis() - lastMotionStickUpdateMs) < 350L) {
             return false
         }
         val keyCode = event.keyCode
@@ -893,7 +1289,9 @@ class ControllerHealthManager(private val context: Context) : SensorEventListene
         val isGamepadSource = dev != null &&
             ((dev.sources and InputDevice.SOURCE_GAMEPAD) == InputDevice.SOURCE_GAMEPAD ||
                 (dev.sources and InputDevice.SOURCE_JOYSTICK) == InputDevice.SOURCE_JOYSTICK ||
-                (dev.sources and InputDevice.SOURCE_DPAD) == InputDevice.SOURCE_DPAD)
+                (dev.sources and InputDevice.SOURCE_DPAD) == InputDevice.SOURCE_DPAD ||
+                isActualGamepadInputDevice(dev) ||
+                isCompanionControllerNode(dev))
 
         // Reject volume keys, power key, and phone navigation bar keys when not from a gamepad device
         if (keyCode == KeyEvent.KEYCODE_VOLUME_UP ||
@@ -955,9 +1353,7 @@ class ControllerHealthManager(private val context: Context) : SensorEventListene
             }
 
             measurePollingRate()
-            if (dev != null && dev.name.isNotBlank() && isActualGamepadInputDevice(dev) && _state.value.controllerId != dev.id) {
-                setupController(dev)
-            }
+            ensureControllerBoundFromEvent(dev, event.deviceId)
 
             var mappedButtons = normalizeGamepadKeyCodes(
                 keyCode = keyCode,
@@ -1027,10 +1423,10 @@ class ControllerHealthManager(private val context: Context) : SensorEventListene
                 return true
             }
 
-            if (!isAppInForeground) {
-                // Out-of-app micro-slice capture: illuminate button on either ACTION_DOWN or ACTION_UP
-                // for 220ms so fast taps and pass-through slices always show on the floating overlay
-                // and automatically release without ever getting stuck.
+            if (!isAppInForeground && (event.action == KeyEvent.ACTION_DOWN || !pressed.contains(primaryBtnName))) {
+                // Out-of-app micro-slice capture: illuminate button on ACTION_DOWN (or on ACTION_UP if ACTION_DOWN
+                // occurred between slices) for 220ms so fast taps and pass-through slices always show on the
+                // floating overlay and automatically release without ever getting stuck.
                 if (primaryBtnName == "X" || primaryBtnName == "Y") {
                     faceButtonDownTimestampMs[primaryBtnName] = nowMs
                     val xTime = faceButtonDownTimestampMs["X"] ?: 0L
@@ -1072,6 +1468,8 @@ class ControllerHealthManager(private val context: Context) : SensorEventListene
                     if (btn.startsWith("DPAD_")) {
                         keyHeldDpad.add(btn)
                         keyHeldDpadTimestampMs[btn] = nowMs
+                    } else if (btn == "L2" || btn == "R2") {
+                        keyHeldTriggers.add(btn)
                     }
                 }
                 if (keyCode == KeyEvent.KEYCODE_BUTTON_MODE ||
@@ -1106,16 +1504,23 @@ class ControllerHealthManager(private val context: Context) : SensorEventListene
                         faceButtonDownTimestampMs.remove("Y")
                         pressed.remove("X")
                         pressed.remove("Y")
+                        pulseHeldButtons.remove("X")
+                        pulseHeldButtons.remove("Y")
                     }
                 }
                 for (btn in mappedButtons) {
+                    pulseHeldButtons.remove(btn)
                     if (btn.startsWith("DPAD_")) {
+                        pulseHeldDpad.remove(btn)
                         keyHeldDpad.remove(btn)
                         keyHeldDpadTimestampMs.remove(btn)
                         if (!hatHeldDpad.contains(btn)) {
                             pressed.remove(btn)
                         }
                     } else {
+                        if (btn == "L2" || btn == "R2") {
+                            keyHeldTriggers.remove(btn)
+                        }
                         pressed.remove(btn)
                     }
                 }
@@ -1367,8 +1772,8 @@ class ControllerHealthManager(private val context: Context) : SensorEventListene
                 305 -> return "B"
                 306 -> return "B"
                 // In Linux hid-playstation / hid-sony (Vendor_054c), BTN_WEST (308) is Square ("X")
-                // and BTN_NORTH (307) is Triangle ("Y") when 308 is present:
-                307 -> return "X"
+                // and BTN_NORTH (307) is Triangle ("Y"):
+                307 -> return "Y"
                 308 -> return "X"
                 309 -> return "R1"
                 310 -> return "L1"
@@ -1595,36 +2000,68 @@ class ControllerHealthManager(private val context: Context) : SensorEventListene
     }
 
     /**
-     * Test rumble motors on controller.
+     * Test rumble motors on controller (searches primary and sibling InputDevice nodes for Bluetooth/USB controllers).
      */
     fun testRumble(intensity: Float = 1.0f, durationMs: Long = 300) {
+        if (_state.value.controllerId < 0 || InputDevice.getDevice(_state.value.controllerId) == null) {
+            scanActiveController()
+        }
         val devId = _state.value.controllerId
-        val device = if (devId >= 0) InputDevice.getDevice(devId) else null
+        val primaryDevice = if (devId >= 0) InputDevice.getDevice(devId) else null
 
+        val candidateDevices = buildList {
+            if (primaryDevice != null) add(primaryDevice)
+            try {
+                for (id in InputDevice.getDeviceIds()) {
+                    val d = InputDevice.getDevice(id) ?: continue
+                    if (d.id != devId && !d.isVirtual) {
+                        val sameVid = primaryDevice != null && primaryDevice.vendorId > 0 && d.vendorId == primaryDevice.vendorId
+                        if (sameVid || isActualGamepadInputDevice(d)) {
+                            add(d)
+                        }
+                    }
+                }
+            } catch (_: Exception) {}
+        }
+
+        val amp = (intensity * 255).toInt().coerceIn(1, 255)
         try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && device?.vibratorManager != null) {
-                val vm = device.vibratorManager
-                val effect = VibrationEffect.createOneShot(durationMs, (intensity * 255).toInt().coerceIn(1, 255))
-                val combined = CombinedVibration.createParallel(effect)
-                vm.vibrate(combined)
-                _state.value = _state.value.copy(rumbleStatus = "Vibrating (${durationMs}ms @ ${(intensity * 100).toInt()}%)")
-            } else if (device != null) {
+            for (device in candidateDevices) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && device.vibratorManager != null) {
+                    val vm = device.vibratorManager
+                    val hasAnyMotor = vm.vibratorIds.isNotEmpty() || vm.defaultVibrator.hasVibrator()
+                    if (hasAnyMotor) {
+                        val effect = VibrationEffect.createOneShot(durationMs, amp)
+                        val combined = CombinedVibration.createParallel(effect)
+                        vm.vibrate(combined)
+                        val updated = _state.value.copy(
+                            isRumbleSupported = true,
+                            rumbleStatus = "Vibrating (${durationMs}ms @ ${(intensity * 100).toInt()}%)"
+                        )
+                        _state.value = updated
+                        updateSharedState(updated)
+                        return
+                    }
+                }
                 @Suppress("DEPRECATION")
                 val vib = device.vibrator
                 if (vib.hasVibrator()) {
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                        vib.vibrate(VibrationEffect.createOneShot(durationMs, (intensity * 255).toInt().coerceIn(1, 255)))
+                        vib.vibrate(VibrationEffect.createOneShot(durationMs, amp))
                     } else {
                         @Suppress("DEPRECATION")
                         vib.vibrate(durationMs)
                     }
-                    _state.value = _state.value.copy(rumbleStatus = "Actuating Controller Motors")
-                } else {
-                    fallbackPhoneVibrate(durationMs)
+                    val updated = _state.value.copy(
+                        isRumbleSupported = true,
+                        rumbleStatus = "Actuating Controller Motors (${durationMs}ms @ ${(intensity * 100).toInt()}%)"
+                    )
+                    _state.value = updated
+                    updateSharedState(updated)
+                    return
                 }
-            } else {
-                fallbackPhoneVibrate(durationMs)
             }
+            fallbackPhoneVibrate(durationMs)
         } catch (e: Exception) {
             Log.e(TAG, "Rumble failed: ${e.message}")
             fallbackPhoneVibrate(durationMs)
@@ -1633,7 +2070,12 @@ class ControllerHealthManager(private val context: Context) : SensorEventListene
 
     private fun fallbackPhoneVibrate(durationMs: Long) {
         try {
-            val phoneVib = context.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
+            val phoneVib = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                (context.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as? VibratorManager)?.defaultVibrator
+            } else {
+                @Suppress("DEPRECATION")
+                context.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
+            }
             phoneVib?.let {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                     it.vibrate(VibrationEffect.createOneShot(durationMs, VibrationEffect.DEFAULT_AMPLITUDE))
@@ -1642,37 +2084,71 @@ class ControllerHealthManager(private val context: Context) : SensorEventListene
                     it.vibrate(durationMs)
                 }
             }
-            _state.value = _state.value.copy(rumbleStatus = "Controller motor unreachable (Phone fallback haptic fired)")
+            val updated = _state.value.copy(rumbleStatus = "Haptic Pulse Fired (${durationMs}ms)")
+            _state.value = updated
+            updateSharedState(updated)
         } catch (_: Exception) {}
     }
 
     /**
-     * Set controller LED color (Android 12+ / API 31+ with supported lights manager).
+     * Set controller LED color (Android 12+ / API 31+ with supported lights manager across primary and sibling nodes).
      */
     fun setLedColor(colorHex: String) {
+        if (_state.value.controllerId < 0 || InputDevice.getDevice(_state.value.controllerId) == null) {
+            scanActiveController()
+        }
         val devId = _state.value.controllerId
-        val device = if (devId >= 0) InputDevice.getDevice(devId) else null
+        val primaryDevice = if (devId >= 0) InputDevice.getDevice(devId) else null
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && device != null) {
-            try {
-                val lightsManager = device.lightsManager
-                val lightsList = lightsManager.lights
-                val colorInt = android.graphics.Color.parseColor(colorHex)
-                val reqBuilder = android.hardware.lights.LightsRequest.Builder()
-                for (light in lightsList) {
-                    val state = LightState.Builder().setColor(colorInt).build()
-                    reqBuilder.addLight(light, state)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            val candidateDevices = buildList {
+                if (primaryDevice != null) add(primaryDevice)
+                try {
+                    for (id in InputDevice.getDeviceIds()) {
+                        val d = InputDevice.getDevice(id) ?: continue
+                        if (d.id != devId && !d.isVirtual) {
+                            val sameVid = primaryDevice != null && primaryDevice.vendorId > 0 && d.vendorId == primaryDevice.vendorId
+                            if (sameVid || isActualGamepadInputDevice(d)) {
+                                add(d)
+                            }
+                        }
+                    }
+                } catch (_: Exception) {}
+            }
+            val colorInt = try {
+                android.graphics.Color.parseColor(colorHex)
+            } catch (_: Exception) {
+                android.graphics.Color.CYAN
+            }
+            for (device in candidateDevices) {
+                try {
+                    val lightsManager = device.lightsManager
+                    val lightsList = lightsManager.lights
+                    if (lightsList.isNotEmpty()) {
+                        val reqBuilder = android.hardware.lights.LightsRequest.Builder()
+                        for (light in lightsList) {
+                            val state = LightState.Builder().setColor(colorInt).build()
+                            reqBuilder.addLight(light, state)
+                        }
+                        val session = lightsManager.openSession()
+                        session.requestLights(reqBuilder.build())
+                        val updated = _state.value.copy(
+                            isLedSupported = true,
+                            ledCurrentColorHex = colorHex
+                        )
+                        _state.value = updated
+                        updateSharedState(updated)
+                        Log.i(TAG, "Set controller LED to $colorHex")
+                        return
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "LED set color failed: ${e.message}")
                 }
-                val session = lightsManager.openSession()
-                session.requestLights(reqBuilder.build())
-                _state.value = _state.value.copy(ledCurrentColorHex = colorHex)
-                Log.i(TAG, "Set controller LED to $colorHex")
-                return
-            } catch (e: Exception) {
-                Log.w(TAG, "LED set color failed: ${e.message}")
             }
         }
-        _state.value = _state.value.copy(ledCurrentColorHex = colorHex)
+        val updated = _state.value.copy(ledCurrentColorHex = colorHex)
+        _state.value = updated
+        updateSharedState(updated)
     }
 
     override fun onSensorChanged(event: SensorEvent?) {

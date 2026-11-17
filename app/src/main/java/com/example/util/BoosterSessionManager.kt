@@ -87,21 +87,21 @@ class BoosterSessionManager(context: Context) {
      */
     fun getActiveMode(): BoostMode? {
         if (!isSessionActive()) return null
-        val modeStr = prefs.getString(KEY_ACTIVE_MODE, null) ?: return null
+        val modeStr = prefs.getString(KEY_ACTIVE_MODE, null) ?: return BoostMode.BEAST
         return try {
             BoostMode.valueOf(modeStr)
         } catch (_: Exception) {
-            BoostMode.GAMING
+            BoostMode.BEAST
         }
     }
 
     /**
-     * Starts a booster session with the specified mode and target game.
+     * Starts an Overlay and Focus Mode Timer session (1 hour 30 minutes) with the target game.
      * If a session is already active, preserves the existing expiration timestamp
-     * so choosing a different game does not reset the remaining boost duration.
+     * so choosing a different game does not reset the remaining session duration.
      */
     fun startSession(
-        mode: BoostMode,
+        mode: BoostMode = BoostMode.BEAST,
         targetPackage: String? = null,
         targetAppName: String? = null,
         forceResetTime: Boolean = false
@@ -113,18 +113,14 @@ class BoosterSessionManager(context: Context) {
         val expiresAt = if (!forceResetTime && isSessionActive() && currentExpiresAt > now) {
             currentExpiresAt
         } else {
-            val durationMs = if (mode == BoostMode.BEAST) {
-                DURATION_BEAST_MODE_MS
-            } else {
-                DURATION_NORMAL_BOOST_MS
-            }
+            val durationMs = DURATION_BEAST_MODE_MS
             now + durationMs
         }
 
         val editor = prefs.edit()
             .putBoolean(KEY_IS_ACTIVE, true)
             .putLong(KEY_EXPIRES_AT, expiresAt)
-            .putString(KEY_ACTIVE_MODE, mode.name)
+            .putString(KEY_ACTIVE_MODE, BoostMode.BEAST.name)
 
         if (!targetPackage.isNullOrBlank()) {
             editor.putString(KEY_LAST_PACKAGE, targetPackage)

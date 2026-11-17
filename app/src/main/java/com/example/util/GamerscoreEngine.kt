@@ -102,8 +102,8 @@ object GamerscoreEngine {
         val sessionMilestones = (safeSessions / 10L) * 250L // 250 pts per 10 sessions
         val rawMilestoneBonusPoints = hourMilestones + sessionMilestones
 
-        // Starter base score of 1,200 G so every session and minute played always adds to Gamerscore
-        val rawBaseBonus = 1200L
+        // When reset to 0 for a new monthly season (0 minutes & 0 sessions), totalScore is 0
+        val rawBaseBonus = if (safeMinutes == 0L && safeSessions == 0L) 0L else 1200L
         val rawTotalScore = rawBaseBonus + rawPlayTimePoints + rawSessionsPoints + rawMilestoneBonusPoints
 
         val playTimePoints = SeasonLeaderboardEngine.applySeasonHalvingToScore(rawPlayTimePoints, seasonHalvingCount)

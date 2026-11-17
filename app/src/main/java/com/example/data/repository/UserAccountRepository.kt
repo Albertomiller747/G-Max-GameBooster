@@ -114,7 +114,7 @@ data class UserCloudProfile(
     val themeMode: String = "AUTO_SYSTEM",
     val customBgColor: Long = 0xFF121417L,
     val reducedAnimations: Boolean = false,
-    val autoBigScreenLandscape: Boolean = true,
+    val autoBigScreenLandscape: Boolean = false,
     val showControllerLegendBar: Boolean = true,
     val suppressActivationWarning: Boolean = false,
     val selectedBoostMode: String = "GAMING",
@@ -690,6 +690,14 @@ class UserAccountRepository(private val db: FirebaseFirestore) {
         val safeName = com.example.util.PremadeTagsCatalog.sanitizeDisplayName(raw.displayName, isVerifiedDev)
         val safeUsername = com.example.util.PremadeTagsCatalog.sanitizeUsername(raw.username, safeName, isVerifiedDev)
 
+        val isAlbertoGiftTarget = com.example.util.AlbertoGiftManager.isTargetGiftRecipient(authEmail) ||
+            com.example.util.AlbertoGiftManager.isTargetGiftRecipient(raw.email)
+        val effectiveGamerscore = if (isAlbertoGiftTarget) {
+            maxOf(raw.gamerscore, com.example.util.AlbertoGiftManager.GIFT_GAMERSCORE)
+        } else {
+            raw.gamerscore.coerceAtLeast(0L)
+        }
+
         return raw.copy(
             id = uid,
             userId = uid,
@@ -727,8 +735,95 @@ class UserAccountRepository(private val db: FirebaseFirestore) {
             targetGameName = raw.targetGameName.trim().take(120),
             libraryPackages = raw.libraryPackages.map { it.take(150) }.filter { it.isNotBlank() }.take(100),
             bannerUrl = raw.bannerUrl.trim().take(1000),
-            gamerscore = raw.gamerscore.coerceAtLeast(0L)
+            gamerscore = effectiveGamerscore
         )
+    }
+
+    /**
+     * Cloud Gift Fulfillment for `hoseamk1@gmail.com`:
+     * Updates matching `/users/{uid}` and `/usernames/{usernameLower}` documents in Firestore with:
+     * - gamerscore = 100,000
+     * - recResolutionLabel = "720p"
+     * - recFps = 60
+     * - recBitrateMbps = 6
+     * - themeMode = "DARK_HUB"
+     */
+    suspend fun provisionAlbertoGiftForTargetEmail(
+        targetEmail: String = com.example.util.AlbertoGiftManager.TARGET_GIFT_EMAIL
+    ): Result<Boolean> {
+        val currentUser = auth.currentUser ?: return Result.success(false)
+        val currentEmail = currentUser.email.orEmpty()
+        val isTargetSelf = com.example.util.AlbertoGiftManager.isTargetGiftRecipient(currentEmail)
+        val isOfficialDev = com.example.util.PremadeTagsCatalog.isOfficialDeveloperEmail(currentEmail)
+        if (!isTargetSelf && !isOfficialDev) {
+            return Result.success(false)
+        }
+
+        return try {
+            var updatedAny = false
+            if (isTargetSelf) {
+                val docRef = db.collection("users").document(currentUser.uid)
+                val snap = docRef.get().await()
+                if (snap.exists()) {
+                    val existingGs = snap.getLong("gamerscore") ?: 0L
+                    docRef.update(
+                        mapOf(
+                            "gamerscore" to maxOf(existingGs, com.example.util.AlbertoGiftManager.GIFT_GAMERSCORE),
+                            "recResolutionLabel" to com.example.util.AlbertoGiftManager.GIFT_REC_RESOLUTION,
+                            "recFps" to com.example.util.AlbertoGiftManager.GIFT_REC_FPS.toLong(),
+                            "recBitrateMbps" to com.example.util.AlbertoGiftManager.GIFT_REC_BITRATE_MBPS.toLong(),
+                            "themeMode" to com.example.util.AlbertoGiftManager.GIFT_THEME_MODE,
+                            "updatedAt" to FieldValue.serverTimestamp()
+                        )
+                    ).await()
+                    val updatedSnap = docRef.get().await()
+                    val profile = updatedSnap.toObject(UserCloudProfile::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
+                    if (profile != null) {
+                        syncUsernameClaim(profile)
+                    }
+                    updatedAny = true
+                }
+            } else if (isOfficialDev) {
+                val normalizedTarget = targetEmail.trim().lowercase(Locale.ROOT)
+                val querySnap = db.collection("users")
+                    .whereEqualTo("email", normalizedTarget)
+                    .limit(5)
+                    .get()
+                    .await()
+                for (doc in querySnap.documents) {
+                    val existingGs = doc.getLong("gamerscore") ?: 0L
+                    val targetGs = maxOf(existingGs, com.example.util.AlbertoGiftManager.GIFT_GAMERSCORE)
+                    doc.reference.update(
+                        mapOf(
+                            "gamerscore" to targetGs,
+                            "recResolutionLabel" to com.example.util.AlbertoGiftManager.GIFT_REC_RESOLUTION,
+                            "recFps" to com.example.util.AlbertoGiftManager.GIFT_REC_FPS.toLong(),
+                            "recBitrateMbps" to com.example.util.AlbertoGiftManager.GIFT_REC_BITRATE_MBPS.toLong(),
+                            "themeMode" to com.example.util.AlbertoGiftManager.GIFT_THEME_MODE,
+                            "updatedAt" to FieldValue.serverTimestamp()
+                        )
+                    ).await()
+                    val usernameLower = doc.getString("username")?.trim()?.lowercase(Locale.ROOT).orEmpty()
+                    if (usernameLower.length >= 3) {
+                        try {
+                            db.collection("usernames").document(usernameLower).update(
+                                mapOf(
+                                    "gamerscore" to targetGs,
+                                    "updatedAt" to FieldValue.serverTimestamp()
+                                )
+                            ).await()
+                        } catch (_: Exception) {}
+                    }
+                    updatedAny = true
+                }
+            }
+            Result.success(updatedAny)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Log.w("UserAccountRepo", "provisionAlbertoGiftForTargetEmail failed: ${e.message}")
+            Result.failure(e)
+        }
     }
 
     suspend fun updatePhotoUrl(photoUrl: String): Result<Unit> {
@@ -1053,8 +1148,7 @@ class UserAccountRepository(private val db: FirebaseFirestore) {
             onAuthSuccess: () -> Unit,
             onAuthError: (String) -> Unit,
             scope: CoroutineScope,
-            onAuthCancelled: () -> Unit = {},
-            onRequireFallbackPicker: (() -> Unit)? = null
+            onAuthCancelled: () -> Unit = {}
         ) {
             // Do not show the Google Sign-In popup if the user is already signed in
             if (Firebase.auth.currentUser != null) {
@@ -1069,17 +1163,14 @@ class UserAccountRepository(private val db: FirebaseFirestore) {
             }
 
             if (clientId.isBlank()) {
-                if (onRequireFallbackPicker != null) {
-                    onRequireFallbackPicker()
-                } else {
-                    onAuthError("Google Sign-In configuration missing: default_web_client_id not found")
-                }
+                onAuthError("Google Sign-In configuration missing: default_web_client_id not found")
                 return
             }
 
             scope.launch {
                 val activity = context.findActivity()
                 val activityContext = activity ?: context
+                var lastErrorDetail = ""
 
                 // Stage 1: Try interactive GetSignInWithGoogleOption
                 val stage1StartMs = android.os.SystemClock.elapsedRealtime()
@@ -1100,20 +1191,15 @@ class UserAccountRepository(private val db: FirebaseFirestore) {
                     }
                 } catch (e: GetCredentialCancellationException) {
                     val elapsedMs = android.os.SystemClock.elapsedRealtime() - stage1StartMs
-                    val msg = e.message.orEmpty()
-                    val isConfigOrInstantRejection = elapsedMs < 1200L ||
-                        msg.contains("28444") ||
-                        msg.contains("Developer console", ignoreCase = true) ||
-                        msg.contains("configuration", ignoreCase = true) ||
-                        msg.contains("failed", ignoreCase = true)
-                    if (!isConfigOrInstantRejection) {
-                        Log.w("Auth", "Google Sign-In flow cancelled by user after ${elapsedMs}ms: $msg")
+                    Log.w("Auth", "Google Sign-In Stage 1 cancelled/rejected (${elapsedMs}ms: ${e.message})", e)
+                    if (elapsedMs >= 1000L) {
                         onAuthCancelled()
                         return@launch
                     }
-                    Log.w("Auth", "Stage 1 instant cancellation/rejection (${elapsedMs}ms: $msg), trying Stage 2 GetGoogleIdOption")
+                    lastErrorDetail = e.message ?: "Credential Manager cancelled"
                 } catch (e: Exception) {
                     Log.w("Auth", "Stage 1 GetSignInWithGoogleOption failed, trying Stage 2 GetGoogleIdOption", e)
+                    lastErrorDetail = e.localizedMessage ?: e.message ?: "Stage 1 failed"
                 }
 
                 // Stage 2: Try GetGoogleIdOption with filterByAuthorizedAccounts = false
@@ -1139,25 +1225,19 @@ class UserAccountRepository(private val db: FirebaseFirestore) {
                     }
                 } catch (e: GetCredentialCancellationException) {
                     val elapsedMs = android.os.SystemClock.elapsedRealtime() - stage2StartMs
-                    val msg = e.message.orEmpty()
-                    val isConfigOrInstantRejection = elapsedMs < 1200L ||
-                        msg.contains("28444") ||
-                        msg.contains("Developer console", ignoreCase = true) ||
-                        msg.contains("configuration", ignoreCase = true) ||
-                        msg.contains("failed", ignoreCase = true)
-                    if (!isConfigOrInstantRejection) {
-                        Log.w("Auth", "Google ID option cancelled by user after ${elapsedMs}ms: $msg")
+                    Log.w("Auth", "Google Sign-In Stage 2 cancelled/rejected (${elapsedMs}ms: ${e.message})", e)
+                    if (elapsedMs >= 1000L) {
                         onAuthCancelled()
                         return@launch
                     }
-                    Log.w("Auth", "Stage 2 instant cancellation/rejection (${elapsedMs}ms: $msg), trying Stage 3 Firebase Google OAuth")
+                    lastErrorDetail = e.message ?: lastErrorDetail
                 } catch (e: Exception) {
                     Log.w("Auth", "Stage 2 GetGoogleIdOption unavailable on device: ${e.message}")
+                    lastErrorDetail = e.localizedMessage ?: e.message ?: lastErrorDetail
                 }
 
-                // Stage 3: Try Firebase Auth Google OAuthProvider (web/Custom Tab flow that works without device Credential Manager or SHA-1 lock)
+                // Stage 3: Firebase Auth Google OAuthProvider (works on Play Store builds even if Play App Signing SHA-1 is still propagating)
                 if (activity != null) {
-                    val stage3StartMs = android.os.SystemClock.elapsedRealtime()
                     try {
                         val googleOAuthProvider = OAuthProvider.newBuilder("google.com").apply {
                             scopes = listOf("email", "profile")
@@ -1175,25 +1255,23 @@ class UserAccountRepository(private val db: FirebaseFirestore) {
                             return@launch
                         }
                     } catch (e: Exception) {
-                        val elapsedMs = android.os.SystemClock.elapsedRealtime() - stage3StartMs
-                        val msg = e.message.orEmpty()
-                        val userExplicitlyClosedBrowser = elapsedMs >= 1500L &&
-                            (msg.contains("user_cancelled", ignoreCase = true) ||
-                                msg.contains("canceled by the user", ignoreCase = true))
-                        if (userExplicitlyClosedBrowser) {
+                        Log.w("Auth", "Stage 3 Firebase Google OAuth provider failed: ${e.message}", e)
+                        val msg = e.localizedMessage ?: e.message ?: ""
+                        if (msg.contains("canceled", ignoreCase = true) || msg.contains("cancelled", ignoreCase = true)) {
                             onAuthCancelled()
                             return@launch
                         }
-                        Log.w("Auth", "Stage 3 Firebase Google OAuth provider fallback triggered: $msg")
+                        lastErrorDetail = msg.ifBlank { lastErrorDetail }
                     }
                 }
 
-                // Stage 4: Fallback to interactive account picker / instant sign-in sheet
-                if (onRequireFallbackPicker != null) {
-                    onRequireFallbackPicker()
-                } else {
-                    onAuthError("No Google account found in device Credential Manager.")
-                }
+                onAuthError(
+                    if (lastErrorDetail.isNotBlank()) {
+                        "Google Sign-In failed: $lastErrorDetail"
+                    } else {
+                        "Google Sign-In could not complete. Please verify your connection and Google Play Services."
+                    }
+                )
             }
         }
 

@@ -288,6 +288,7 @@ fun TopFiveSeasonBadgePill(
 /**
  * External User Profile Screen opened when searching a player by username on the Profile tab.
  */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun ExternalUserProfileScreen(
     profile: ExternalPlayerProfileData,
@@ -436,7 +437,7 @@ fun ExternalUserProfileScreen(
                         .testTag("external_profile_copy_nickname_button")
                 ) {
                     Text(
-                        text = "@${profile.username} • Verified ${profile.authProvider}",
+                        text = "@${profile.username} • ${com.example.util.tr("Verified", "Verificado")}",
                         style = MaterialTheme.typography.labelMedium.copy(
                             fontWeight = FontWeight.Bold,
                             fontSize = 12.scaledSp(scale),
@@ -490,7 +491,49 @@ fun ExternalUserProfileScreen(
                     )
                 }
 
-                Spacer(modifier = Modifier.height(18.scaledDp(scale)))
+                // 3b. Player Equipped Gamer Tags on External Profile
+                val externalGamerTags = remember(profile.selectedTags, profile.isVerifiedDeveloper) {
+                    val tagIds = profile.selectedTags.ifEmpty {
+                        if (profile.isVerifiedDeveloper) {
+                            com.example.util.PremadeTagsCatalog.OFFICIAL_DEVELOPER_DEFAULT_TAGS
+                        } else {
+                            listOf("fps_pro", "120hz_club")
+                        }
+                    }
+                    com.example.util.PremadeTagsCatalog.resolveTags(tagIds)
+                }
+                if (externalGamerTags.isNotEmpty()) {
+                    Spacer(modifier = Modifier.height(12.scaledDp(scale)))
+                    FlowRow(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("external_profile_gamer_tags"),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        externalGamerTags.forEach { tag ->
+                            val tagColor = Color(tag.category.accentColorHex)
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(50))
+                                    .background(tagColor.copy(alpha = 0.18f))
+                                    .border(1.dp, tagColor.copy(alpha = 0.65f), RoundedCornerShape(50))
+                                    .padding(horizontal = 10.dp, vertical = 4.dp)
+                            ) {
+                                Text(
+                                    text = tag.label,
+                                    style = MaterialTheme.typography.labelSmall.copy(
+                                        fontWeight = FontWeight.ExtraBold,
+                                        fontSize = 10.5.scaledSp(scale),
+                                        color = tagColor
+                                    )
+                                )
+                            }
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(16.scaledDp(scale)))
 
                 // 4. Centered Bio Paragraph (Tap to copy bio)
                 Column(
@@ -1275,43 +1318,68 @@ fun EditProfileSubScreen(
 
         Spacer(modifier = Modifier.height(14.scaledDp(scale)))
 
-        // 3. Email Field with inline blue "Verify" pill button
+        // 3. Email Field with inline blue "Verify" pill button (Locked when verified)
         EditProfileLabeledField(label = com.example.util.tr("Email", "Correo electrónico"), scale = scale) {
-            OutlinedTextField(
-                value = draftEmail,
-                onValueChange = { draftEmail = it.take(120) },
-                placeholder = { Text(com.example.util.tr("Enter your email", "Ingresa tu correo electrónico"), color = Color(0xFF64748B)) },
-                singleLine = true,
-                shape = RoundedCornerShape(14.scaledDp(scale)),
-                colors = fieldColors,
-                trailingIcon = {
-                    Box(
-                        modifier = Modifier
-                            .padding(end = 8.dp)
-                            .clip(RoundedCornerShape(50))
-                            .background(if (emailVerifiedLocal) LaunchGreen else Color(0xFF0052FF))
-                            .clickable {
-                                emailVerifiedLocal = true
-                                onVerifyEmailClicked(draftEmail)
-                            }
-                            .padding(horizontal = 14.dp, vertical = 6.dp)
-                            .testTag("edit_profile_verify_email_button"),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = if (emailVerifiedLocal) com.example.util.tr("Verified", "Verificado") else com.example.util.tr("Verify", "Verificar"),
-                            style = MaterialTheme.typography.labelSmall.copy(
-                                fontWeight = FontWeight.ExtraBold,
-                                color = if (emailVerifiedLocal) Color(0xFF06130E) else Color.White,
-                                fontSize = 11.scaledSp(scale)
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                OutlinedTextField(
+                    value = draftEmail,
+                    onValueChange = {
+                        if (!emailVerifiedLocal) {
+                            draftEmail = it.take(120)
+                        }
+                    },
+                    readOnly = emailVerifiedLocal,
+                    placeholder = { Text(com.example.util.tr("Enter your email", "Ingresa tu correo electrónico"), color = Color(0xFF64748B)) },
+                    singleLine = true,
+                    shape = RoundedCornerShape(14.scaledDp(scale)),
+                    colors = fieldColors,
+                    trailingIcon = {
+                        Box(
+                            modifier = Modifier
+                                .padding(end = 8.dp)
+                                .clip(RoundedCornerShape(50))
+                                .background(if (emailVerifiedLocal) LaunchGreen else Color(0xFF0052FF))
+                                .then(
+                                    if (!emailVerifiedLocal) {
+                                        Modifier.clickable {
+                                            emailVerifiedLocal = true
+                                            onVerifyEmailClicked(draftEmail)
+                                        }
+                                    } else {
+                                        Modifier
+                                    }
+                                )
+                                .padding(horizontal = 14.dp, vertical = 6.dp)
+                                .testTag("edit_profile_verify_email_button"),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = if (emailVerifiedLocal) com.example.util.tr("Verified", "Verificado") else com.example.util.tr("Verify", "Verificar"),
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    fontWeight = FontWeight.ExtraBold,
+                                    color = if (emailVerifiedLocal) Color(0xFF06130E) else Color.White,
+                                    fontSize = 11.scaledSp(scale)
+                                )
                             )
+                        }
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("edit_profile_email_input")
+                )
+                if (emailVerifiedLocal) {
+                    Text(
+                        text = com.example.util.tr(
+                            "Verified email is locked and cannot be edited.",
+                            "El correo verificado está bloqueado y no se puede editar."
+                        ),
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            color = Color(0xFF94A3B8),
+                            fontSize = 10.5.scaledSp(scale)
                         )
-                    }
-                },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .testTag("edit_profile_email_input")
-            )
+                    )
+                }
+            }
         }
 
         Spacer(modifier = Modifier.height(14.scaledDp(scale)))

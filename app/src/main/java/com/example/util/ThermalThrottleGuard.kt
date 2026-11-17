@@ -97,7 +97,9 @@ class ThermalThrottleGuard(private val context: Context) {
                 }
             }
             try {
-                powerManager.addThermalStatusListener(context.mainExecutor, thermalListener!!)
+                thermalListener?.let { listener ->
+                    powerManager.addThermalStatusListener(context.mainExecutor, listener)
+                }
             } catch (_: Exception) {}
         }
     }
@@ -225,9 +227,11 @@ class ThermalThrottleGuard(private val context: Context) {
             context.unregisterReceiver(batteryReceiver)
         } catch (_: Exception) {}
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && powerManager != null && thermalListener != null) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && powerManager != null) {
             try {
-                powerManager.removeThermalStatusListener(thermalListener!!)
+                thermalListener?.let { listener ->
+                    powerManager.removeThermalStatusListener(listener)
+                }
             } catch (_: Exception) {}
         }
     }

@@ -27,15 +27,15 @@
 
     <!-- Offline / Online Gate -->
     <string name="offline_gate_title">Kailangan ng Koneksyon sa Internet</string>
-    <string name="offline_gate_subtitle">Gumagana offline ang Game Launcher at Normal Boost. Kumonekta sa Wi-Fi o mobile data para ma-access ang Recorder, Leaderboard, Extras, Beast Boost, at Account.</string>
+    <string name="offline_gate_subtitle">Gumagana offline ang Game Launcher at Focus Mode. Kumonekta sa Wi-Fi o mobile data para ma-access ang Recorder, Leaderboard, Extras, at Account.</string>
     <string name="offline_gate_retry">Subukan Muli</string>
     <string name="offline_gate_back_launcher">Pumunta sa Offline Launcher</string>
-    <string name="offline_mode_badge">Offline Mode: Aktibo ang Launcher at Normal Boost</string>
+    <string name="offline_mode_badge">Offline Mode: Aktibo ang Launcher at Focus Mode</string>
 
-    <!-- Launcher & Boost -->
-    <string name="launcher_normal_boost">Normal Boost</string>
-    <string name="launcher_beast_boost">Beast Boost</string>
-    <string name="launcher_boost_memory">I-boost ang RAM</string>
+    <!-- Launcher & Focus Mode -->
+    <string name="launcher_normal_boost">Focus Mode</string>
+    <string name="launcher_beast_boost">Focus Mode</string>
+    <string name="launcher_boost_memory">I-optimize ang RAM</string>
     <string name="launcher_launch_game">Ilunsad</string>
     <string name="launcher_add_games">Magdagdag ng Laro</string>
     <string name="launcher_search_games">Maghanap ng laro...</string>
@@ -54,7 +54,7 @@
     <string name="leaderboard_empty_title">Wala Pang Na-rank na Manlalaro</string>
     <string name="leaderboard_empty_subtitle">Mag-sign in gamit ang Google o Facebook para makuha ang iyong puwesto sa Top 100 Leaderboard.</string>
 
-    <!-- AdMob Labels -->
+    <!-- Unity Ads Labels -->
     <string name="ad_badge_label">Ad</string>
     <string name="ad_sponsored_label">Sponsored</string>
     <string name="ad_reward_unlock_title">I-unlock ang Custom RGB at Overlay (24h)</string>

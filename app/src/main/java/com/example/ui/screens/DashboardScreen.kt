@@ -116,6 +116,8 @@ fun DashboardScreen(
     val isPowerSaveModeActive by viewModel.isPowerSaveModeActive.collectAsState()
     val isDndAccessGranted by viewModel.isDndAccessGranted.collectAsState()
     val efpsTelemetry by viewModel.efpsTelemetry.collectAsState()
+    val squadPassState by viewModel.squadPassState.collectAsState()
+    val userUsername by viewModel.userUsername.collectAsState()
 
     val infiniteTransition = rememberInfiniteTransition(label = "pulse")
     val pulseScale by infiniteTransition.animateFloat(
@@ -155,7 +157,7 @@ fun DashboardScreen(
                     .padding(top = 8.dp)
             ) {
                 Text(
-                    text = "Hardware Readiness & Boost Engine",
+                    text = "Hardware Readiness & Focus Mode",
                     style = MaterialTheme.typography.titleLarge.copy(
                         fontWeight = FontWeight.Bold,
                         color = Color.White,
@@ -165,102 +167,13 @@ fun DashboardScreen(
                 )
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
-                    text = "Select your profile and trigger hardware acceleration",
+                    text = "Launch your game with 1h 30m Overlay and Focus Mode Timer",
                     style = MaterialTheme.typography.bodySmall.copy(
                         color = Color(0xFF8B94A6),
                         fontSize = 12.sp,
                         textAlign = TextAlign.Center
                     )
                 )
-            }
-        }
-
-        // 2. Mode Selector: Gaming vs Beast
-        item {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(14.dp))
-                    .background(Color(0xFF141A28))
-                    .border(1.dp, Color(0xFF202A3E), RoundedCornerShape(14.dp))
-                    .padding(4.dp),
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                // Gaming Mode (Normal Boost)
-                Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(if (!isBeastMode) Color(0xFF2563EB) else Color.Transparent)
-                        .clickable { viewModel.setBoostMode(BoostMode.GAMING) }
-                        .padding(vertical = 10.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(
-                                imageVector = Icons.Default.Bolt,
-                                contentDescription = null,
-                                tint = if (!isBeastMode) Color.White else Color(0xFF9CA3AF),
-                                modifier = Modifier.size(16.dp)
-                            )
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text(
-                                text = "Gaming Mode",
-                                style = MaterialTheme.typography.titleSmall.copy(
-                                    fontWeight = FontWeight.Bold,
-                                    color = if (!isBeastMode) Color.White else Color(0xFF9CA3AF),
-                                    fontSize = 13.sp
-                                )
-                            )
-                        }
-                        Text(
-                            text = "3h • 12m Auto-Trim",
-                            style = MaterialTheme.typography.labelSmall.copy(
-                                color = if (!isBeastMode) Color(0xFFBFDBFE) else Color(0xFF6B7280),
-                                fontSize = 10.sp
-                            )
-                        )
-                    }
-                }
-
-                // Beast Mode (Intense FPS Boost)
-                Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(if (isBeastMode) Color(0xFFDC2626) else Color.Transparent)
-                        .clickable { viewModel.setBoostMode(BoostMode.BEAST) }
-                        .padding(vertical = 10.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(
-                                imageVector = Icons.Default.FlashOn,
-                                contentDescription = null,
-                                tint = if (isBeastMode) Color.White else Color(0xFF9CA3AF),
-                                modifier = Modifier.size(16.dp)
-                            )
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text(
-                                text = "Beast Mode",
-                                style = MaterialTheme.typography.titleSmall.copy(
-                                    fontWeight = FontWeight.Bold,
-                                    color = if (isBeastMode) Color.White else Color(0xFF9CA3AF),
-                                    fontSize = 13.sp
-                                )
-                            )
-                        }
-                        Text(
-                            text = "90m • 3m Aggressive Purge",
-                            style = MaterialTheme.typography.labelSmall.copy(
-                                color = if (isBeastMode) Color(0xFFFECACA) else Color(0xFF6B7280),
-                                fontSize = 10.sp
-                            )
-                        )
-                    }
-                }
             }
         }
 
@@ -289,7 +202,7 @@ fun DashboardScreen(
                     Column(modifier = Modifier.weight(1f)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(
-                                text = if (selectedTargetGame != null) selectedTargetGame!!.appName else "NO GAME SELECTED",
+                                text = selectedTargetGame?.appName ?: "NO GAME SELECTED",
                                 color = TextPrimary,
                                 fontSize = 13.sp,
                                 fontWeight = FontWeight.Bold,
@@ -313,7 +226,7 @@ fun DashboardScreen(
                             }
                         }
                         Text(
-                            text = if (selectedTargetGame != null) "Auto-opens automatically after boost completes" else "Tap to choose which game or app to boost & launch",
+                            text = if (selectedTargetGame != null) "Auto-opens automatically when Focus Mode starts" else "Tap to choose which game or app to launch with Focus Mode",
                             color = TextMuted,
                             fontSize = 11.sp
                         )
@@ -590,7 +503,7 @@ fun DashboardScreen(
                             )
                             Spacer(modifier = Modifier.height(6.dp))
                             Text(
-                                text = if (isBeastMode) "UNLEASHING..." else "FLUSHING...",
+                                text = "STARTING...",
                                 style = MaterialTheme.typography.labelSmall.copy(
                                     fontWeight = FontWeight.Black,
                                     letterSpacing = 1.sp,
@@ -617,24 +530,24 @@ fun DashboardScreen(
                             )
                             Spacer(modifier = Modifier.height(2.dp))
                             Text(
-                                text = if (sessionState.mode == BoostMode.BEAST) "BEAST ACTIVE" else "BOOST ACTIVE",
+                                text = "OVERLAY & FOCUS",
                                 style = MaterialTheme.typography.labelSmall.copy(
                                     fontFamily = FontFamily.Monospace,
-                                    color = if (isBeastMode) Color(0xFFFFD5D5) else Color(0xFF80F0FF),
+                                    color = Color(0xFF80F0FF),
                                     fontWeight = FontWeight.Bold,
                                     fontSize = 10.sp
                                 )
                             )
                         } else {
                             Icon(
-                                imageVector = if (isBeastMode) Icons.Default.FlashOn else Icons.Default.Bolt,
-                                contentDescription = "Boost",
+                                imageVector = Icons.Default.Bolt,
+                                contentDescription = "Focus Mode",
                                 tint = Color.White,
                                 modifier = Modifier.size(36.dp)
                             )
                             Spacer(modifier = Modifier.height(2.dp))
                             Text(
-                                text = if (isBeastMode) "BEAST BOOST" else "GAMING BOOST",
+                                text = "FOCUS MODE",
                                 style = MaterialTheme.typography.titleMedium.copy(
                                     fontWeight = FontWeight.Black,
                                     letterSpacing = 1.5.sp,
@@ -644,10 +557,10 @@ fun DashboardScreen(
                             )
                             Spacer(modifier = Modifier.height(2.dp))
                             Text(
-                                text = if (selectedTargetGame != null) "Launch ${selectedTargetGame!!.appName}" else if (isBeastMode) "1h 30m • 5m Purge" else "3 Hours Active",
+                                text = selectedTargetGame?.let { "Launch ${it.appName}" } ?: "1h 30m Overlay & Focus",
                                 style = MaterialTheme.typography.labelSmall.copy(
                                     fontFamily = FontFamily.Monospace,
-                                    color = if (isBeastMode) Color(0xFFFFD5D5) else Color(0xFF80F0FF),
+                                    color = Color(0xFF80F0FF),
                                     fontWeight = FontWeight.Bold,
                                     fontSize = 10.sp
                                 ),
@@ -660,16 +573,16 @@ fun DashboardScreen(
             }
         }
 
-        // Active Booster Session Countdown Card (if session is active)
+        // Active Overlay and Focus Mode Timer Card (if session is active)
         if (sessionState.isActive) {
             item {
                 Card(
                     colors = CardDefaults.cardColors(
-                        containerColor = if (sessionState.mode == BoostMode.BEAST) Color(0xFF261010) else Color(0xFF0F2236)
+                        containerColor = Color(0xFF0F2236)
                     ),
                     border = BorderStroke(
                         1.dp,
-                        if (sessionState.mode == BoostMode.BEAST) Color(0xFFDC2626) else CyberCyan
+                        CyberCyan
                     ),
                     shape = RoundedCornerShape(14.dp),
                     modifier = Modifier.fillMaxWidth()
@@ -686,7 +599,7 @@ fun DashboardScreen(
                                 modifier = Modifier
                                     .size(36.dp)
                                     .background(
-                                        if (sessionState.mode == BoostMode.BEAST) Color(0xFFEF4444).copy(alpha = 0.2f) else CyberCyan.copy(alpha = 0.2f),
+                                        CyberCyan.copy(alpha = 0.2f),
                                         CircleShape
                                     ),
                                 contentAlignment = Alignment.Center
@@ -694,21 +607,21 @@ fun DashboardScreen(
                                 Icon(
                                     imageVector = Icons.Default.Timer,
                                     contentDescription = null,
-                                    tint = if (sessionState.mode == BoostMode.BEAST) Color(0xFFEF4444) else CyberCyan,
+                                    tint = CyberCyan,
                                     modifier = Modifier.size(20.dp)
                                 )
                             }
                             Spacer(modifier = Modifier.width(10.dp))
                             Column {
                                 Text(
-                                    text = if (sessionState.mode == BoostMode.BEAST) "BEAST MODE (1h 30m)" else "NORMAL BOOST (3h)",
-                                    color = if (sessionState.mode == BoostMode.BEAST) Color(0xFFFF8A80) else Color(0xFF80D8FF),
+                                    text = "OVERLAY AND FOCUS MODE TIMER (1h 30m)",
+                                    color = Color(0xFF80D8FF),
                                     fontSize = 12.sp,
                                     fontWeight = FontWeight.Black,
                                     fontFamily = FontFamily.Monospace
                                 )
                                 Text(
-                                    text = "${sessionState.formattedCountdown} remaining",
+                                    text = "${sessionState.formattedCountdown} active on screen",
                                     color = TextPrimary,
                                     fontSize = 15.sp,
                                     fontWeight = FontWeight.Bold,
@@ -756,6 +669,17 @@ fun DashboardScreen(
             }
         }
 
+        // Squad Pass & Pro Guest Pass Dashboard Banner
+        item {
+            com.example.ui.components.DashboardSquadPassBannerCard(
+                squadState = squadPassState,
+                referrerUsername = userUsername.ifBlank { "SquadLeader" },
+                onOpenSquadPassHub = {
+                    viewModel.requestExtrasSubTab(2)
+                }
+            )
+        }
+
         // Quick HUD Overlay banner (especially useful during Beast Mode)
         item {
             CyberCard(borderColor = if (overlayConfig.isEnabled) NeonGreen.copy(alpha = 0.6f) else DarkSurfaceBorder) {
@@ -784,7 +708,7 @@ fun DashboardScreen(
                                 )
                             )
                             Text(
-                                text = if (overlayConfig.isEnabled) "Showing live FPS & Battery on screen" else "Off (Auto-enables in Beast Mode)",
+                                text = if (overlayConfig.isEnabled) "Showing live FPS & Battery on screen" else "Off (Toggle on for live FPS & Battery)",
                                 style = MaterialTheme.typography.bodySmall.copy(
                                     color = if (overlayConfig.isEnabled) NeonGreen else TextSecondary,
                                     fontSize = 11.sp
@@ -854,6 +778,29 @@ fun DashboardScreen(
                                 text = if (overlayConfig.showBattery) "Batt: ON" else "Batt: OFF",
                                 fontSize = 11.sp,
                                 color = if (overlayConfig.showBattery) NeonGreen else Color.Gray
+                            )
+                        }
+
+                        OutlinedButton(
+                            onClick = {
+                                val next = !overlayConfig.showNotificationTicker
+                                viewModel.toggleOverlayNotificationTicker(context, next)
+                                if (next && !com.example.service.NotificationTickerOverlayService.isNotificationListenerGranted(context)) {
+                                    com.example.service.NotificationTickerOverlayService.openNotificationListenerSettings(context)
+                                }
+                            },
+                            modifier = Modifier
+                                .weight(1.1f)
+                                .testTag("dashboard_overlay_ticker_toggle"),
+                            shape = RoundedCornerShape(8.dp),
+                            colors = ButtonDefaults.outlinedButtonColors(
+                                containerColor = if (overlayConfig.showNotificationTicker) Color(0xFF142436) else Color.Transparent
+                            )
+                        ) {
+                            Text(
+                                text = if (overlayConfig.showNotificationTicker) "Ticker: ${overlayConfig.tickerDurationSeconds}s" else "Ticker: OFF",
+                                fontSize = 11.sp,
+                                color = if (overlayConfig.showNotificationTicker) CyberCyan else Color.Gray
                             )
                         }
                     }

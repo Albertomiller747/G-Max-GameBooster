@@ -121,14 +121,14 @@ fun GamePickerDialog(
                         Spacer(modifier = Modifier.width(10.dp))
                         Column {
                             Text(
-                                text = "SELECT TARGET GAME",
+                                text = com.example.util.tr("SELECT TARGET GAME", "SELECCIONAR JUEGO OBJETIVO"),
                                 color = TextPrimary,
                                 fontSize = 16.sp,
                                 fontWeight = FontWeight.Black,
                                 fontFamily = FontFamily.Monospace
                             )
                             Text(
-                                text = "Auto-launches after boost completes",
+                                text = com.example.util.tr("Auto-launches when Focus Mode starts", "Se inicia automáticamente al activar el Modo Enfoque"),
                                 color = TextMuted,
                                 fontSize = 11.sp
                             )
@@ -141,7 +141,7 @@ fun GamePickerDialog(
                     ) {
                         Icon(
                             imageVector = Icons.Default.Close,
-                            contentDescription = "Close",
+                            contentDescription = com.example.util.tr("Close", "Cerrar"),
                             tint = TextSecondary
                         )
                     }
@@ -153,7 +153,7 @@ fun GamePickerDialog(
                 OutlinedTextField(
                     value = searchQuery,
                     onValueChange = { searchQuery = it },
-                    placeholder = { Text("Search game or app...", color = TextMuted, fontSize = 13.sp) },
+                    placeholder = { Text(com.example.util.tr("Search game or app...", "Buscar juego o aplicación..."), color = TextMuted, fontSize = 13.sp) },
                     leadingIcon = {
                         Icon(imageVector = Icons.Default.Search, contentDescription = null, tint = TextMuted)
                     },
@@ -183,7 +183,7 @@ fun GamePickerDialog(
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
-                            text = "No apps found matching search.",
+                            text = com.example.util.tr("No apps found matching search.", "No se encontraron aplicaciones."),
                             color = TextMuted,
                             fontSize = 13.sp
                         )
@@ -251,7 +251,7 @@ fun GamePickerDialog(
                                                     .padding(horizontal = 5.dp, vertical = 2.dp)
                                             ) {
                                                 Text(
-                                                    text = "GAME",
+                                                    text = com.example.util.tr("GAME", "JUEGO"),
                                                     color = NeonGreen,
                                                     fontSize = 9.sp,
                                                     fontWeight = FontWeight.Black
@@ -271,7 +271,7 @@ fun GamePickerDialog(
                                 if (isSelected) {
                                     Icon(
                                         imageVector = Icons.Default.CheckCircle,
-                                        contentDescription = "Selected",
+                                        contentDescription = com.example.util.tr("Selected", "Seleccionado"),
                                         tint = CyberCyan,
                                         modifier = Modifier.size(20.dp)
                                     )
@@ -290,7 +290,7 @@ fun GamePickerDialog(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     TextButton(onClick = onDismiss) {
-                        Text("Cancel", color = TextSecondary)
+                        Text(com.example.util.tr("Cancel", "Cancelar"), color = TextSecondary)
                     }
 
                     Spacer(modifier = Modifier.width(8.dp))
@@ -314,7 +314,7 @@ fun GamePickerDialog(
                         )
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
-                            text = "Boost & Launch",
+                            text = com.example.util.tr("Launch Game", "Iniciar Juego"),
                             fontWeight = FontWeight.Bold,
                             fontSize = 13.sp
                         )

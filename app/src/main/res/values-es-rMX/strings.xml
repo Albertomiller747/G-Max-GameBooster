@@ -27,14 +27,14 @@
 
     <!-- Offline / Online Gate -->
     <string name="offline_gate_title">Conexión a Internet Requerida</string>
-    <string name="offline_gate_subtitle">El Lanzador de Juegos y el Impulso Normal funcionan sin conexión. Conéctate a Wi-Fi o datos móviles para acceder a Grabadora, Clasificación, Extras, Impulso Bestia y Cuenta.</string>
+    <string name="offline_gate_subtitle">El Lanzador de Juegos y el Modo Enfoque funcionan sin conexión. Conéctate a Wi-Fi o datos móviles para acceder a Grabadora, Clasificación, Extras y Cuenta.</string>
     <string name="offline_gate_retry">Reintentar Conexión</string>
     <string name="offline_gate_back_launcher">Ir al Lanzador Sin Conexión</string>
-    <string name="offline_mode_badge">Modo Sin Conexión: Lanzador e Impulso Normal Activos</string>
+    <string name="offline_mode_badge">Modo Sin Conexión: Lanzador y Modo Enfoque Activos</string>
 
-    <!-- Launcher & Boost -->
-    <string name="launcher_normal_boost">Impulso Normal</string>
-    <string name="launcher_beast_boost">Impulso Bestia</string>
+    <!-- Launcher & Focus Mode -->
+    <string name="launcher_normal_boost">Modo Enfoque</string>
+    <string name="launcher_beast_boost">Modo Enfoque</string>
     <string name="launcher_boost_memory">Optimizar RAM</string>
     <string name="launcher_launch_game">Jugar</string>
     <string name="launcher_add_games">Agregar Juegos</string>
@@ -54,7 +54,7 @@
     <string name="leaderboard_empty_title">Aún No Hay Jugadores Clasificados</string>
     <string name="leaderboard_empty_subtitle">Inicia sesión con Google o Facebook para reclamar tu lugar en el Top 100.</string>
 
-    <!-- AdMob Labels -->
+    <!-- Unity Ads Labels -->
     <string name="ad_badge_label">Anuncio</string>
     <string name="ad_sponsored_label">Patrocinado</string>
     <string name="ad_reward_unlock_title">Desbloquear RGB y Superposición (24h)</string>

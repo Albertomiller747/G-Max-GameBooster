@@ -73,6 +73,36 @@ enum class SmartNotificationTrigger(
         id = 4109,
         key = "app_review_after_recording",
         targetTab = "RECORD"
+    ),
+    ALBERTO_GIFT_ARRIVED(
+        id = 4110,
+        key = "alberto_gift_arrived",
+        targetTab = "PROFILE"
+    ),
+    RIVALS_THREAT(
+        id = 4111,
+        key = "rivals_threat",
+        targetTab = "RIVALS"
+    ),
+    RIVALS_DETHRONED(
+        id = 4112,
+        key = "rivals_dethroned",
+        targetTab = "RIVALS"
+    ),
+    RIVALS_ACTIVITY_NUDGE(
+        id = 4113,
+        key = "rivals_activity_nudge",
+        targetTab = "RIVALS"
+    ),
+    RIVALS_MONTHLY_WRAP(
+        id = 4114,
+        key = "rivals_monthly_wrap",
+        targetTab = "RIVALS"
+    ),
+    RIVALS_TAUNT_RECEIVED(
+        id = 4115,
+        key = "rivals_taunt_received",
+        targetTab = "RIVALS"
     )
 }
 
@@ -251,6 +281,7 @@ object SmartNotificationManager {
     }
 
     fun resetQuotaAndTelemetryForTesting(context: Context) {
+        enforceIntervalCooldown = false
         getPrefs(context).edit().clear().apply()
     }
 
@@ -331,6 +362,12 @@ object SmartNotificationManager {
                 "Session complete! $formattedGb of RAM cleared and temperatures kept stable."
             AppLanguage.ES_MX ->
                 "¡Sesión completada! $formattedGb de RAM liberados y temperaturas estables."
+            AppLanguage.ES_LA ->
+                "¡Partida completada! Se liberaron $formattedGb de RAM y las temperaturas se mantuvieron estables."
+            AppLanguage.JA ->
+                "セッション完了！${formattedGb}のRAMを解放し、温度を安定させました。"
+            AppLanguage.HI ->
+                "सेशन पूरा हुआ! $formattedGb RAM साफ़ किया गया और तापमान स्थिर रखा गया।"
             AppLanguage.PT_BR ->
                 "Sessão concluída! $formattedGb de RAM liberados e temperaturas mantidas estáveis."
             AppLanguage.ID ->
@@ -344,16 +381,16 @@ object SmartNotificationManager {
 
     /**
      * Trigger 5A: Inactivity Day 3 Lapsed
-     * "Your games are missing the boost. Jump back in for a lag free session."
+     * "Your games are waiting in your library. Jump back in for a focused gaming session."
      */
     fun getDay3LapsedMessage(lang: AppLanguage = AppStrings.resolveActiveLanguage()): String {
         return AppStrings.translateForLanguage(
-            en = "Your games are missing the boost. Jump back in for a lag free session.",
-            es = "Tus juegos extrañan el impulso. Vuelve a jugar para una sesión sin lag.",
-            ptBr = "Seus jogos estão sentindo falta do impulso. Volte a jogar para uma sessão sem travamentos.",
-            id = "Game Anda merindukan boost. Kembali bermain untuk sesi bebas lag.",
-            vi = "Các trò chơi đang chờ bạn tăng tốc. Quay lại ngay để trải nghiệm phiên chơi mượt mà không giật lag.",
-            tl = "Na-miss na ng mga laro mo ang boost. Bumalik na para sa lag-free na gaming session.",
+            en = "Your games are waiting in your library. Jump back in for a focused gaming session.",
+            es = "Tus juegos te esperan en tu biblioteca. Vuelve a jugar para una sesión enfocada.",
+            ptBr = "Seus jogos estão esperando na biblioteca. Volte a jogar para uma sessão focada.",
+            id = "Game Anda menunggu di pustaka. Kembali bermain untuk sesi gaming yang fokus.",
+            vi = "Các trò chơi đang chờ bạn trong thư viện. Quay lại ngay để trải nghiệm phiên chơi mượt mà.",
+            tl = "Naghihintay na ang mga laro mo sa library. Bumalik na para sa focused gaming session.",
             active = lang
         )
     }
@@ -389,6 +426,12 @@ object SmartNotificationManager {
                 "You gamed for $hoursLabelEn this week! Tap to see how much RAM was optimized and your increased gamer score."
             AppLanguage.ES_MX ->
                 "¡Jugaste $safeHours horas esta semana! Toca para ver cuánta RAM se optimizó y tu aumento de puntuación gamer."
+            AppLanguage.ES_LA ->
+                "¡Jugaste $safeHours horas esta semana! Toca para ver cuánta RAM se optimizó y el incremento de tu puntuación gamer."
+            AppLanguage.JA ->
+                "今週は${safeHours}時間プレイしました！タップして最適化されたRAM量とゲーマースコアの上昇を確認しましょう。"
+            AppLanguage.HI ->
+                "आपने इस सप्ताह $safeHours घंटे गेम खेला! देखें कि कितना RAM ऑप्टिमाइज़ हुआ और आपका गेमरस्कोर कितना बढ़ा।"
             AppLanguage.PT_BR ->
                 "Você jogou por $safeHours horas nesta semana! Toque para ver quanta RAM foi otimizada e o aumento da sua pontuação gamer."
             AppLanguage.ID ->
@@ -424,12 +467,12 @@ object SmartNotificationManager {
                 active = lang
             )
             SmartNotificationTrigger.SEND_TIME_MODELING -> AppStrings.translateForLanguage(
-                en = "Peak Gaming Time • GMAX Boost",
-                es = "Hora de Jugar • Impulso GMAX",
-                ptBr = "Hora de Jogar • Impulso GMAX",
-                id = "Waktunya Bermain • GMAX Boost",
-                vi = "Giờ Chiến Game • Tăng tốc GMAX",
-                tl = "Oras ng Laro • GMAX Boost",
+                en = "Peak Gaming Time • GMAX Focus Mode",
+                es = "Hora de Jugar • Modo Enfoque GMAX",
+                ptBr = "Hora de Jogar • Modo Foco GMAX",
+                id = "Waktunya Bermain • Mode Fokus GMAX",
+                vi = "Giờ Chiến Game • Chế độ Tập trung GMAX",
+                tl = "Oras ng Laro • GMAX Focus Mode",
                 active = lang
             )
             SmartNotificationTrigger.POST_SESSION_WRAP_UP -> AppStrings.translateForLanguage(
@@ -486,17 +529,63 @@ object SmartNotificationManager {
                 tl = "Na-save ang Clip! I-rate ang GMAX Screen Recorder",
                 active = lang
             )
+            SmartNotificationTrigger.ALBERTO_GIFT_ARRIVED -> AlbertoGiftManager.GIFT_NOTIFICATION_TITLE
+            SmartNotificationTrigger.RIVALS_THREAT -> AppStrings.translateForLanguage(
+                en = "Rivals Alert • Defend Your Rank!",
+                es = "Alerta Rivals • ¡Defiende tu Rango!",
+                ptBr = "Alerta Rivals • Defenda seu Rank!",
+                id = "Peringatan Rivals • Pertahankan Peringkatmu!",
+                vi = "Cảnh báo Rivals • Bảo vệ Thứ hạng!",
+                tl = "Rivals Alert • Ipagtanggol ang Rank Mo!",
+                active = lang
+            )
+            SmartNotificationTrigger.RIVALS_DETHRONED -> AppStrings.translateForLanguage(
+                en = "Rivals Alert • You’ve Been Dethroned!",
+                es = "Alerta Rivals • ¡Has sido Destronado!",
+                ptBr = "Alerta Rivals • Você Foi Destronado!",
+                id = "Peringatan Rivals • Kamu Telah Digeser!",
+                vi = "Cảnh báo Rivals • Bạn Đã Mất Ngôi!",
+                tl = "Rivals Alert • Naagaw ang Trono Mo!",
+                active = lang
+            )
+            SmartNotificationTrigger.RIVALS_ACTIVITY_NUDGE -> AppStrings.translateForLanguage(
+                en = "Rivals Activity • Squadmate Pulling Ahead",
+                es = "Actividad Rivals • Tu Rival Toma Ventaja",
+                ptBr = "Atividade Rivals • Rival Abrindo Vantagem",
+                id = "Aktivitas Rivals • Rekan Skuad Unggul",
+                vi = "Hoạt động Rivals • Đối thủ Đang Vượt Lên",
+                tl = "Rivals Activity • Umaabante ang Squadmate Mo",
+                active = lang
+            )
+            SmartNotificationTrigger.RIVALS_MONTHLY_WRAP -> AppStrings.translateForLanguage(
+                en = "Rivals Monthly Wrap • 12 Hours Until Reset",
+                es = "Resumen Mensual Rivals • Reinicio en 12 Horas",
+                ptBr = "Resumo Mensal Rivals • Reset em 12 Horas",
+                id = "Rekap Bulanan Rivals • Reset dalam 12 Jam",
+                vi = "Tổng kết Tháng Rivals • Reset sau 12 Giờ",
+                tl = "Rivals Monthly Wrap • 12 Oras Bago Mag-Reset",
+                active = lang
+            )
+            SmartNotificationTrigger.RIVALS_TAUNT_RECEIVED -> AppStrings.translateForLanguage(
+                en = "Rivals Squad Taunt!",
+                es = "¡Burla en el Escuadrón Rivals!",
+                ptBr = "Provocação no Esquadrão Rivals!",
+                id = "Taunt Skuad Rivals!",
+                vi = "Khiêu khích Bảng xếp hạng Rivals!",
+                tl = "Rivals Squad Taunt!",
+                active = lang
+            )
         }
     }
 
     fun getReviewAfterBoostMessage(lang: AppLanguage = AppStrings.resolveActiveLanguage()): String {
         return AppStrings.translateForLanguage(
-            en = "You've boosted your gaming session! Tap to leave a quick review on Google Play.",
-            es = "¡Has impulsado tu sesión de juego! Toca para dejar una reseña rápida en Google Play.",
-            ptBr = "Você impulsionou sua sessão de jogo! Toque para deixar uma avaliação rápida na Google Play.",
-            id = "Anda telah meningkatkan sesi gaming Anda! Ketuk untuk memberi ulasan singkat di Google Play.",
-            vi = "Bạn đã tăng tốc phiên chơi game! Chạm để để lại đánh giá nhanh trên Google Play.",
-            tl = "Na-boost mo ang iyong gaming session! I-tap para mag-iwan ng mabilis na review sa Google Play.",
+            en = "You've completed your gaming focus session! Tap to leave a quick review on Google Play.",
+            es = "¡Has completado tu sesión de enfoque de juego! Toca para dejar una reseña rápida en Google Play.",
+            ptBr = "Você concluiu sua sessão de foco! Toque para deixar uma avaliação rápida na Google Play.",
+            id = "Anda telah menyelesaikan sesi fokus gaming Anda! Ketuk untuk memberi ulasan singkat di Google Play.",
+            vi = "Bạn đã hoàn tất phiên chơi game tập trung! Chạm để để lại đánh giá nhanh trên Google Play.",
+            tl = "Tapos na ang iyong gaming focus session! I-tap para mag-iwan ng mabilis na review sa Google Play.",
             active = lang
         )
     }
@@ -817,7 +906,8 @@ object SmartNotificationManager {
         customMessage: String,
         nowMs: Long = System.currentTimeMillis()
     ): SmartNotificationPayload? {
-        if (!canSendNotification(context, nowMs)) return null
+        if (!isSmartNotificationsEnabled(context)) return null
+        if (getWeeklySentCount(context, nowMs) >= MAX_NOTIFICATIONS_PER_WEEK) return null
         val lang = AppStrings.resolveActiveLanguageContext(context)
         val payload = SmartNotificationPayload(
             trigger = trigger,
@@ -873,6 +963,20 @@ object SmartNotificationManager {
             }
             SmartNotificationTrigger.APP_REVIEW_AFTER_BOOST -> getReviewAfterBoostMessage(lang)
             SmartNotificationTrigger.APP_REVIEW_AFTER_RECORDING -> getReviewAfterRecordingMessage(lang)
+            SmartNotificationTrigger.ALBERTO_GIFT_ARRIVED -> AppStrings.translateForLanguage(
+                en = AlbertoGiftManager.GIFT_NOTIFICATION_MESSAGE_EN,
+                es = AlbertoGiftManager.GIFT_NOTIFICATION_MESSAGE_ES,
+                ptBr = AlbertoGiftManager.GIFT_NOTIFICATION_MESSAGE_EN,
+                id = AlbertoGiftManager.GIFT_NOTIFICATION_MESSAGE_EN,
+                vi = AlbertoGiftManager.GIFT_NOTIFICATION_MESSAGE_EN,
+                tl = AlbertoGiftManager.GIFT_NOTIFICATION_MESSAGE_EN,
+                active = lang
+            )
+            SmartNotificationTrigger.RIVALS_THREAT,
+            SmartNotificationTrigger.RIVALS_DETHRONED,
+            SmartNotificationTrigger.RIVALS_ACTIVITY_NUDGE,
+            SmartNotificationTrigger.RIVALS_MONTHLY_WRAP,
+            SmartNotificationTrigger.RIVALS_TAUNT_RECEIVED -> customMessage.orEmpty()
         }
 
         val payload = SmartNotificationPayload(
@@ -885,6 +989,75 @@ object SmartNotificationManager {
         )
 
         recordNotificationSent(context, nowMs)
+        postSystemNotification(context, payload)
+        return payload
+    }
+
+    /**
+     * Posts a real-time Rivals Squad competition notification (The Threat, The Dethroning,
+     * The Activity Nudge, Monthly Wrap 12h Before Reset, or One-Click Taunt) and deep-links
+     * to the Rivals tab when tapped.
+     */
+    fun postRivalsNotification(
+        context: Context,
+        trigger: SmartNotificationTrigger,
+        message: String
+    ): SmartNotificationPayload {
+        val lang = AppStrings.resolveActiveLanguageContext(context)
+        val payload = SmartNotificationPayload(
+            trigger = trigger,
+            title = getTitleForTrigger(trigger, lang),
+            message = message,
+            targetTab = "RIVALS"
+        )
+        postSystemNotification(context, payload)
+        return payload
+    }
+
+    /**
+     * Schedules an exact background check for the Rivals Monthly Wrap notification
+     * exactly 12 hours before the monthly UTC reset (`00:00:00 UTC` on the 1st of next month).
+     */
+    fun scheduleRivalsMonthlyWrap12hBeforeReset(context: Context, nowMs: Long = System.currentTimeMillis()) {
+        try {
+            val am = context.getSystemService(Context.ALARM_SERVICE) as? AlarmManager ?: return
+            val triggerAtMs = com.example.data.repository.RivalsRepository.nextMonthlyWrap12HoursBeforeResetEpochMs(nowMs)
+            val targetTimeMs = if (triggerAtMs > nowMs) {
+                triggerAtMs
+            } else {
+                com.example.data.repository.RivalsRepository.nextUtcMonthResetEpochMs(nowMs)
+            }
+            val intent = Intent(context, SmartNotificationReceiver::class.java).apply {
+                action = SmartNotificationReceiver.ACTION_RIVALS_MONTHLY_WRAP_12H
+            }
+            val flags = PendingIntent.FLAG_UPDATE_CURRENT or
+                (if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) PendingIntent.FLAG_IMMUTABLE else 0)
+            val pi = PendingIntent.getBroadcast(context, 4203, intent, flags)
+            am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, targetTimeMs, pi)
+        } catch (_: Exception) {}
+    }
+
+    /**
+     * Immediately posts the "Alberto Gift has Arrived" push notification on startup
+     * bypassing weekly frequency caps so the recipient always receives their gift alert.
+     */
+    fun postAlbertoGiftNotification(context: Context): SmartNotificationPayload? {
+        val lang = AppStrings.resolveActiveLanguageContext(context)
+        val message = AppStrings.translateForLanguage(
+            en = AlbertoGiftManager.GIFT_NOTIFICATION_MESSAGE_EN,
+            es = AlbertoGiftManager.GIFT_NOTIFICATION_MESSAGE_ES,
+            ptBr = AlbertoGiftManager.GIFT_NOTIFICATION_MESSAGE_EN,
+            id = AlbertoGiftManager.GIFT_NOTIFICATION_MESSAGE_EN,
+            vi = AlbertoGiftManager.GIFT_NOTIFICATION_MESSAGE_EN,
+            tl = AlbertoGiftManager.GIFT_NOTIFICATION_MESSAGE_EN,
+            active = lang
+        )
+        val payload = SmartNotificationPayload(
+            trigger = SmartNotificationTrigger.ALBERTO_GIFT_ARRIVED,
+            title = AlbertoGiftManager.GIFT_NOTIFICATION_TITLE,
+            message = message,
+            targetTab = SmartNotificationTrigger.ALBERTO_GIFT_ARRIVED.targetTab
+        )
         postSystemNotification(context, payload)
         return payload
     }

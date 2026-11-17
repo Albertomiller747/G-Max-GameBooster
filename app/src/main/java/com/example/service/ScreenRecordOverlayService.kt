@@ -54,7 +54,7 @@ class ScreenRecordOverlayService : Service() {
     private var radialFanContainer: FrameLayout? = null
     private var centerHubView: FrameLayout? = null
     private var centerHubIconView: ImageView? = null
-    private val satelliteButtons = ArrayList<FrameLayout>(4)
+    private val satelliteButtons = ArrayList<FrameLayout>(5)
     private var recordingTimerPill: LinearLayout? = null
     private var timerTextView: TextView? = null
     private var stopLabelView: TextView? = null
@@ -72,7 +72,7 @@ class ScreenRecordOverlayService : Service() {
     private var currentHubTopPx = 0
 
     private val overshootInterpolator = android.view.animation.OvershootInterpolator(1.28f)
-    private val serviceScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
+    private val serviceScope = CoroutineScope(Dispatchers.Main + SupervisorJob() + com.example.util.AppCrashGuard.coroutineExceptionHandler)
     private val mainHandler = Handler(Looper.getMainLooper())
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -195,14 +195,10 @@ class ScreenRecordOverlayService : Service() {
         rootOverlayLayout?.addView(recordingTimerPill)
         rootOverlayLayout?.addView(floatingCircle)
 
-        setupDragListener(floatingCircle!!)
-        setupDragListener(recordingTimerPill!!)
+        floatingCircle?.let { setupDragListener(it) }
+        recordingTimerPill?.let { setupDragListener(it) }
 
-        try {
-            windowManager?.addView(rootOverlayLayout, windowParams)
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
+        com.example.util.AppCrashGuard.safeAddView(this, windowManager, rootOverlayLayout, windowParams)
     }
 
     /**
@@ -378,10 +374,10 @@ class ScreenRecordOverlayService : Service() {
             satelliteButtons.add(sat2)
             addView(sat2)
 
-            // Satellite 3 (Lower-middle of arc): Instant Screenshot Capture
+            // Satellite 3 (Middle of arc): Instant Screenshot Capture
             val sat3 = createRadialSatelliteButton(
-                leftDp = 18,
-                topDp = 138,
+                leftDp = 12,
+                topDp = 114,
                 iconRes = R.drawable.ic_notif_screenshots,
                 iconTint = null
             ) {
@@ -392,8 +388,8 @@ class ScreenRecordOverlayService : Service() {
 
             // Satellite 4 (Bottom of arc): Exit Overlay
             val sat4 = createRadialSatelliteButton(
-                leftDp = 68,
-                topDp = 194,
+                leftDp = 50,
+                topDp = 178,
                 iconRes = R.drawable.ic_notif_exit,
                 iconTint = null
             ) {
@@ -496,6 +492,7 @@ class ScreenRecordOverlayService : Service() {
                 setTextColor(Color.parseColor("#FCA5A5"))
                 textSize = 10f
                 typeface = android.graphics.Typeface.DEFAULT_BOLD
+                setPadding(0, 0, (4 * density).toInt(), 0)
             }
             addView(stopLabelView)
 
@@ -549,20 +546,22 @@ class ScreenRecordOverlayService : Service() {
                 .start()
         }
 
-        // Arc coordinates for the 4 satellites relative to the fan container
+        // Arc coordinates for the 5 satellites relative to the fan container
         val satCoordsDp = if (openToRight) {
             listOf(
-                62 to 12,
-                112 to 68,
-                112 to 138,
-                62 to 194
+                62 to 8,
+                108 to 54,
+                118 to 108,
+                104 to 162,
+                62 to 204
             )
         } else {
             listOf(
-                68 to 12,
-                18 to 68,
-                18 to 138,
-                68 to 194
+                68 to 8,
+                22 to 54,
+                12 to 108,
+                26 to 162,
+                68 to 204
             )
         }
 

@@ -94,20 +94,6 @@ fun ControlsOverlayScreen(
     val activeControllerGlyphs by viewModel.activeControllerGlyphs.collectAsState()
     val controllerOverlayConfig by viewModel.controllerOverlayConfig.collectAsState()
     val controllerHealthState by viewModel.controllerHealthState.collectAsState()
-    var showAntiCheatNotice by remember { mutableStateOf(false) }
-
-    if (showAntiCheatNotice) {
-        AntiCheatNoticeDialog(
-            onConfirm = {
-                viewModel.acknowledgeAntiCheatNotice()
-                showAntiCheatNotice = false
-                viewModel.setCrosshairEnabled(context, true)
-            },
-            onDismiss = {
-                showAntiCheatNotice = false
-            }
-        )
-    }
 
     LazyColumn(
         modifier = modifier
@@ -172,145 +158,23 @@ fun ControlsOverlayScreen(
             }
         }
 
-        // Crosshair Customizer & Live Preview Box
-        item {
-            CyberCard {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        SectionTitle(
-                            title = "Tactical Screen Crosshair",
-                            subtitle = "Draws an on-screen reticle overlay (Touch-through active)"
-                        )
-                    }
-
-                    Switch(
-                        checked = overlaySettings.isEnabled,
-                        onCheckedChange = { targetState ->
-                            if (targetState && !overlaySettings.antiCheatNoticeAcknowledged) {
-                                showAntiCheatNotice = true
-                            } else {
-                                viewModel.setCrosshairEnabled(context, targetState)
-                            }
-                        },
-                        colors = SwitchDefaults.colors(
-                            checkedThumbColor = Color.White,
-                            checkedTrackColor = CyberCyan
-                        ),
-                        modifier = Modifier.testTag("crosshair_tweak_toggle")
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(10.dp))
-
-                // Live Preview Canvas
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(140.dp)
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(Color(0xFF070A12))
-                        .border(1.dp, Color(0xFF1E283D), RoundedCornerShape(12.dp)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    CrosshairPreview(
-                        style = overlaySettings.crosshairStyle,
-                        color = Color(overlaySettings.crosshairColor),
-                        sizeDp = overlaySettings.crosshairSizeDp
-                    )
-                    Text(
-                        text = "LIVE RETICLE PREVIEW",
-                        style = MaterialTheme.typography.labelSmall.copy(
-                            color = Color(0x66FFFFFF),
-                            fontWeight = FontWeight.Black,
-                            letterSpacing = 1.sp
-                        ),
-                        modifier = Modifier
-                            .align(Alignment.BottomEnd)
-                            .padding(8.dp)
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(12.dp))
-
-                // Style Selector Chips (8 distinct reticles)
-                Text("Reticle Design (${CrosshairData.styles.size} Styles)", style = MaterialTheme.typography.labelMedium.copy(color = TextSecondary, fontWeight = FontWeight.Bold))
-                Spacer(modifier = Modifier.height(6.dp))
-                LazyRow(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    itemsIndexed(CrosshairData.styles) { index, styleName ->
-                        FilterChip(
-                            selected = overlaySettings.crosshairStyle == index,
-                            onClick = { viewModel.updateCrosshairStyle(index) },
-                            label = { Text(styleName, fontSize = 11.sp) },
-                            colors = FilterChipDefaults.filterChipColors(
-                                selectedContainerColor = CyberCyan.copy(alpha = 0.2f),
-                                selectedLabelColor = CyberCyan
-                            )
-                        )
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(12.dp))
-
-                // Color Picker Row (8 neon colors)
-                Text("Reticle Color (${CrosshairData.colors.size} Colors)", style = MaterialTheme.typography.labelMedium.copy(color = TextSecondary, fontWeight = FontWeight.Bold))
-                Spacer(modifier = Modifier.height(8.dp))
-                LazyRow(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    items(CrosshairData.colors.size) { i ->
-                        val (name, colorVal) = CrosshairData.colors[i]
-                        val isSelected = overlaySettings.crosshairColor == colorVal
-                        Box(
-                            modifier = Modifier
-                                .size(34.dp)
-                                .clip(CircleShape)
-                                .background(Color(colorVal))
-                                .border(
-                                    width = if (isSelected) 3.dp else 1.dp,
-                                    color = if (isSelected) Color.White else DarkSurfaceBorder,
-                                    shape = CircleShape
-                                )
-                                .clickable { viewModel.updateCrosshairColor(colorVal) }
-                        )
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(12.dp))
-
-                // Size Slider
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text("Reticle Size", style = MaterialTheme.typography.labelMedium.copy(color = TextSecondary, fontWeight = FontWeight.Bold))
-                    Text("${overlaySettings.crosshairSizeDp} dp", style = MaterialTheme.typography.bodySmall.copy(color = CyberCyan, fontWeight = FontWeight.Bold))
-                }
-                Slider(
-                    value = overlaySettings.crosshairSizeDp.toFloat(),
-                    onValueChange = { viewModel.updateCrosshairSize(it.toInt()) },
-                    valueRange = 16f..64f,
-                    colors = SliderDefaults.colors(
-                        thumbColor = CyberCyan,
-                        activeTrackColor = CyberCyan,
-                        inactiveTrackColor = DarkSurfaceVariant
-                    )
-                )
-            }
-        }
-
         // Real-Time Controller Input Screen Overlay & Layout Selector
         item {
-            val proUnlockUntilMs by com.example.util.AdMobManager.proControllerUnlockUntilMs.collectAsState()
-            val isProUnlocked = proUnlockUntilMs > System.currentTimeMillis() || com.example.util.AdMobManager.isProControllerUnlocked()
+            androidx.compose.runtime.DisposableEffect(Unit) {
+                com.example.util.ControllerHealthManager.setControllerStudioActive(true)
+                viewModel.refreshControllerState()
+                onDispose {
+                    com.example.util.ControllerHealthManager.setControllerStudioActive(false)
+                }
+            }
+            androidx.compose.runtime.LaunchedEffect(controllerHealthState.controllerId < 0) {
+                while (controllerHealthState.controllerId < 0) {
+                    kotlinx.coroutines.delay(1500L)
+                    viewModel.refreshControllerState()
+                }
+            }
+            val proUnlockUntilMs by com.example.util.UnityAdsManager.proControllerUnlockUntilMs.collectAsState()
+            val isProUnlocked = proUnlockUntilMs > System.currentTimeMillis() || com.example.util.UnityAdsManager.isProControllerUnlocked()
             com.example.ui.components.ControllerScreenOverlayCard(
                 config = controllerOverlayConfig,
                 controllerState = controllerHealthState,
@@ -319,11 +183,11 @@ fun ControlsOverlayScreen(
                 onSelectLayoutMode = { viewModel.setControllerLayoutMode(it) },
                 onSelectStickTrackingMode = { viewModel.setControllerOverlayStickTrackingMode(it) },
                 onToggleEnabled = { enableRequested ->
-                    if (enableRequested && !com.example.util.ControllerHealthManager.isWiredControllerConnected(context)) {
+                    if (enableRequested && !com.example.util.ControllerHealthManager.isAnyControllerConnected(context)) {
                         viewModel.setControllerOverlayEnabled(false)
                         viewModel.triggerWiredControllerRequiredPopup()
                     } else if (enableRequested && !isProUnlocked) {
-                        com.example.util.AdMobManager.requestProControllerRewardedUnlock(context) {
+                        com.example.util.UnityAdsManager.requestProControllerRewardedUnlock(context) {
                             viewModel.setControllerOverlayEnabled(true)
                         }
                     } else {
@@ -406,26 +270,26 @@ fun ControlsOverlayScreen(
                 Spacer(modifier = Modifier.height(10.dp))
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     LatencyTierRow(
-                        tier = "Tier S: Wired 3.5mm / Type-C DAC",
-                        latency = "0 - 5 ms",
+                        tier = "Tier S: Wired 3.5mm / Type C DAC",
+                        latency = "0 to 5 ms",
                         quality = "Zero perceived latency. Recommended for competitive shooters (PUBG, COD).",
                         color = NeonGreen
                     )
                     LatencyTierRow(
                         tier = "Tier A: 2.4GHz RF USB Dongle",
-                        latency = "15 - 25 ms",
-                        quality = "Near-instant wireless audio using dedicated low-loss RF receiver.",
+                        latency = "15 to 25 ms",
+                        quality = "Fast wireless audio using dedicated low loss RF receiver.",
                         color = CyberCyan
                     )
                     LatencyTierRow(
                         tier = "Tier B: Bluetooth aptX Low Latency / LHDC",
-                        latency = "40 - 80 ms",
+                        latency = "40 to 80 ms",
                         quality = "Acceptable latency. Requires matching codec support in Developer Options.",
                         color = SolarGold
                     )
                     LatencyTierRow(
                         tier = "Tier C: Standard Bluetooth SBC / AAC",
-                        latency = "150 - 250 ms",
+                        latency = "150 to 250 ms",
                         quality = "Noticeable delay. Gunshot and footstep sounds arrive ~1/5th second late.",
                         color = ElectricCrimson
                     )

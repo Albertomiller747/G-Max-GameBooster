@@ -93,6 +93,12 @@ data class OverlaySettings(
     val crosshairColor: Long = 0xFF00E5FF,
     val crosshairSizeDp: Int = 32,
     val crosshairAlpha: Float = 0.95f,
+    val offsetXdp: Int = 0,
+    val offsetYdp: Int = 0,
+    val strokeThicknessDp: Float = 2.5f,
+    val centerGapDp: Float = 4.0f,
+    val showOutline: Boolean = true,
+    val showCenterDot: Boolean = true,
     val showTimer: Boolean = true,
     val timerSeconds: Int = 0,
     val isTimerRunning: Boolean = false,
@@ -172,15 +178,15 @@ enum class BoostMode(
     val accentColor: Color
 ) {
     GAMING(
-        title = "Gaming Mode",
-        subtitle = "Normal Boost",
-        description = "Balanced optimization for smooth casual to competitive gaming. Flushes app caches, trims memory, and sets high thread priority.",
+        title = "Overlay & Focus Mode",
+        subtitle = "1h 30m Active Session",
+        description = "Keeps the software telemetry overlay and focus mode active on screen for up to 1 hour and 30 minutes.",
         accentColor = Color(0xFF3B82F6)
     ),
     BEAST(
-        title = "Beast Mode",
-        subtitle = "Intense FPS Boost",
-        description = "Maximum performance profile for heavy games. Aggressive RAM compaction, sustained performance mode, maximum refresh rate, and auto-activates screen HUD.",
+        title = "Overlay & Focus Mode",
+        subtitle = "1h 30m Active Session",
+        description = "Keeps the software telemetry overlay, DND focus mode, and audio/network locks active on screen for 1 hour and 30 minutes.",
         accentColor = Color(0xFFEF4444)
     )
 }
@@ -217,6 +223,13 @@ data class OverlayHudConfig(
     val showTimer: Boolean = true,
     val showRamPct: Boolean = true,
     val showClock: Boolean = true,
+    val showNetSpeed: Boolean = true,
+    val showNotificationTicker: Boolean = true,
+    val tickerDurationSeconds: Int = 6,
+    val gamingVolumeLockEnabled: Boolean = false,
+    val gamingVolumeLockPercent: Int = 80,
+    val hardcoreModeEnabled: Boolean = false,
+    val speedrunTimerEnabled: Boolean = false,
     val autoScaleSmallScreens: Boolean = true,
     val fpsMode: String = "BALANCED", // "FAST", "BALANCED", "SMOOTH"
     val targetCapMode: String = "AUTO" // "AUTO", "30", "45", "60", "90", "120", "144", "165"

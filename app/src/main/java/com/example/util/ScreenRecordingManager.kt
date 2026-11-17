@@ -717,12 +717,13 @@ object ScreenRecordingManager {
                     files?.forEach { file ->
                         if (list.none { it.filePath == file.absolutePath || it.title.equals(file.name, ignoreCase = true) }) {
                             val (gameTitle, gamePkg) = resolveGameForMediaFile(context, file.name)
+                            val inferredDurMs = if (file.name.contains("Replay30s", ignoreCase = true)) 30_000L else 0L
                             list.add(
                                 RecordedVideo(
                                     id = file.hashCode().toLong(),
                                     uriString = Uri.fromFile(file).toString(),
                                     title = file.name,
-                                    durationMs = 0L,
+                                    durationMs = inferredDurMs,
                                     sizeBytes = file.length(),
                                     dateAddedSec = file.lastModified() / 1000,
                                     resolution = "HD",

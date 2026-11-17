@@ -41,15 +41,22 @@ class GamingOverlayService : Service(), Choreographer.FrameCallback {
 
     private var fpsTextView: TextView? = null
     private var timerTextView: TextView? = null
+    private var netSpeedTextView: TextView? = null
     private var ramTextView: TextView? = null
     private var tempTextView: TextView? = null
     private var batteryTextView: TextView? = null
     private var clockTextView: TextView? = null
+    private var squadToastTextView: TextView? = null
+    private var squadToastJob: Job? = null
 
     private var boosterSessionManager: com.example.util.BoosterSessionManager? = null
     private var lastPeriodicRamCleanTimestamp = 0L
     private var lastNotificationUpdateTimestamp = 0L
-    private val serviceScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Default + kotlinx.coroutines.SupervisorJob())
+    private val serviceScope = kotlinx.coroutines.CoroutineScope(
+        kotlinx.coroutines.Dispatchers.Default +
+            kotlinx.coroutines.SupervisorJob() +
+            com.example.util.AppCrashGuard.coroutineExceptionHandler
+    )
     private var optimizationJob: Job? = null
 
     private var wifiLock: WifiManager.WifiLock? = null
@@ -66,6 +73,7 @@ class GamingOverlayService : Service(), Choreographer.FrameCallback {
     private var showTimer = true
     private var showRamPct = true
     private var showClock = true
+    private var showNetSpeed = true
     private var autoScaleSmallScreens = true
     private var closeBtnView: TextView? = null
 
@@ -74,6 +82,13 @@ class GamingOverlayService : Service(), Choreographer.FrameCallback {
     private var effectiveCapFps = 60
     private var currentFps = 60
     private var efpsCollectorJob: Job? = null
+
+    // Local TrafficStats KB/s Monitor State (zero-bandwidth local byte rate)
+    private var lastTotalRxBytes = -1L
+    private var lastTotalTxBytes = -1L
+    private var lastTrafficSampleTimestampMs = 0L
+    private var currentRxBytesPerSec = 0L
+    private var currentTxBytesPerSec = 0L
 
     // Live RAM Usage Percentage & Time of Day (pre-allocated objects for zero-GC telemetry ticks)
     private var currentRamPct = 48
@@ -123,8 +138,29 @@ class GamingOverlayService : Service(), Choreographer.FrameCallback {
         } catch (_: Exception) {}
     }
 
+    private fun sampleLocalTrafficStats() {
+        try {
+            val rx = android.net.TrafficStats.getTotalRxBytes()
+            val tx = android.net.TrafficStats.getTotalTxBytes()
+            val now = android.os.SystemClock.elapsedRealtime()
+            if (rx != android.net.TrafficStats.UNSUPPORTED.toLong() &&
+                tx != android.net.TrafficStats.UNSUPPORTED.toLong()
+            ) {
+                if (lastTotalRxBytes >= 0L && lastTotalTxBytes >= 0L && now > lastTrafficSampleTimestampMs) {
+                    val elapsedMs = (now - lastTrafficSampleTimestampMs).coerceAtLeast(250L)
+                    currentRxBytesPerSec = (((rx - lastTotalRxBytes).coerceAtLeast(0L)) * 1000L) / elapsedMs
+                    currentTxBytesPerSec = (((tx - lastTotalTxBytes).coerceAtLeast(0L)) * 1000L) / elapsedMs
+                }
+                lastTotalRxBytes = rx
+                lastTotalTxBytes = tx
+                lastTrafficSampleTimestampMs = now
+            }
+        } catch (_: Exception) {}
+    }
+
     private fun queryHardwareBatteryAndTemp() {
         queryRamAndClock()
+        sampleLocalTrafficStats()
         // 1. Direct hardware register query via BatteryManager (zero latency)
         try {
             val bm = getSystemService(Context.BATTERY_SERVICE) as? BatteryManager
@@ -155,6 +191,7 @@ class GamingOverlayService : Service(), Choreographer.FrameCallback {
         const val ACTION_START = "ACTION_START"
         const val ACTION_STOP = "ACTION_STOP"
         const val ACTION_UPDATE = "ACTION_UPDATE"
+        const val ACTION_SQUAD_TOAST = "ACTION_SQUAD_TOAST"
 
         const val EXTRA_SHOW_FPS = "EXTRA_SHOW_FPS"
         const val EXTRA_SHOW_TEMP = "EXTRA_SHOW_TEMP"
@@ -162,10 +199,23 @@ class GamingOverlayService : Service(), Choreographer.FrameCallback {
         const val EXTRA_SHOW_TIMER = "EXTRA_SHOW_TIMER"
         const val EXTRA_SHOW_RAM_PCT = "EXTRA_SHOW_RAM_PCT"
         const val EXTRA_SHOW_CLOCK = "EXTRA_SHOW_CLOCK"
+        const val EXTRA_SHOW_NET_SPEED = "EXTRA_SHOW_NET_SPEED"
         const val EXTRA_AUTO_SCALE = "EXTRA_AUTO_SCALE"
+        const val EXTRA_SQUAD_TOAST_MESSAGE = "EXTRA_SQUAD_TOAST_MESSAGE"
 
         var isServiceRunning = false
             private set
+
+        fun showInGameSquadToast(context: Context, message: String) {
+            if (!isServiceRunning) return
+            try {
+                val intent = Intent(context.applicationContext, GamingOverlayService::class.java).apply {
+                    action = ACTION_SQUAD_TOAST
+                    putExtra(EXTRA_SQUAD_TOAST_MESSAGE, message)
+                }
+                context.applicationContext.startService(intent)
+            } catch (_: Exception) {}
+        }
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -189,10 +239,10 @@ class GamingOverlayService : Service(), Choreographer.FrameCallback {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = android.app.NotificationChannel(
                 CHANNEL_ID,
-                "G MAX Booster Live Telemetry",
+                "Overlay and Focus Mode Timer",
                 android.app.NotificationManager.IMPORTANCE_LOW
             ).apply {
-                description = "Shows live booster active status and remaining time"
+                description = "Shows live software overlay and focus mode active time remaining"
                 setShowBadge(false)
             }
             val nm = getSystemService(Context.NOTIFICATION_SERVICE) as? android.app.NotificationManager
@@ -346,13 +396,9 @@ class GamingOverlayService : Service(), Choreographer.FrameCallback {
                 android.app.PendingIntent.FLAG_UPDATE_CURRENT or (if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) android.app.PendingIntent.FLAG_IMMUTABLE else 0)
             )
 
-            val modeTitle = if (isBeast) "⚡ BEAST ACTIVE" else "🛡️ GAMING BOOST"
+            val modeTitle = "🎯 OVERLAY & FOCUS MODE TIMER"
             val purgedLabel = if (purgedMb > 0) "Freed ${purgedMb}MB • " else ""
-            val summaryText = if (isBeast) {
-                "${purgedLabel}Low-Latency Wi-Fi • Zero-Lag Audio • $gameTitle"
-            } else {
-                "${purgedLabel}Wi-Fi Lock • Priority DND • $gameTitle"
-            }
+            val summaryText = "${purgedLabel}Low-Latency Wi-Fi • Focus Silence • $gameTitle"
 
             val builder = androidx.core.app.NotificationCompat.Builder(this, CHANNEL_ID)
                 .setSmallIcon(android.R.drawable.ic_dialog_info)
@@ -378,23 +424,9 @@ class GamingOverlayService : Service(), Choreographer.FrameCallback {
                 com.example.util.NetworkConnectivityMonitor.observeConnectivity(this@GamingOverlayService).collect { isOnline ->
                     if (wasOnlinePreviously && !isOnline) {
                         val session = boosterSessionManager
-                        val isNormalBoostActive = session != null &&
-                            session.isSessionActive() &&
-                            session.getActiveMode() == com.example.model.BoostMode.GAMING
+                        val isSessionActive = session != null && session.isSessionActive()
 
-                        // Always stop Crosshair & Controller overlays on internet loss
-                        try {
-                            com.example.service.CrosshairOverlayService.saveConfig(
-                                this@GamingOverlayService,
-                                false,
-                                0,
-                                0xFF00E676L,
-                                24,
-                                0.9f
-                            )
-                            stopService(Intent(this@GamingOverlayService, CrosshairOverlayService::class.java))
-                        } catch (_: Exception) {}
-
+                        // Stop Controller overlay on internet loss
                         try {
                             val ctrlCfg = ControllerOverlayService.loadConfig(this@GamingOverlayService)
                             if (ctrlCfg.isEnabled) {
@@ -403,8 +435,7 @@ class GamingOverlayService : Service(), Choreographer.FrameCallback {
                             }
                         } catch (_: Exception) {}
 
-                        // Remove HUD overlay when internet drops UNLESS it is a Normal Boost (BoostMode.GAMING) session
-                        if (!isNormalBoostActive) {
+                        if (!isSessionActive) {
                             stopSelf()
                         }
                     }
@@ -448,13 +479,17 @@ class GamingOverlayService : Service(), Choreographer.FrameCallback {
                     applyLowLatencyAudioAndNetworkHints(enable = false, isBeast = false)
                     restoreDefaultThreadPriority()
                     com.example.util.PriorityDndHelper.restorePreviousDnd(this@GamingOverlayService)
-                    if (overlayLayout == null && !showFps && !showTemp && !showBattery && !showRamPct && !showClock) {
+                    if (overlayLayout == null && !showFps && !showTemp && !showBattery && !showRamPct && !showClock && !showNetSpeed) {
                         if (com.example.util.MatchRecapManager.getInstance(this@GamingOverlayService).isRecording.value) {
                             com.example.util.MatchRecapManager.getInstance(this@GamingOverlayService).finishSession()
                         }
                         stopSelf()
                         break
                     }
+                }
+                // Sample zero-bandwidth local TrafficStats incoming/outgoing byte rate every second
+                if (showNetSpeed) {
+                    sampleLocalTrafficStats()
                 }
                 // Refresh RAM usage % and Time of Day every 3 seconds instead of every 1 second to reduce IPC overhead
                 if (tickCount % 3 == 0) {
@@ -467,6 +502,11 @@ class GamingOverlayService : Service(), Choreographer.FrameCallback {
                             context = this@GamingOverlayService,
                             secondsElapsed = 15
                         )
+                    } catch (_: Exception) {}
+                }
+                if (tickCount % 60 == 0 && session != null && session.isSessionActive()) {
+                    try {
+                        com.example.util.SquadReferralManager.onBoostedGameplayMinuteElapsed(this@GamingOverlayService)
                     } catch (_: Exception) {}
                 }
                 kotlinx.coroutines.withContext(Dispatchers.Main) {
@@ -499,6 +539,14 @@ class GamingOverlayService : Service(), Choreographer.FrameCallback {
             return START_NOT_STICKY
         }
 
+        if (intent?.action == ACTION_SQUAD_TOAST) {
+            val toastMsg = intent.getStringExtra(EXTRA_SQUAD_TOAST_MESSAGE).orEmpty()
+            if (toastMsg.isNotBlank()) {
+                displayOverlaySquadToast(toastMsg)
+            }
+            return START_STICKY
+        }
+
         val hudPrefs = getSharedPreferences("gmax_hud_prefs", Context.MODE_PRIVATE)
         showFps = intent?.getBooleanExtra(EXTRA_SHOW_FPS, true) ?: true
         showTemp = intent?.getBooleanExtra(EXTRA_SHOW_TEMP, true) ?: true
@@ -511,6 +559,10 @@ class GamingOverlayService : Service(), Choreographer.FrameCallback {
         showClock = intent?.getBooleanExtra(
             EXTRA_SHOW_CLOCK,
             hudPrefs.getBoolean("hud_show_clock", true)
+        ) ?: true
+        showNetSpeed = intent?.getBooleanExtra(
+            EXTRA_SHOW_NET_SPEED,
+            hudPrefs.getBoolean(com.example.util.ConfigCodeCodec.KEY_HUD_SHOW_NET_SPEED, true)
         ) ?: true
         autoScaleSmallScreens = intent?.getBooleanExtra(
             EXTRA_AUTO_SCALE,
@@ -535,38 +587,6 @@ class GamingOverlayService : Service(), Choreographer.FrameCallback {
         // Refresh battery, temperature, RAM %, and clock immediately on each start/update
         queryHardwareBatteryAndTemp()
 
-        // Promote to foreground service so Android never kills the overlay when leaving the app
-        try {
-            val openIntent = Intent(this, com.example.MainActivity::class.java).apply {
-                this.flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
-            }
-            val pendingIntent = android.app.PendingIntent.getActivity(
-                this,
-                0,
-                openIntent,
-                android.app.PendingIntent.FLAG_UPDATE_CURRENT or
-                    (if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) android.app.PendingIntent.FLAG_IMMUTABLE else 0)
-            )
-            val notification = androidx.core.app.NotificationCompat.Builder(this, CHANNEL_ID)
-                .setSmallIcon(android.R.drawable.ic_dialog_info)
-                .setContentTitle("G MAX Live Telemetry Active")
-                .setContentText("$targetGameName • $currentFps EFPS • ${currentTempC}°C")
-                .setContentIntent(pendingIntent)
-                .setOngoing(true)
-                .setSilent(true)
-                .setPriority(androidx.core.app.NotificationCompat.PRIORITY_LOW)
-                .build()
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-                startForeground(
-                    NOTIFICATION_ID,
-                    notification,
-                    android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
-                )
-            } else {
-                startForeground(NOTIFICATION_ID, notification)
-            }
-        } catch (_: Exception) {}
-
         // Setup floating HUD if overlay permission is granted
         val canDraw = Build.VERSION.SDK_INT < Build.VERSION_CODES.M || Settings.canDrawOverlays(this)
         if (canDraw) {
@@ -579,6 +599,16 @@ class GamingOverlayService : Service(), Choreographer.FrameCallback {
             if (windowManager == null || overlayLayout == null) {
                 setupOverlay()
             } else {
+                val (savedX, savedY) = com.example.util.ConfigCodeCodec.getSavedHudPosition(this)
+                windowParams?.let { lp ->
+                    if (lp.x != savedX || lp.y != savedY) {
+                        lp.x = savedX
+                        lp.y = savedY
+                        try {
+                            windowManager?.updateViewLayout(overlayLayout, lp)
+                        } catch (_: Exception) {}
+                    }
+                }
                 updateVisibility()
                 updateLabels()
             }
@@ -664,6 +694,19 @@ class GamingOverlayService : Service(), Choreographer.FrameCallback {
         }
         hudContainer.addView(timerTextView)
 
+        // 2b. Local TrafficStats KB/s Throughput Monitor (Zero Firebase bandwidth)
+        netSpeedTextView = TextView(this).apply {
+            text = "↓0KB/s ↑0KB/s"
+            setTextColor(Color.parseColor("#38BDF8"))
+            textSize = 11.5f
+            typeface = android.graphics.Typeface.MONOSPACE
+            isSingleLine = true
+            maxLines = 1
+            ellipsize = null
+            setPadding(0, 0, (7 * density).toInt(), 0)
+        }
+        hudContainer.addView(netSpeedTextView)
+
         // 3. Live System RAM Usage Percentage
         ramTextView = TextView(this).apply {
             text = "RAM $currentRamPct%"
@@ -716,6 +759,19 @@ class GamingOverlayService : Service(), Choreographer.FrameCallback {
         }
         hudContainer.addView(clockTextView)
 
+        // 6b. High-Dopamine Squadmate Connected Banner inside In-Game Overlay
+        squadToastTextView = TextView(this).apply {
+            text = ""
+            setTextColor(Color.parseColor("#00E676"))
+            textSize = 11.0f
+            typeface = android.graphics.Typeface.DEFAULT_BOLD
+            isSingleLine = true
+            maxLines = 1
+            visibility = View.GONE
+            setPadding((6 * density).toInt(), 0, (8 * density).toInt(), 0)
+        }
+        hudContainer.addView(squadToastTextView)
+
         // 7. Quick Dismiss Button
         val closeBtn = TextView(this).apply {
             text = "✕"
@@ -736,6 +792,7 @@ class GamingOverlayService : Service(), Choreographer.FrameCallback {
         updateVisibility()
         updateLabels()
 
+        val (savedHudX, savedHudY) = com.example.util.ConfigCodeCodec.getSavedHudPosition(this)
         val params = WindowManager.LayoutParams(
             WindowManager.LayoutParams.WRAP_CONTENT,
             WindowManager.LayoutParams.WRAP_CONTENT,
@@ -746,8 +803,8 @@ class GamingOverlayService : Service(), Choreographer.FrameCallback {
             PixelFormat.TRANSLUCENT
         ).apply {
             gravity = Gravity.TOP or Gravity.START
-            x = (20 * density).toInt()
-            y = (60 * density).toInt()
+            x = savedHudX
+            y = savedHudY
 
             // Unlock screen's hardware high refresh rate (90Hz, 120Hz, 144Hz, 165Hz)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
@@ -762,7 +819,7 @@ class GamingOverlayService : Service(), Choreographer.FrameCallback {
         }
         windowParams = params
 
-        // Smooth Drag Handling
+        // Smooth Drag Handling (saves X/Y coordinates for Base64 Config Codes)
         hudContainer.setOnTouchListener(object : View.OnTouchListener {
             private var initialX = 0
             private var initialY = 0
@@ -788,6 +845,14 @@ class GamingOverlayService : Service(), Choreographer.FrameCallback {
                         } catch (_: Exception) {}
                         return true
                     }
+                    MotionEvent.ACTION_UP -> {
+                        com.example.util.ConfigCodeCodec.saveHudPosition(
+                            this@GamingOverlayService,
+                            curParams.x,
+                            curParams.y
+                        )
+                        return true
+                    }
                 }
                 return false
             }
@@ -804,14 +869,27 @@ class GamingOverlayService : Service(), Choreographer.FrameCallback {
     private var lastTimerText: String = ""
     private var lastTimerColor: Int = 0
     private var lastTimerVisible: Boolean? = null
+    private var lastNetSpeedText: String = ""
+    private var lastNetSpeedColor: Int = 0
     private var lastRamText: String = ""
     private var lastRamColor: Int = 0
     private var lastTempText: String = ""
     private var lastBatText: String = ""
     private var lastClockText: String = ""
 
+    private fun displayOverlaySquadToast(message: String) {
+        squadToastJob?.cancel()
+        squadToastJob = serviceScope.launch(Dispatchers.Main) {
+            squadToastTextView?.text = "⚡ $message"
+            squadToastTextView?.visibility = View.VISIBLE
+            delay(6500L)
+            squadToastTextView?.visibility = View.GONE
+        }
+    }
+
     private fun updateVisibility() {
         fpsTextView?.visibility = if (showFps) View.VISIBLE else View.GONE
+        netSpeedTextView?.visibility = if (showNetSpeed) View.VISIBLE else View.GONE
         ramTextView?.visibility = if (showRamPct) View.VISIBLE else View.GONE
         tempTextView?.visibility = if (showTemp) View.VISIBLE else View.GONE
         batteryTextView?.visibility = if (showBattery) View.VISIBLE else View.GONE
@@ -821,14 +899,14 @@ class GamingOverlayService : Service(), Choreographer.FrameCallback {
 
     /**
      * Auto-scales font size, item padding, and container padding based on phone screen width
-     * and the number of enabled HUD metrics so all 6 items stay strictly on 1 single row.
+     * and the number of enabled HUD metrics so all items stay strictly on 1 single row.
      * Uses signature dirty-checking so layout padding/textSize is not recalculated on every frame.
      */
     private fun applyResponsiveOverlayScale(force: Boolean = false) {
         val density = resources.displayMetrics.density
         val screenWidthDp = resources.configuration.screenWidthDp.coerceAtLeast(320)
         val isTimerVisible = boosterSessionManager?.isSessionActive() == true && showTimer
-        val activeCount = listOf(showFps, isTimerVisible, showRamPct, showTemp, showBattery, showClock).count { it }.coerceAtLeast(1)
+        val activeCount = listOf(showFps, isTimerVisible, showNetSpeed, showRamPct, showTemp, showBattery, showClock).count { it }.coerceAtLeast(1)
 
         val signature = (screenWidthDp shl 8) or (activeCount shl 2) or (if (autoScaleSmallScreens) 1 else 0)
         if (!force && signature == lastAppliedScaleSignature) return
@@ -840,20 +918,21 @@ class GamingOverlayService : Service(), Choreographer.FrameCallback {
             0.94f
         }
         val densityFactor = when {
-            activeCount >= 6 -> if (autoScaleSmallScreens) 0.78f else 0.85f
+            activeCount >= 7 -> if (autoScaleSmallScreens) 0.72f else 0.80f
+            activeCount == 6 -> if (autoScaleSmallScreens) 0.78f else 0.85f
             activeCount == 5 -> if (autoScaleSmallScreens) 0.84f else 0.90f
             activeCount == 4 -> 0.92f
             else -> 1.0f
         }
 
-        val resolvedTextSp = (11.8f * widthFactor * densityFactor).coerceIn(8.5f, 12.0f)
-        val itemGapPx = ((if (activeCount >= 5) 4.5f else 7.0f) * widthFactor * density).toInt().coerceAtLeast(3)
-        val padHPx = ((if (activeCount >= 5) 8.5f else 11.5f) * widthFactor * density).toInt().coerceAtLeast(6)
+        val resolvedTextSp = (11.8f * widthFactor * densityFactor).coerceIn(8.2f, 12.0f)
+        val itemGapPx = ((if (activeCount >= 5) 4.0f else 7.0f) * widthFactor * density).toInt().coerceAtLeast(3)
+        val padHPx = ((if (activeCount >= 5) 8.0f else 11.5f) * widthFactor * density).toInt().coerceAtLeast(6)
         val padVPx = ((if (activeCount >= 5) 4.5f else 6.0f) * widthFactor * density).toInt().coerceAtLeast(4)
 
         (overlayLayout as? LinearLayout)?.setPadding(padHPx, padVPx, padHPx, padVPx)
 
-        listOf(fpsTextView, timerTextView, ramTextView, tempTextView, batteryTextView, clockTextView).forEach { tv ->
+        listOf(fpsTextView, timerTextView, netSpeedTextView, ramTextView, tempTextView, batteryTextView, clockTextView).forEach { tv ->
             tv?.textSize = resolvedTextSp
             tv?.isSingleLine = true
             tv?.maxLines = 1
@@ -865,8 +944,8 @@ class GamingOverlayService : Service(), Choreographer.FrameCallback {
     @SuppressLint("SetTextI18n")
     private fun updateLabels() {
         val isTimerVisible = boosterSessionManager?.isSessionActive() == true && showTimer
-        val activeCount = listOf(showFps, isTimerVisible, showRamPct, showTemp, showBattery, showClock).count { it }
-        val isCompactHud = autoScaleSmallScreens && activeCount >= 5 && resources.configuration.screenWidthDp < 430
+        val activeCount = listOf(showFps, isTimerVisible, showNetSpeed, showRamPct, showTemp, showBattery, showClock).count { it }
+        val isCompactHud = autoScaleSmallScreens && activeCount >= 5 && resources.configuration.screenWidthDp < 440
 
         // 1. Compact 96% to 98% Accuracy 6-Way Multi-Sensor EFPS Readout
         val newFpsText = if (isCompactHud) "$currentFps FPS" else "$currentFps EFPS"
@@ -948,6 +1027,32 @@ class GamingOverlayService : Service(), Choreographer.FrameCallback {
             if (lastTimerVisible != false) {
                 lastTimerVisible = false
                 timerTextView?.visibility = View.GONE
+            }
+        }
+
+        // 2b. Local TrafficStats KB/s Throughput Monitor Readout
+        if (showNetSpeed) {
+            val newNetText = com.example.util.ConfigCodeCodec.formatTrafficRate(
+                rxBytesPerSec = currentRxBytesPerSec,
+                txBytesPerSec = currentTxBytesPerSec,
+                compact = isCompactHud
+            )
+            if (newNetText != lastNetSpeedText) {
+                lastNetSpeedText = newNetText
+                netSpeedTextView?.text = newNetText
+            }
+            val trafficHealth = com.example.util.ConfigCodeCodec.classifyTrafficHealth(
+                rxBytesPerSec = currentRxBytesPerSec,
+                txBytesPerSec = currentTxBytesPerSec
+            )
+            val netColor = when (trafficHealth) {
+                com.example.util.TrafficHealthState.CHOKING -> Color.parseColor("#F59E0B")
+                com.example.util.TrafficHealthState.HEAVY_SPIKE -> Color.parseColor("#EF4444")
+                com.example.util.TrafficHealthState.HEALTHY -> Color.parseColor("#38BDF8")
+            }
+            if (netColor != lastNetSpeedColor) {
+                lastNetSpeedColor = netColor
+                netSpeedTextView?.setTextColor(netColor)
             }
         }
 

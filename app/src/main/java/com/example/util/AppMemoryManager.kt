@@ -37,7 +37,7 @@ data class MemoryTrimResult(
  */
 object AppMemoryManager {
 
-    private val managerScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val managerScope = CoroutineScope(SupervisorJob() + Dispatchers.IO + AppCrashGuard.coroutineExceptionHandler)
 
     private val _lastTrimResult = MutableStateFlow<MemoryTrimResult?>(null)
     val lastTrimResult: StateFlow<MemoryTrimResult?> = _lastTrimResult.asStateFlow()
@@ -212,10 +212,20 @@ object AppMemoryManager {
         } catch (_: Exception) {}
     }
 
+    fun ensureWebViewCacheDirectories(context: Context) {
+        try {
+            val cache = context.cacheDir ?: return
+            File(cache, "WebView/Crashpad").mkdirs()
+            File(cache, "org.chromium.android_webview").mkdirs()
+        } catch (_: Exception) {}
+    }
+
     fun clearCacheDirectoriesBytes(context: Context): Long {
         var freedBytes = 0L
         try {
+            ensureWebViewCacheDirectories(context)
             freedBytes += deleteSafeCacheContents(context.cacheDir)
+            ensureWebViewCacheDirectories(context)
             context.codeCacheDir?.let { codeCache ->
                 freedBytes += deleteSafeCacheContents(codeCache)
             }
@@ -226,6 +236,14 @@ object AppMemoryManager {
         return freedBytes.coerceAtLeast(0L)
     }
 
+    private fun isProtectedSystemCacheDir(file: File): Boolean {
+        val name = file.name
+        return name.equals("WebView", ignoreCase = true) ||
+            name.equals("Crashpad", ignoreCase = true) ||
+            name.startsWith("org.chromium", ignoreCase = true) ||
+            name.contains("webview", ignoreCase = true)
+    }
+
     private fun deleteSafeCacheContents(dir: File?): Long {
         if (dir == null || !dir.exists() || !dir.isDirectory) return 0L
         var freed = 0L
@@ -233,6 +251,10 @@ object AppMemoryManager {
         for (child in children) {
             try {
                 if (child.isDirectory) {
+                    if (isProtectedSystemCacheDir(child)) {
+                        // Preserve Chromium WebView / Crashpad directory hierarchy so WebView never fails mkdir
+                        continue
+                    }
                     freed += deleteSafeCacheContents(child)
                     child.delete()
                 } else {

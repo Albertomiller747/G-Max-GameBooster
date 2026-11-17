@@ -37,6 +37,7 @@ data class ExternalPlayerProfileData(
     val rankTier: String,
     val currentLeaderboardPosition: Int = 0,
     val topFiveBadge: TopFiveSeasonBadge? = null,
+    val selectedTags: List<String> = emptyList(),
     val isVerifiedDeveloper: Boolean = false,
     val isCurrentUser: Boolean = false
 )
@@ -213,6 +214,9 @@ object SeasonLeaderboardEngine {
             rankTier = scoreInfo.rankTier,
             currentLeaderboardPosition = 0,
             topFiveBadge = null,
+            selectedTags = claim.selectedTags.ifEmpty {
+                if (claim.isVerifiedDeveloper) PremadeTagsCatalog.OFFICIAL_DEVELOPER_DEFAULT_TAGS else emptyList()
+            },
             isVerifiedDeveloper = claim.isVerifiedDeveloper,
             isCurrentUser = isCurrentUser
         )

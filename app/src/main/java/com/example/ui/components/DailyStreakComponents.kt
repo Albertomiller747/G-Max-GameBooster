@@ -68,7 +68,7 @@ import com.example.ui.theme.HubBlue
 import com.example.ui.theme.LaunchGreen
 import com.example.ui.theme.RecorderCoral
 import com.example.ui.theme.SolarGold
-import com.example.util.AdMobManager
+import com.example.util.UnityAdsManager
 import com.example.util.ConsoleHapticManager
 import com.example.util.DailyStreakManager
 import com.example.util.DailyStreakState
@@ -168,7 +168,7 @@ fun VipStreakUsernameBadge(
         ) {
             Icon(
                 imageVector = Icons.Default.Bolt,
-                contentDescription = "30-Day Streak VIP",
+                contentDescription = "30 Day Streak VIP",
                 tint = SolarGold,
                 modifier = Modifier.size(12.dp)
             )
@@ -247,7 +247,7 @@ fun ProfileDailyStreakCard(
                         Text(
                             text = if (streakState.isStreakBrokenRepairable) {
                                 tr(
-                                    "⚠️ ${streakState.lostStreakCount}-Day Streak Lost (12h Repair Active)",
+                                    "⚠️ ${streakState.lostStreakCount} Day Streak Lost (12h Repair Active)",
                                     "⚠️ Racha de ${streakState.lostStreakCount} días perdida (12h para reparar)"
                                 )
                             } else {
@@ -306,7 +306,7 @@ fun ProfileDailyStreakCard(
                             )
                         )
                         Text(
-                            text = tr("G-Tokens", "G-Tokens"),
+                            text = tr("G Tokens", "G Tokens"),
                             style = MaterialTheme.typography.labelSmall.copy(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 fontSize = 10.sp
@@ -454,8 +454,8 @@ fun DailyStreakHubModalDialog(
                                     tr("✅ Today's goal completed! Keep it up tomorrow.", "✅ ¡Meta de hoy completada! Sigue así mañana.")
                                 } else {
                                     tr(
-                                        "⏳ Launch a game with Boost or play with the live HUD before midnight!",
-                                        "⏳ ¡Inicia un juego con Boost o juega con el HUD activo antes de medianoche!"
+                                        "⏳ Launch a game with Focus Mode or play with the live HUD before midnight!",
+                                        "⏳ ¡Inicia un juego con Modo Enfoque o juega con el HUD activo antes de medianoche!"
                                     )
                                 },
                                 style = MaterialTheme.typography.labelSmall.copy(
@@ -508,7 +508,7 @@ fun DailyStreakHubModalDialog(
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(
                                     text = tr(
-                                        "🚨 ${streakState.lostStreakCount}-Day Streak Broken!",
+                                        "🚨 ${streakState.lostStreakCount} Day Streak Broken!",
                                         "🚨 ¡Racha de ${streakState.lostStreakCount} días rota!"
                                     ),
                                     style = MaterialTheme.typography.titleSmall.copy(
@@ -638,8 +638,8 @@ fun DailyStreakHubModalDialog(
                                     )
                                     Text(
                                         text = tr(
-                                            "Auto-activates at midnight if you miss a day (Max 2 held)",
-                                            "Se activa automáticamente a medianoche si olvidas jugar (Máx. 2)"
+                                            "Activates at midnight if you miss a day (Max 2 held)",
+                                            "Se activa a medianoche si olvidas jugar (Máx. 2)"
                                         ),
                                         style = MaterialTheme.typography.bodySmall.copy(
                                             color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -673,8 +673,8 @@ fun DailyStreakHubModalDialog(
                             ) {
                                 Text(
                                     text = tr(
-                                        "🪙 Balance: ${streakState.gTokensBalance} G-Tokens",
-                                        "🪙 Saldo: ${streakState.gTokensBalance} G-Tokens"
+                                        "🪙 Balance: ${streakState.gTokensBalance} G Tokens",
+                                        "🪙 Saldo: ${streakState.gTokensBalance} G Tokens"
                                     ),
                                     style = MaterialTheme.typography.labelMedium.copy(
                                         fontWeight = FontWeight.ExtraBold,
@@ -683,8 +683,8 @@ fun DailyStreakHubModalDialog(
                                 )
                                 Text(
                                     text = tr(
-                                        "+10 G-Tokens per 5m of active HUD play (${streakState.secondsUntilNextTokenBatch}s left)",
-                                        "+10 G-Tokens cada 5m con HUD activo (${streakState.secondsUntilNextTokenBatch}s restantes)"
+                                        "+10 G Tokens per 5m of active HUD play (${streakState.secondsUntilNextTokenBatch}s left)",
+                                        "+10 G Tokens cada 5m con HUD activo (${streakState.secondsUntilNextTokenBatch}s restantes)"
                                     ),
                                     style = MaterialTheme.typography.labelSmall.copy(
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -725,8 +725,8 @@ fun DailyStreakHubModalDialog(
                                     tr("Inventory Full (2/2 Streak Freezes Equipped)", "Inventario Lleno (2/2 Congeladores Equipados)")
                                 } else {
                                     tr(
-                                        "Buy 1 Streak Freeze • 100 G-Tokens",
-                                        "Comprar 1 Congelador de Racha • 100 G-Tokens"
+                                        "Buy 1 Streak Freeze • 100 G Tokens",
+                                        "Comprar 1 Congelador de Racha • 100 G Tokens"
                                     )
                                 },
                                 style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.ExtraBold)
@@ -775,13 +775,13 @@ fun DailyStreakHubModalDialog(
                             ) {
                                 Icon(
                                     imageVector = if (streakState.isHudNeonUnlocked) Icons.Default.CheckCircle else Icons.Default.Lock,
-                                    contentDescription = "7-Day Milestone",
+                                    contentDescription = "7 Day Milestone",
                                     tint = if (streakState.isHudNeonUnlocked) LaunchGreen else MaterialTheme.colorScheme.onSurfaceVariant,
                                     modifier = Modifier.size(18.dp)
                                 )
                                 Column {
                                     Text(
-                                        text = tr("7-Day Streak: Custom Neon HUD Color", "Racha de 7 Días: Color Neón para el HUD"),
+                                        text = tr("7 Day Streak: Custom Neon HUD Color", "Racha de 7 Días: Color Neón para el HUD"),
                                         style = MaterialTheme.typography.titleSmall.copy(
                                             fontWeight = FontWeight.ExtraBold,
                                             color = MaterialTheme.colorScheme.onSurface
@@ -878,13 +878,13 @@ fun DailyStreakHubModalDialog(
                         ) {
                             Icon(
                                 imageVector = if (streakState.isVipBadgeUnlocked) Icons.Default.Stars else Icons.Default.Lock,
-                                contentDescription = "30-Day VIP Badge",
+                                contentDescription = "30 Day VIP Badge",
                                 tint = if (streakState.isVipBadgeUnlocked) SolarGold else MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.size(20.dp)
                             )
                             Column {
                                 Text(
-                                    text = tr("30-Day Streak: VIP Username Badge", "Racha de 30 Días: Insignia VIP junto al Usuario"),
+                                    text = tr("30 Day Streak: VIP Username Badge", "Racha de 30 Días: Insignia VIP junto al Usuario"),
                                     style = MaterialTheme.typography.titleSmall.copy(
                                         fontWeight = FontWeight.ExtraBold,
                                         color = MaterialTheme.colorScheme.onSurface
@@ -927,7 +927,7 @@ fun DailyStreakHubModalDialog(
 }
 
 /**
- * "Streak Lost!" 12-Hour Grace Period Screen with Google AdMob Rewarded Video Ad Repair.
+ * "Streak Lost!" 12-Hour Grace Period Screen with Unity Rewarded Video Ad Repair.
  */
 @Composable
 fun StreakLostRepairModalDialog(
@@ -995,7 +995,7 @@ fun StreakLostRepairModalDialog(
 
                 Text(
                     text = tr(
-                        "You missed a day with 0 Streak Freezes left! Your $lostDays-day streak (and any 7-Day Neon HUD or 30-Day VIP perks) has been locked.",
+                        "You missed a day with 0 Streak Freezes left! Your $lostDays day streak (and any 7 Day Neon HUD or 30 Day VIP perks) has been locked.",
                         "¡Perdiste un día sin Congeladores de Racha! Tu racha de $lostDays días (y tus ventajas de 7 y 30 días) se ha bloqueado."
                     ),
                     style = MaterialTheme.typography.bodyMedium.copy(
@@ -1004,7 +1004,7 @@ fun StreakLostRepairModalDialog(
                     )
                 )
 
-                // Live 12-Hour Grace Period Countdown Box
+                // Live 12 Hour Grace Period Countdown Box
                 Surface(
                     shape = RoundedCornerShape(14.dp),
                     color = RecorderCoral.copy(alpha = 0.12f),
@@ -1017,7 +1017,7 @@ fun StreakLostRepairModalDialog(
                         verticalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
                         Text(
-                            text = tr("12-HOUR REPAIR GRACE PERIOD", "PERIODO DE GRACIA DE 12 HORAS"),
+                            text = tr("12 HOUR REPAIR GRACE PERIOD", "PERIODO DE GRACIA DE 12 HORAS"),
                             style = MaterialTheme.typography.labelSmall.copy(
                                 fontWeight = FontWeight.ExtraBold,
                                 color = RecorderCoral
@@ -1033,11 +1033,11 @@ fun StreakLostRepairModalDialog(
                     }
                 }
 
-                // Primary Monetization CTA: Watch Google AdMob Rewarded Video Ad
+                // Primary Monetization CTA: Watch Unity Rewarded Video Ad
                 Button(
                     onClick = {
                         ConsoleHapticManager.playLaunchPulse(context)
-                        AdMobManager.showRewardedAdForStreakRepair(
+                        UnityAdsManager.showRewardedAdForStreakRepair(
                             context = context,
                             lostStreakDays = lostDays,
                             onRepaired = onRepairViaRewardedAd
@@ -1061,7 +1061,7 @@ fun StreakLostRepairModalDialog(
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
                         text = tr(
-                            "Watch Video Ad to Repair $lostDays-Day Streak",
+                            "Watch Video Ad to Repair $lostDays Day Streak",
                             "Ver Anuncio para Reparar Racha de $lostDays Días"
                         ),
                         style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.ExtraBold),

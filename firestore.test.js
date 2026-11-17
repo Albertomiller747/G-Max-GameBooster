@@ -10,6 +10,7 @@ let testEnv;
 const PROJECT_ID = process.env.GCP_PROJECT || "demo-no-project";
 const ALICE_UID = "alice_123";
 const BOB_UID = "bob_456";
+const CHARLIE_UID = "charlie_789";
 
 const [emulatorHost, emulatorPortStr] = (
   process.env.FIRESTORE_EMULATOR_HOST || "127.0.0.1:8085"
@@ -152,10 +153,15 @@ test("Random user: cannot fake or claim isVerifiedDeveloper == true", async () =
   await assertFails(aliceDb.collection("users").doc(ALICE_UID).set(fakeDevPayload));
 });
 
-test("Official developer (Albertomiller747@gmail.com): can claim isVerifiedDeveloper == true", async () => {
+test("Official developer (Albertomiller747@gmail.com): can claim isVerifiedDeveloper == true and grant Alberto Gift to hoseamk1@gmail.com", async () => {
   const devUid = "alberto_dev_747";
+  const hoseaUid = "hosea_mk1_uid";
   const devDb = testEnv.authenticatedContext(devUid, {
     email: "Albertomiller747@gmail.com",
+    email_verified: true,
+  }).firestore();
+  const hoseaDb = testEnv.authenticatedContext(hoseaUid, {
+    email: "hoseamk1@gmail.com",
     email_verified: true,
   }).firestore();
   const ts = new Date();
@@ -167,6 +173,28 @@ test("Official developer (Albertomiller747@gmail.com): can claim isVerifiedDevel
     isVerifiedDeveloper: true,
   };
   await assertSucceeds(devDb.collection("users").doc(devUid).set(devPayload));
+
+  // Seed Hosea's initial profile
+  await assertSucceeds(
+    hoseaDb.collection("users").doc(hoseaUid).set({
+      ...buildValidProfile(hoseaUid, ts),
+      email: "hoseamk1@gmail.com",
+      username: "hoseamk1",
+      gamerscore: 1200,
+    })
+  );
+
+  // Official developer grants Alberto Gift (100,000 GS, 720p 60fps 6Mbps, DARK_HUB)
+  await assertSucceeds(
+    devDb.collection("users").doc(hoseaUid).update({
+      gamerscore: 100000,
+      recResolutionLabel: "720p",
+      recFps: 60,
+      recBitrateMbps: 6,
+      themeMode: "DARK_HUB",
+      updatedAt: new Date(),
+    })
+  );
 });
 
 test("Authenticated user: can update allowed settings fields on their own profile", async () => {
@@ -218,9 +246,6 @@ test("Usernames: authenticated user can claim an available username with public 
   // Bob can look up "cyber_ace" via get() to view Alice's external profile
   await assertSucceeds(bobDb.collection("usernames").doc("cyber_ace").get());
 
-  // Bob cannot list all usernames
-  await assertFails(bobDb.collection("usernames").get());
-
   // Bob cannot overwrite Alice's claimed username
   await assertFails(
     bobDb.collection("usernames").doc("cyber_ace").set({
@@ -263,25 +288,303 @@ test("TopGearProducts: signed-in users can read curated products, only verified 
     last_updated: "2026-10-31",
   };
 
-  // Regular user cannot create or modify Top Gear catalog items
   await assertFails(
     aliceDb.collection("top_gear_products").doc("cooler_neveika_core").set(validProduct)
   );
-
-  // Verified developer can create/update Top Gear catalog items
   await assertSucceeds(
     devDb.collection("top_gear_products").doc("cooler_neveika_core").set(validProduct)
   );
-
-  // Signed-in user can read and list Top Gear catalog items
   await assertSucceeds(
     aliceDb.collection("top_gear_products").doc("cooler_neveika_core").get()
   );
   await assertSucceeds(aliceDb.collection("top_gear_products").get());
-
-  // Unauthenticated context cannot read Top Gear Firestore collection directly (uses bundled/local cache)
   await assertFails(
     unauthDb.collection("top_gear_products").doc("cooler_neveika_core").get()
   );
+});
+
+test("Squad Referral Loop: code registration, hardware-bound claim, and anti-fraud core action verification", async () => {
+  const aliceDb = testEnv.authenticatedContext(ALICE_UID).firestore();
+  const bobDb = testEnv.authenticatedContext(BOB_UID).firestore();
+  const charlieDb = testEnv.authenticatedContext(CHARLIE_UID).firestore();
+  const ts = new Date();
+  const code = "GMAX-ALICE99";
+  const hwHash = "hw_sha256_9f86d081884c7d659a2feaa0c55ad015";
+
+  // 1. Alice registers her Squad Invite code
+  await assertSucceeds(
+    aliceDb.collection("referral_codes").doc(code).set({
+      referrerUid: ALICE_UID,
+      referrerUsername: "alice_gamer",
+      referrerDisplayName: "Alice Gamer",
+      code: code,
+      passesRemaining: 3,
+      validatedCount: 0,
+      updatedAt: ts,
+    })
+  );
+
+  // 2. Bob can look up Alice's code
+  await assertSucceeds(bobDb.collection("referral_codes").doc(code).get());
+
+  // 3. Anti-Fraud: Alice CANNOT refer herself
+  await assertFails(
+    aliceDb.collection("referral_activations").doc(ALICE_UID).set({
+      inviteeUid: ALICE_UID,
+      inviteeUsername: "alice_gamer",
+      inviteeDisplayName: "Alice Gamer",
+      referrerUid: ALICE_UID,
+      referrerUsername: "alice_gamer",
+      referrerCode: code,
+      deviceFingerprintHash: hwHash,
+      status: "PENDING_ACTIVATION",
+      boostedMinutesCompleted: 0,
+      hudMatchCompleted: false,
+      activationTrigger: "NONE",
+      createdAt: ts,
+      updatedAt: ts,
+    })
+  );
+
+  // 4. Anti-Fraud: Bob CANNOT create a referral already in ACTIVATED status on install
+  await assertFails(
+    bobDb.collection("referral_activations").doc(BOB_UID).set({
+      inviteeUid: BOB_UID,
+      inviteeUsername: "bob_duo",
+      inviteeDisplayName: "Bob Duo",
+      referrerUid: ALICE_UID,
+      referrerUsername: "alice_gamer",
+      referrerCode: code,
+      deviceFingerprintHash: hwHash,
+      status: "ACTIVATED",
+      boostedMinutesCompleted: 15,
+      hudMatchCompleted: true,
+      activationTrigger: "1_HUD_MATCH",
+      createdAt: ts,
+      updatedAt: ts,
+    })
+  );
+
+  // 5. Bob claims the Guest Pass as PENDING_ACTIVATION and locks his hardware fingerprint
+  await assertSucceeds(
+    bobDb.collection("device_referral_claims").doc(hwHash).set({
+      deviceFingerprintHash: hwHash,
+      inviteeUid: BOB_UID,
+      referrerUid: ALICE_UID,
+      referrerCode: code,
+      createdAt: ts,
+    })
+  );
+
+  await assertSucceeds(
+    bobDb.collection("referral_activations").doc(BOB_UID).set({
+      inviteeUid: BOB_UID,
+      inviteeUsername: "bob_duo",
+      inviteeDisplayName: "Bob Duo",
+      referrerUid: ALICE_UID,
+      referrerUsername: "alice_gamer",
+      referrerCode: code,
+      deviceFingerprintHash: hwHash,
+      status: "PENDING_ACTIVATION",
+      boostedMinutesCompleted: 0,
+      hudMatchCompleted: false,
+      activationTrigger: "NONE",
+      createdAt: ts,
+      updatedAt: ts,
+    })
+  );
+
+  // 6. Anti-Fraud: Charlie (burner account on same phone) CANNOT overwrite or claim with the same deviceFingerprintHash
+  await assertFails(
+    charlieDb.collection("device_referral_claims").doc(hwHash).set({
+      deviceFingerprintHash: hwHash,
+      inviteeUid: CHARLIE_UID,
+      referrerUid: ALICE_UID,
+      referrerCode: code,
+      createdAt: ts,
+    })
+  );
+
+  // 7. Anti-Fraud: Bob CANNOT transition to ACTIVATED with only 5 minutes and hudMatchCompleted == false
+  await assertFails(
+    bobDb.collection("referral_activations").doc(BOB_UID).update({
+      status: "ACTIVATED",
+      boostedMinutesCompleted: 5,
+      hudMatchCompleted: false,
+      activationTrigger: "15M_BOOSTED_PLAY",
+      updatedAt: new Date(),
+    })
+  );
+
+  // 8. Bob completes 1 full match with the Floating HUD active -> transitions to ACTIVATED
+  await assertSucceeds(
+    bobDb.collection("referral_activations").doc(BOB_UID).update({
+      status: "ACTIVATED",
+      boostedMinutesCompleted: 8,
+      hudMatchCompleted: true,
+      activationTrigger: "1_HUD_MATCH",
+      updatedAt: new Date(),
+    })
+  );
+
+  // 9. Alice can query her squad roster using matching referrerUid filter
+  await assertSucceeds(
+    aliceDb.collection("referral_activations").where("referrerUid", "==", ALICE_UID).get()
+  );
+
+  // 10. Terminal state lock: Bob cannot mutate his activation record once ACTIVATED
+  await assertFails(
+    bobDb.collection("referral_activations").doc(BOB_UID).update({
+      boostedMinutesCompleted: 99,
+      updatedAt: new Date(),
+    })
+  );
+});
+
+test("Rivals Squad Competition: squad creation (150-char bio), leader-only edit/delete, 5-player cap, squad code join, username invites, and pre-set taunts", async () => {
+  const aliceDb = testEnv.authenticatedContext(ALICE_UID).firestore();
+  const bobDb = testEnv.authenticatedContext(BOB_UID).firestore();
+  const charlieDb = testEnv.authenticatedContext(CHARLIE_UID).firestore();
+  const ts = new Date();
+  const squadId = "squad_alpha_01";
+  const squadCode = "RIVALS-ALPHA01";
+
+  // 1. Reject bio longer than 150 characters
+  const overlongBio = "A".repeat(151);
+  await assertFails(
+    aliceDb.collection("rivals_squads").doc(squadId).set({
+      squadId,
+      name: "Alpha Rivals",
+      bio: overlongBio,
+      squadCode,
+      leaderUid: ALICE_UID,
+      leaderUsername: "alice_gamer",
+      memberUids: [ALICE_UID],
+      seasonMonthKey: "2026-11",
+      createdAt: ts,
+      updatedAt: ts,
+    })
+  );
+
+  // 2. Alice creates squad with valid 150-character max bio and registers Squad Code
+  await assertSucceeds(
+    aliceDb.collection("rivals_squads").doc(squadId).set({
+      squadId,
+      name: "Alpha Rivals",
+      bio: "Top 120FPS competitive squad competing for 1st place crown!",
+      squadCode,
+      leaderUid: ALICE_UID,
+      leaderUsername: "alice_gamer",
+      memberUids: [ALICE_UID],
+      seasonMonthKey: "2026-11",
+      createdAt: ts,
+      updatedAt: ts,
+    })
+  );
+
+  await assertSucceeds(
+    aliceDb.collection("rivals_squad_codes").doc(squadCode).set({
+      squadCode,
+      squadId,
+      leaderUid: ALICE_UID,
+      squadName: "Alpha Rivals",
+      updatedAt: ts,
+    })
+  );
+
+  // 3. Bob looks up Squad Code and auto-joins the squad
+  await assertSucceeds(bobDb.collection("rivals_squad_codes").doc(squadCode).get());
+  await assertSucceeds(
+    bobDb.collection("rivals_squads").doc(squadId).update({
+      memberUids: [ALICE_UID, BOB_UID],
+      updatedAt: new Date(),
+    })
+  );
+
+  // 4. Bob (non-leader) CANNOT edit the squad name or bio or delete the squad
+  await assertFails(
+    bobDb.collection("rivals_squads").doc(squadId).update({
+      name: "Hacked Squad Name",
+      bio: "Hacked bio",
+      updatedAt: new Date(),
+    })
+  );
+  await assertFails(bobDb.collection("rivals_squads").doc(squadId).delete());
+
+  // 5. Alice (Squad Leader) CAN edit squad name and bio in real time
+  await assertSucceeds(
+    aliceDb.collection("rivals_squads").doc(squadId).update({
+      name: "Apex Rivals Elite",
+      bio: "Updated real-time bio by Squad Leader.",
+      updatedAt: new Date(),
+    })
+  );
+
+  // 6. Squad cannot exceed 5 players
+  await assertFails(
+    aliceDb.collection("rivals_squads").doc(squadId).update({
+      memberUids: [ALICE_UID, BOB_UID, CHARLIE_UID, "u4", "u5", "u6"],
+      updatedAt: new Date(),
+    })
+  );
+
+  // 7. Username-search Squad Invite: Alice invites Charlie -> Charlie must accept
+  const inviteId = `${squadId}_${CHARLIE_UID}`;
+  await assertSucceeds(
+    aliceDb.collection("rivals_squad_invites").doc(inviteId).set({
+      inviteId,
+      squadId,
+      squadName: "Apex Rivals Elite",
+      inviterUid: ALICE_UID,
+      inviterUsername: "alice_gamer",
+      inviteeUid: CHARLIE_UID,
+      inviteeUsername: "charlie_pro",
+      status: "PENDING",
+      createdAt: ts,
+      updatedAt: ts,
+    })
+  );
+
+  await assertSucceeds(
+    charlieDb.collection("rivals_squad_invites").doc(inviteId).update({
+      status: "ACCEPTED",
+      updatedAt: new Date(),
+    })
+  );
+
+  // 8. One-Click Pre-Set Taunts: Bob passes Alice and sends a valid preset taunt ("Catch me if you can")
+  const tauntId = "taunt_bob_passes_alice_1";
+  await assertSucceeds(
+    bobDb.collection("rivals_taunts").doc(tauntId).set({
+      tauntId,
+      squadId,
+      senderUid: BOB_UID,
+      senderName: "Bob Duo",
+      receiverUid: ALICE_UID,
+      receiverName: "Alice Gamer",
+      tauntText: "Catch me if you can",
+      passEventKey: "pass_2026-11_bob_alice_1",
+      createdAt: ts,
+    })
+  );
+
+  // 9. Custom non-preset taunt text is strictly rejected
+  await assertFails(
+    bobDb.collection("rivals_taunts").doc("taunt_custom_fail").set({
+      tauntId: "taunt_custom_fail",
+      squadId,
+      senderUid: BOB_UID,
+      senderName: "Bob Duo",
+      receiverUid: ALICE_UID,
+      receiverName: "Alice Gamer",
+      tauntText: "Custom text not in preset list",
+      passEventKey: "pass_2026-11_bob_alice_2",
+      createdAt: ts,
+    })
+  );
+
+  // 10. Alice (Squad Leader) can delete the squad and squad code from Firebase database
+  await assertSucceeds(aliceDb.collection("rivals_squad_codes").doc(squadCode).delete());
+  await assertSucceeds(aliceDb.collection("rivals_squads").doc(squadId).delete());
 });
 

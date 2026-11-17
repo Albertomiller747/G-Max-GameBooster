@@ -311,13 +311,14 @@ fun ControllerScreenOverlayCard(
     val context = LocalContext.current
     val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
     var canDrawOverlays by remember { mutableStateOf(SystemSettingsHelper.canDrawOverlays(context)) }
-    val unlockUntilMs by com.example.util.AdMobManager.proControllerUnlockUntilMs.collectAsState()
+    val unlockUntilMs by com.example.util.UnityAdsManager.proControllerUnlockUntilMs.collectAsState()
     val isProUnlocked = unlockUntilMs > System.currentTimeMillis()
-    val remainingUnlockHours = com.example.util.AdMobManager.remainingUnlockHours()
-    var isWiredConnected by remember(controllerState) {
+    val remainingUnlockHours = com.example.util.UnityAdsManager.remainingUnlockHours()
+    var isControllerConnected by remember(controllerState) {
         mutableStateOf(
-            controllerState.isWiredConnection ||
-                com.example.util.ControllerHealthManager.isWiredControllerConnected(context)
+            controllerState.controllerId >= 0 ||
+                controllerState.isWiredConnection ||
+                com.example.util.ControllerHealthManager.isAnyControllerConnected(context)
         )
     }
     var showWiredWarningPopup by remember { mutableStateOf(false) }
@@ -335,9 +336,10 @@ fun ControllerScreenOverlayCard(
         val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
             if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
                 canDrawOverlays = SystemSettingsHelper.canDrawOverlays(context)
-                isWiredConnected =
-                    controllerState.isWiredConnection ||
-                        com.example.util.ControllerHealthManager.isWiredControllerConnected(context)
+                isControllerConnected =
+                    controllerState.controllerId >= 0 ||
+                        controllerState.isWiredConnection ||
+                        com.example.util.ControllerHealthManager.isAnyControllerConnected(context)
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -346,7 +348,7 @@ fun ControllerScreenOverlayCard(
 
     if (showWiredWarningPopup) {
         WiredControllerRequiredDialog(
-            isBluetoothControllerConnected = controllerState.controllerId >= 0 && !isWiredConnected,
+            isBluetoothControllerConnected = controllerState.controllerId >= 0 && !controllerState.isWiredConnection,
             controllerName = controllerState.activeControllerName,
             onDismiss = { showWiredWarningPopup = false }
         )
@@ -406,30 +408,35 @@ fun ControllerScreenOverlayCard(
         ) {
             Column(modifier = Modifier.weight(1f)) {
                 SectionTitle(
-                    title = com.example.util.tr("Controller Input Screen Overlay (Wired Only)", "Superposición de Mando en Pantalla (Solo por Cable)"),
+                    title = com.example.util.tr("Controller Input Screen Overlay (Bluetooth & USB)", "Superposición de Mando en Pantalla (Bluetooth y USB)"),
                     subtitle = com.example.util.tr(
-                        "Displays a live mini controller on screen when your controller is connected directly via wired USB",
-                        "Muestra un mini mando en vivo en pantalla cuando tu mando está conectado directamente por cable USB"
+                        "Displays a live mini controller on screen when your controller is connected via Bluetooth or wired USB",
+                        "Muestra un mini mando en vivo en pantalla cuando tu mando está conectado por Bluetooth o cable USB"
                     ),
-                    badge = if (config.isEnabled && isWiredConnected) {
-                        com.example.util.tr("WIRED HUD ON", "HUD USB ACTIVO")
+                    badge = if (config.isEnabled && isControllerConnected) {
+                        if (controllerState.isWiredConnection) {
+                            com.example.util.tr("WIRED HUD ON", "HUD USB ACTIVO")
+                        } else {
+                            com.example.util.tr("BLUETOOTH HUD ON", "HUD BT ACTIVO")
+                        }
                     } else if (isProUnlocked) {
                         com.example.util.tr("UNLOCKED (${remainingUnlockHours}H)", "DESBLOQUEADO (${remainingUnlockHours}H)")
                     } else {
-                        com.example.util.tr("WIRED USB ONLY", "SOLO CABLE USB")
+                        com.example.util.tr("BT & USB READY", "BT Y USB LISTO")
                     },
-                    badgeColor = if (config.isEnabled && isWiredConnected || isProUnlocked) LaunchGreen else HubBlue
+                    badgeColor = if (config.isEnabled && isControllerConnected || isProUnlocked) LaunchGreen else HubBlue
                 )
             }
             Spacer(modifier = Modifier.width(8.dp))
             Switch(
-                checked = config.isEnabled && isWiredConnected,
+                checked = config.isEnabled && isControllerConnected,
                 onCheckedChange = { enable ->
                     ConsoleHapticManager.playSelectClick(context)
-                    val currentlyWired = controllerState.isWiredConnection ||
-                        com.example.util.ControllerHealthManager.isWiredControllerConnected(context)
-                    isWiredConnected = currentlyWired
-                    if (enable && !currentlyWired) {
+                    val currentlyConnected = controllerState.controllerId >= 0 ||
+                        controllerState.isWiredConnection ||
+                        com.example.util.ControllerHealthManager.isAnyControllerConnected(context)
+                    isControllerConnected = currentlyConnected
+                    if (enable && !currentlyConnected) {
                         showWiredWarningPopup = true
                         onToggleEnabled(false)
                         return@Switch
@@ -449,23 +456,23 @@ fun ControllerScreenOverlayCard(
 
         Spacer(modifier = Modifier.height(10.dp))
 
-        // Wired vs. Bluetooth Connection Requirement Banner
+        // Bluetooth & Wired USB Connection Status Banner
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(10.dp))
                 .background(
-                    if (isWiredConnected) LaunchGreen.copy(alpha = 0.14f)
+                    if (isControllerConnected) LaunchGreen.copy(alpha = 0.14f)
                     else Color(0xFFF59E0B).copy(alpha = 0.14f)
                 )
                 .border(
                     1.dp,
-                    if (isWiredConnected) LaunchGreen.copy(alpha = 0.55f)
+                    if (isControllerConnected) LaunchGreen.copy(alpha = 0.55f)
                     else Color(0xFFF59E0B).copy(alpha = 0.6f),
                     RoundedCornerShape(10.dp)
                 )
                 .clickable {
-                    if (!isWiredConnected) {
+                    if (!isControllerConnected) {
                         showWiredWarningPopup = true
                     }
                 }
@@ -474,50 +481,90 @@ fun ControllerScreenOverlayCard(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Icon(
-                imageVector = if (isWiredConnected) Icons.Default.Usb else Icons.Default.Warning,
+                imageVector = when {
+                    controllerState.isWiredConnection -> Icons.Default.Usb
+                    isControllerConnected -> Icons.Default.SportsEsports
+                    else -> Icons.Default.Warning
+                },
                 contentDescription = null,
-                tint = if (isWiredConnected) LaunchGreen else Color(0xFFFBBF24),
+                tint = if (isControllerConnected) LaunchGreen else Color(0xFFFBBF24),
                 modifier = Modifier.size(18.dp)
             )
             Spacer(modifier = Modifier.width(10.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = if (isWiredConnected) {
+                    text = if (controllerState.isWiredConnection) {
                         com.example.util.tr(
                             "Wired USB Controller Connected (${controllerState.activeControllerName})",
                             "Mando por Cable USB Conectado (${controllerState.activeControllerName})"
                         )
-                    } else if (controllerState.controllerId >= 0) {
+                    } else if (isControllerConnected) {
                         com.example.util.tr(
-                            "Wireless / Bluetooth Detected (${controllerState.activeControllerName}) — Wired USB Required",
-                            "Mando Bluetooth Detectado (${controllerState.activeControllerName}) — Se Requiere Cable USB"
+                            "Bluetooth / Wireless Controller Connected (${controllerState.activeControllerName})",
+                            "Mando Bluetooth / Inalámbrico Conectado (${controllerState.activeControllerName})"
                         )
                     } else {
                         com.example.util.tr(
-                            "Direct Wired USB Connection Required for In-Game Overlay",
-                            "Se Requiere Conexión Directa por Cable USB para la Superposición"
+                            "Connect a Bluetooth or Wired USB Controller for Live Overlay",
+                            "Conecta un Mando Bluetooth o por Cable USB para la Superposición"
                         )
                     },
-                    color = if (isWiredConnected) LaunchGreen else Color(0xFFFBBF24),
+                    color = if (isControllerConnected) LaunchGreen else Color(0xFFFBBF24),
                     fontSize = 11.5.sp,
                     fontWeight = FontWeight.ExtraBold
                 )
                 Text(
-                    text = if (isWiredConnected) {
+                    text = if (controllerState.isWiredConnection) {
                         com.example.util.tr(
                             "Direct wired USB connection active • Full real-time overlay supported.",
                             "Conexión directa por cable USB activa • Superposición en tiempo real disponible."
                         )
+                    } else if (isControllerConnected) {
+                        com.example.util.tr(
+                            "Bluetooth wireless mode active • Full real-time overlay & diagnostics enabled.",
+                            "Modo inalámbrico Bluetooth activo • Superposición y diagnósticos en tiempo real activados."
+                        )
                     } else {
                         com.example.util.tr(
-                            "This feature may not work well when not connected through wired USB. Plug your controller directly into the device to enable.",
-                            "Esta función puede no funcionar bien sin conexión por cable. Conecta tu mando directamente por cable USB para activarla."
+                            "Pair a controller via Bluetooth or plug in via USB-C / OTG to enable the live screen overlay.",
+                            "Vincula un mando por Bluetooth o conéctalo por USB-C / OTG para activar la superposición en vivo."
                         )
                     },
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     fontSize = 10.5.sp
                 )
             }
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        // Controller Input Accuracy Note
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(8.dp))
+                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f))
+                .border(1.dp, HubBlue.copy(alpha = 0.35f), RoundedCornerShape(8.dp))
+                .padding(horizontal = 10.dp, vertical = 7.dp)
+                .testTag("controller_input_accuracy_note"),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                imageVector = Icons.Default.Warning,
+                contentDescription = null,
+                tint = Color(0xFFF59E0B),
+                modifier = Modifier.size(15.dp)
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+                text = com.example.util.tr(
+                    "Note: Some Controllers input might not be as Accurate as others",
+                    "Nota: Algunos mandos pueden no tener una entrada tan precisa como otros"
+                ),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.SemiBold
+            )
         }
 
         if (!canDrawOverlays) {
@@ -601,11 +648,11 @@ fun ControllerScreenOverlayCard(
 
         Spacer(modifier = Modifier.height(10.dp))
 
-        // Out-of-App D-Pad & Joystick Tracking Mode Selector
+        // External D-Pad & Joystick Tracking Mode Selector
         Text(
             text = com.example.util.tr(
-                "Out-of-App D-Pad & Joystick Tracking Mode",
-                "Modo de Seguimiento de D-Pad y Joysticks Fuera de la App"
+                "External DPad & Joystick Tracking Mode",
+                "Modo de Seguimiento de DPad y Joysticks Externo"
             ),
             style = MaterialTheme.typography.labelMedium.copy(
                 fontWeight = FontWeight.Bold,
@@ -620,13 +667,13 @@ fun ControllerScreenOverlayCard(
             val trackingOptions = listOf(
                 Triple(
                     com.example.model.StickTrackingMode.SMART_HYBRID,
-                    com.example.util.tr("Smart Pass-Through", "Paso Inteligente"),
-                    com.example.util.tr("Home Screen 120Hz + Game Pass-Through", "Inicio 120Hz + Juego Directo")
+                    com.example.util.tr("Smart Pass Through", "Paso Inteligente"),
+                    com.example.util.tr("Home Screen 120Hz + Game Direct", "Inicio 120Hz + Juego Directo")
                 ),
                 Triple(
                     com.example.model.StickTrackingMode.FULL_120HZ_LOCK,
                     com.example.util.tr("Full 120Hz Stick Lock", "Bloqueo Total 120Hz"),
-                    com.example.util.tr("Max D-Pad & Stick Overlay Everywhere", "D-Pad y Joysticks 120Hz Siempre")
+                    com.example.util.tr("Max DPad & Stick Overlay Everywhere", "DPad y Joysticks 120Hz Siempre")
                 )
             )
             trackingOptions.forEach { (mode, title, subtitle) ->
@@ -701,7 +748,7 @@ fun ControllerScreenOverlayCard(
                     .padding(horizontal = 8.dp, vertical = 3.dp)
             ) {
                 Text(
-                    text = "${glyphs.brandTitle} • ${(config.scaleFactor * 100).roundToInt()}% ${if (config.autoScale) com.example.util.tr("(Auto-Scale)", "(Auto-Escala)") else com.example.util.tr("(Manual)", "(Manual)")}",
+                    text = "${glyphs.brandTitle} • ${(config.scaleFactor * 100).roundToInt()}% ${if (config.autoScale) com.example.util.tr("(Smart Scale)", "(Escala Automática)") else com.example.util.tr("(Manual)", "(Manual)")}",
                     color = Color.White,
                     fontSize = 10.sp,
                     fontWeight = FontWeight.Bold
@@ -832,8 +879,8 @@ fun ControllerScreenOverlayCard(
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = com.example.util.tr(
-                        "Auto-Scaling (Screen & Orientation Aware)",
-                        "Auto-Escala (Adaptada a Pantalla y Orientación)"
+                        "Smart Scaling (Screen & Orientation Aware)",
+                        "Escala Inteligente (Adaptada a Pantalla y Orientación)"
                     ),
                     style = MaterialTheme.typography.bodyMedium.copy(
                         fontWeight = FontWeight.Bold,
@@ -1077,7 +1124,7 @@ fun ControllerScreenOverlayCard(
                     Text(
                         text = if (config.lockTouchPassThrough) {
                             com.example.util.tr(
-                                "Position Locked (100% Game Touch Pass-Through)",
+                                "Position Locked (100% Game Touch Pass Through)",
                                 "Posición Bloqueada (100% Paso Táctil al Juego)"
                             )
                         } else {
@@ -1220,8 +1267,8 @@ fun WiredControllerRequiredDialog(
         title = {
             Text(
                 text = com.example.util.tr(
-                    "Wired Controller Connection Required",
-                    "Se Requiere Conexión de Mando por Cable"
+                    "Connect a Bluetooth or Wired USB Controller",
+                    "Conecta un Mando Bluetooth o por Cable USB"
                 ),
                 color = Color.White,
                 fontSize = 17.sp,
@@ -1233,8 +1280,8 @@ fun WiredControllerRequiredDialog(
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text(
                     text = com.example.util.tr(
-                        "The Controller Input Screen Overlay may not work well when not connected through a wired USB cable while playing games. To ensure reliable, zero-lag real-time input tracking in games, this feature only works when your controller is wired directly to your device.",
-                        "La Superposición de Mando en Pantalla puede no funcionar bien cuando no está conectada mediante un cable USB mientras juegas. Para garantizar un seguimiento en tiempo real fiable y sin retraso en los juegos, esta función solo está disponible cuando el mando está conectado directamente por cable al dispositivo."
+                        "To activate the floating Controller Input Screen Overlay, please pair a wireless controller via Bluetooth or connect your gamepad using a USB-C / OTG cable.",
+                        "Para activar la Superposición de Mando en Pantalla, vincula un mando inalámbrico por Bluetooth o conecta tu mando mediante un cable USB-C / OTG."
                     ),
                     color = Color(0xFFE2E8F0),
                     fontSize = 13.sp,
@@ -1258,8 +1305,8 @@ fun WiredControllerRequiredDialog(
                                 )
                             } else {
                                 com.example.util.tr(
-                                    "Current Status: No Wired USB Controller Detected",
-                                    "Estado Actual: Ningún Mando por Cable USB Detectado"
+                                    "Current Status: No Controller Detected",
+                                    "Estado Actual: Ningún Mando Detectado"
                                 )
                             },
                             color = Color(0xFFFBBF24),
@@ -1268,8 +1315,8 @@ fun WiredControllerRequiredDialog(
                         )
                         Text(
                             text = com.example.util.tr(
-                                "Connect your controller directly to your phone or tablet using a USB-C / OTG cable, then turn on the Controller Overlay.",
-                                "Conecta tu mando directamente a tu teléfono o tablet con un cable USB-C / OTG y luego activa la Superposición de Mando."
+                                "Turn on your Bluetooth controller or plug in via USB-C / OTG, then toggle on the Controller Overlay.",
+                                "Enciende tu mando Bluetooth o conéctalo por USB-C / OTG y luego activa la Superposición de Mando."
                             ),
                             color = Color(0xFF94A3B8),
                             fontSize = 11.sp

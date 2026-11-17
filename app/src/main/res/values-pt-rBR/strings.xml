@@ -27,14 +27,14 @@
 
     <!-- Offline / Online Gate -->
     <string name="offline_gate_title">Conexão com a Internet Necessária</string>
-    <string name="offline_gate_subtitle">O Iniciador de Jogos e o Impulso Normal funcionam offline. Conecte-se ao Wi-Fi ou dados móveis para acessar Gravador, Classificação, Extras, Impulso Fera e Conta.</string>
+    <string name="offline_gate_subtitle">O Iniciador de Jogos e o Modo Foco funcionam offline. Conecte-se ao Wi-Fi ou dados móveis para acessar Gravador, Classificação, Extras e Conta.</string>
     <string name="offline_gate_retry">Tentar Novamente</string>
     <string name="offline_gate_back_launcher">Ir para o Iniciador Offline</string>
-    <string name="offline_mode_badge">Modo Offline: Iniciador e Impulso Normal Ativos</string>
+    <string name="offline_mode_badge">Modo Offline: Iniciador e Modo Foco Ativos</string>
 
-    <!-- Launcher & Boost -->
-    <string name="launcher_normal_boost">Impulso Normal</string>
-    <string name="launcher_beast_boost">Impulso Fera</string>
+    <!-- Launcher & Focus Mode -->
+    <string name="launcher_normal_boost">Modo Foco</string>
+    <string name="launcher_beast_boost">Modo Foco</string>
     <string name="launcher_boost_memory">Otimizar RAM</string>
     <string name="launcher_launch_game">Jogar</string>
     <string name="launcher_add_games">Adicionar Jogos</string>
@@ -54,7 +54,7 @@
     <string name="leaderboard_empty_title">Nenhum Jogador Verificado Ainda</string>
     <string name="leaderboard_empty_subtitle">Entre com Google ou Facebook para garantir sua posição no Top 100.</string>
 
-    <!-- AdMob Labels -->
+    <!-- Unity Ads Labels -->
     <string name="ad_badge_label">Anúncio</string>
     <string name="ad_sponsored_label">Patrocinado</string>
     <string name="ad_reward_unlock_title">Desbloquear RGB e Sobreposição (24h)</string>

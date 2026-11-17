@@ -83,7 +83,7 @@ data class DailyStreakState(
  * 3. Safety Net: If a day is missed at midnight and the user owns a Streak Freeze, automatically
  *    consume 1 freeze per missed day so the streak does not reset to zero.
  * 4. Break & Repair: If a day is missed with 0 freezes left, the streak breaks and triggers a
- *    "Streak Lost!" screen with a 12-hour grace period to repair it via a Google AdMob Rewarded Video Ad.
+ *    "Streak Lost!" screen with a 12-hour grace period to repair it via a Unity Rewarded Video Ad.
  * 5. Milestones:
  *    - 7-Day Streak: Unlocks Custom Neon HUD Colors for the live performance HUD.
  *    - 30-Day Streak: Unlocks the exclusive VIP Badge next to the player's username.
@@ -452,7 +452,7 @@ object DailyStreakManager {
 
     /**
      * Repairs a broken streak within the 12-hour grace period after the user finishes watching
-     * a Google AdMob Rewarded Video Ad.
+     * a Unity Rewarded Video Ad.
      */
     @Synchronized
     fun repairBrokenStreakViaRewardedAd(

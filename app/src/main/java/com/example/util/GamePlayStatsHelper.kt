@@ -103,6 +103,20 @@ object GamePlayStatsHelper {
     }
 
     /**
+     * Resets all accumulated game session play time and launch counters for the new monthly UTC season
+     * so all users' Gamer Scores reset to 0 at 00:00:00 UTC on the 1st of each month.
+     */
+    fun resetAllGamePlayStatsForMonthlySeasonReset(context: Context, nowMs: Long = System.currentTimeMillis()) {
+        val prefs = getPrefs(context)
+        val activePrefKey = resolveAccountStatsKey(context)
+        prefs.edit()
+            .remove(activePrefKey)
+            .remove(KEY_STATS_JSON)
+            .putLong(KEY_INSTALL_TIMESTAMP_MS, nowMs)
+            .apply()
+    }
+
+    /**
      * Restores the user's Most Played game and play time from their cloud account (`UserCloudProfile`)
      * so switching devices or reinstalling preserves their Most Played game on their account.
      */
